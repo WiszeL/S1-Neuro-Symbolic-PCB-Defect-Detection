@@ -1,0 +1,292 @@
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+
+from symbolic.sodt import SparseObliqueDecisionTreeClassifier
+
+
+def _as_feature_grid(feature_grid: Tensor | np.ndarray) -> np.ndarray:
+    if isinstance(feature_grid, Tensor):
+        return feature_grid.detach().cpu().numpy().astype(np.float32)
+    return np.asarray(feature_grid, dtype=np.float32)
+
+
+def _top_grid_cells(
+    heatmap: np.ndarray,
+    top_k: int = 10,
+) -> list[dict[str, int | float]]:
+    if heatmap.size == 0:
+        return []
+
+    flattened = heatmap.reshape(-1)
+    nonzero_indices = np.flatnonzero(np.abs(flattened) > 0)
+    if nonzero_indices.size == 0:
+        return []
+
+    ranked_indices = nonzero_indices[np.argsort(np.abs(flattened[nonzero_indices]))[::-1]]
+    results: list[dict[str, int | float]] = []
+    width = heatmap.shape[1]
+    for flat_index in ranked_indices[: max(int(top_k), 0)]:
+        row_index = int(flat_index // width)
+        col_index = int(flat_index % width)
+        results.append(
+            {
+                "row": row_index,
+                "col": col_index,
+                "signed_contribution": float(flattened[flat_index]),
+                "absolute_contribution": float(abs(flattened[flat_index])),
+            }
+        )
+    return results
+
+
+def _top_channels(
+    channel_scores: np.ndarray,
+    top_k: int = 8,
+) -> list[dict[str, int | float]]:
+    scores = np.asarray(channel_scores, dtype=np.float32).reshape(-1)
+    nonzero_indices = np.flatnonzero(scores > 0.0)
+    if nonzero_indices.size == 0:
+        return []
+
+    ranked_indices = nonzero_indices[np.argsort(scores[nonzero_indices])[::-1]]
+    return [
+        {
+            "channel": int(channel_index),
+            "score": float(scores[channel_index]),
+        }
+        for channel_index in ranked_indices[: max(int(top_k), 0)]
+    ]
+
+
+def compute_symbolic_heatmap(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    mode: str = "local_instance_evidence_map",
+) -> dict[str, Any]:
+    grid = _as_feature_grid(feature_grid)
+    feature_vector = grid.reshape(-1)
+    path = tree.decision_path(feature_vector)
+
+    if not path:
+        zero_heatmap = np.zeros(grid.shape[-2:], dtype=np.float32)
+        return {
+            "heatmap": zero_heatmap,
+            "path": path,
+            "leaf_index": tree.leaf_index_for_feature(feature_vector),
+            "global_or_structural_density_map": zero_heatmap,
+            "local_instance_evidence_map": zero_heatmap,
+            "positive_local_evidence_map": zero_heatmap,
+            "negative_local_evidence_map": zero_heatmap,
+            "signed_local_evidence_map": zero_heatmap,
+            "combined_local_evidence_map": zero_heatmap,
+            "reasoning_summary": {
+                "path_length": 0,
+                "active_path_original_feature_count": 0,
+                "mean_active_original_features_per_node": 0.0,
+                "map_types": {
+                    "global_or_structural_density_map": (
+                        "Intrinsic structural view of what the active symbolic path weights use in general."
+                    ),
+                    "local_instance_evidence_map": (
+                        "Intrinsic per-instance symbolic evidence for this RoI using the actual pooled feature values."
+                    ),
+                },
+            },
+            "node_summaries": [],
+            "top_positive_contributing_features": [],
+            "top_negative_contributing_features": [],
+            "top_structural_channels": [],
+            "top_positive_local_channels": [],
+            "top_negative_local_channels": [],
+        }
+
+    # ---------------------------------------------------------------------
+    # Gather the actual path weights in the original pooled-feature lattice
+    # ---------------------------------------------------------------------
+    weight_grids = np.stack([tree.node_weight_grid(step.node_index) for step in path], axis=0)
+    path_directions = np.asarray(
+        [1.0 if step.went_left else -1.0 for step in path],
+        dtype=np.float32,
+    ).reshape(-1, 1, 1, 1)
+
+    # ---------------------------------------------------------------------
+    # Build structural and local evidence maps from the symbolic path itself
+    # ---------------------------------------------------------------------
+    local_signed_contributions = path_directions * weight_grids * grid[None, ...]
+    structural_density_map = np.sum(np.abs(weight_grids), axis=(0, 1)).astype(np.float32)
+    positive_local_evidence_map = np.sum(
+        np.maximum(local_signed_contributions, 0.0),
+        axis=(0, 1),
+    ).astype(np.float32)
+    negative_local_evidence_map = np.sum(
+        np.maximum(-local_signed_contributions, 0.0),
+        axis=(0, 1),
+    ).astype(np.float32)
+    signed_local_evidence_map = np.sum(local_signed_contributions, axis=(0, 1)).astype(np.float32)
+    combined_local_evidence_map = (positive_local_evidence_map + negative_local_evidence_map).astype(np.float32)
+    structural_channel_scores = np.sum(np.abs(weight_grids), axis=(0, 2, 3)).astype(np.float32)
+    positive_local_channel_scores = np.sum(
+        np.maximum(local_signed_contributions, 0.0),
+        axis=(0, 2, 3),
+    ).astype(np.float32)
+    negative_local_channel_scores = np.sum(
+        np.maximum(-local_signed_contributions, 0.0),
+        axis=(0, 2, 3),
+    ).astype(np.float32)
+
+    maps = {
+        "global_or_structural_density_map": structural_density_map,
+        "local_instance_evidence_map": positive_local_evidence_map,
+        "positive_local_evidence_map": positive_local_evidence_map,
+        "negative_local_evidence_map": negative_local_evidence_map,
+        "signed_local_evidence_map": signed_local_evidence_map,
+        "combined_local_evidence_map": combined_local_evidence_map,
+    }
+    selected_mode = mode if mode in maps else "local_instance_evidence_map"
+    path_summary = tree.summarize_path(feature_vector, top_k=6)
+    path_trace = [
+        {
+            "node_index": int(step.node_index),
+            "score": float(step.score),
+            "went_left": bool(step.went_left),
+            "active_retained_feature_count": int(tree.node_feature_indices(step.node_index).size),
+            "active_original_feature_count": int(
+                tree.node_feature_indices(step.node_index, original_space=True).size
+            ),
+        }
+        for step in path
+    ]
+    top_features = tree.top_feature_contributions(feature_vector, top_k=12)
+    top_positive_features = tree.top_feature_contributions(
+        feature_vector,
+        top_k=12,
+        contribution_sign="positive",
+    )
+    top_negative_features = tree.top_feature_contributions(
+        feature_vector,
+        top_k=12,
+        contribution_sign="negative",
+    )
+    top_local_cells = _top_grid_cells(positive_local_evidence_map, top_k=12)
+    top_negative_local_cells = _top_grid_cells(negative_local_evidence_map, top_k=12)
+    top_structural_cells = _top_grid_cells(structural_density_map, top_k=12)
+    top_structural_channels = _top_channels(structural_channel_scores, top_k=8)
+    top_positive_local_channels = _top_channels(positive_local_channel_scores, top_k=8)
+    top_negative_local_channels = _top_channels(negative_local_channel_scores, top_k=8)
+    return {
+        "heatmap": maps[selected_mode],
+        "path": path,
+        "path_trace": path_trace,
+        "leaf_index": tree.leaf_index_for_feature(feature_vector),
+        "reasoning_summary": {
+            "path_length": int(path_summary["path_length"]),
+            "active_path_original_feature_count": int(path_summary["active_path_original_feature_count"]),
+            "mean_active_original_features_per_node": float(path_summary["mean_active_original_features_per_node"]),
+            "map_types": {
+                "global_or_structural_density_map": (
+                    "Intrinsic structural view of what the active symbolic path weights use in general."
+                ),
+                "local_instance_evidence_map": (
+                    "Intrinsic per-instance symbolic evidence for this RoI using the actual pooled feature values."
+                ),
+            },
+        },
+        "node_summaries": path_summary["nodes"],
+        "top_contributing_features": top_features,
+        "top_positive_contributing_features": top_positive_features,
+        "top_negative_contributing_features": top_negative_features,
+        "top_local_cells": top_local_cells,
+        "top_positive_local_cells": top_local_cells,
+        "top_negative_local_cells": top_negative_local_cells,
+        "top_structural_cells": top_structural_cells,
+        "top_structural_channels": top_structural_channels,
+        "top_positive_local_channels": top_positive_local_channels,
+        "top_negative_local_channels": top_negative_local_channels,
+        **maps,
+    }
+
+
+def resize_heatmap_to_box(
+    heatmap: Tensor | np.ndarray,
+    box: Tensor | np.ndarray,
+) -> Tensor:
+    if isinstance(heatmap, np.ndarray):
+        heatmap_tensor = torch.from_numpy(heatmap).float()
+    else:
+        heatmap_tensor = heatmap.detach().cpu().float()
+
+    if isinstance(box, np.ndarray):
+        box_tensor = torch.from_numpy(box).float()
+    else:
+        box_tensor = box.detach().cpu().float()
+
+    x1, y1, x2, y2 = box_tensor.round().int().tolist()
+    height = max(y2 - y1, 1)
+    width = max(x2 - x1, 1)
+
+    return F.interpolate(
+        heatmap_tensor[None, None, :, :],
+        size=(height, width),
+        mode="bilinear",
+        align_corners=False,
+    )[0, 0]
+
+def project_heatmap_to_image(
+    heatmap: Tensor | np.ndarray,
+    box: Tensor | np.ndarray,
+    image_shape: tuple[int, int],
+) -> Tensor:
+    if isinstance(box, np.ndarray):
+        box_tensor = torch.from_numpy(box).float()
+    else:
+        box_tensor = box.detach().cpu().float()
+
+    x1, y1, x2, y2 = box_tensor.round().int().tolist()
+    resized = resize_heatmap_to_box(heatmap, box)
+
+    canvas = torch.zeros(image_shape, dtype=torch.float32)
+    canvas[y1:y2, x1:x2] = resized[: max(y2 - y1, 0), : max(x2 - x1, 0)]
+    return canvas
+
+
+def aggregate_projected_heatmaps(
+    projected_heatmaps: list[Tensor | np.ndarray],
+    scores: list[float] | None = None,
+    reduction: str = "max",
+    normalize: bool = True,
+) -> Tensor:
+    if not projected_heatmaps:
+        raise ValueError("At least one projected heatmap is required for aggregation.")
+
+    tensors: list[Tensor] = []
+    for index, heatmap in enumerate(projected_heatmaps):
+        if isinstance(heatmap, np.ndarray):
+            heatmap_tensor = torch.from_numpy(heatmap).float()
+        else:
+            heatmap_tensor = heatmap.detach().cpu().float()
+
+        if scores is not None:
+            heatmap_tensor = heatmap_tensor * float(scores[index])
+
+        tensors.append(heatmap_tensor)
+
+    stacked = torch.stack(tensors, dim=0)
+    if reduction == "sum":
+        aggregated = stacked.sum(dim=0)
+    elif reduction == "mean":
+        aggregated = stacked.mean(dim=0)
+    else:
+        aggregated = stacked.max(dim=0).values
+
+    if normalize:
+        max_value = float(aggregated.abs().max().item())
+        if max_value > 0.0:
+            aggregated = aggregated / max_value
+
+    return aggregated

@@ -1,0 +1,48 @@
+seed: 42
+deterministic: false
+device: cuda
+
+dataset:
+  root: dataset/DeepPCB
+  train_split: trainval.txt
+  test_split: test.txt
+
+transforms:
+  horizontal_flip_prob: 0.5
+  vertical_flip_prob: 0.0
+
+loader:
+  train_batch_size: 1
+  test_batch_size: 1
+  num_workers: 4
+
+optimizer:
+  lr: 0.02
+  momentum: 0.9
+  weight_decay: 0.0001
+
+scheduler:
+  step_size: 8
+  gamma: 0.1
+  milestones: [8, 11]
+
+warmup:
+  iterations: 500
+  ratio: 0.001
+
+train:
+  epochs: 12
+  grad_accumulation_steps: 4
+
+precision:
+  amp: true
+
+evaluation:
+  precision_iou: 0.5
+  precision_score_threshold: 0.5
+  class_metrics: true
+  paper_iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85]
+
+artifacts:
+  checkpoint_dir: checkpoints
+  feature_export_dir: checkpoints/feature_exports
