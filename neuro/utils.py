@@ -9,7 +9,6 @@ from typing import Any, Iterable
 
 import numpy as np
 import torch
-import yaml
 
 
 @dataclass(frozen=True)
@@ -18,16 +17,6 @@ class RunArtifacts:
     checkpoint_path: Path
     metrics_path: Path
     history_path: Path
-
-
-def load_yaml(path: str | Path) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
-
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected a mapping in {path}, but received {type(data).__name__}.")
-
-    return data
 
 
 def ensure_dir(path: str | Path) -> Path:
@@ -56,7 +45,9 @@ def detection_collate_fn(batch: list[tuple[Any, Any]]) -> tuple[list[Any], list[
     return list(images), list(targets)
 
 
-def move_targets_to_device(targets: list[dict[str, Any]], device: torch.device) -> list[dict[str, Any]]:
+def move_targets_to_device(
+    targets: list[dict[str, Any]], device: torch.device
+) -> list[dict[str, Any]]:
     moved_targets: list[dict[str, Any]] = []
     for target in targets:
         moved_target: dict[str, Any] = {}
@@ -146,4 +137,6 @@ def mean_dict(history: Iterable[dict[str, float]]) -> dict[str, float]:
         return {}
 
     keys = history[0].keys()
-    return {key: float(sum(item[key] for item in history) / len(history)) for key in keys}
+    return {
+        key: float(sum(item[key] for item in history) / len(history)) for key in keys
+    }

@@ -28,7 +28,6 @@ What is intentionally not implemented:
 - Python 3.11
 - Packages are provided by the existing `requirements.txt`
 - The code is designed for PyTorch and torchvision from that environment
-- No package installation or environment creation logic is included here
 
 ## DeepPCB Setup
 

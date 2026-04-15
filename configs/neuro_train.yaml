@@ -1,0 +1,41 @@
+seed: 42
+deterministic: false
+device: cuda
+amp: true
+
+dataset: 
+  path: dataset/DeepPCB
+  class_names:
+    - open
+    - short
+    - mouse_bite
+    - spur
+    - pinhole
+    - spurious_copper
+  batch_size: 2
+  num_workers: 4
+  horizontal_flip_prob: 0.5
+
+train:
+  epochs: 12
+  grad_accumulation_steps: 4
+
+  # Optimizer
+  opt_lr: 0.02
+  opt_momentum: 0.9
+  opt_weight_decay: 0.0001
+
+  # Scheduler
+  sch_step_size: 8
+  sch_gamma: 0.1
+  sch_milestones: [8, 11]
+
+  # Warmup
+  warmup_iterations: 500
+  warmup_ratio: 0.001
+
+evaluation:
+  precision_iou: 0.5
+  precision_score_threshold: 0.5
+  class_metrics: true
+  iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]

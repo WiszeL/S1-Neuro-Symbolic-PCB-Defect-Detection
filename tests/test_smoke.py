@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from neuro.datasets import DeepPCBDataset
+from neuro.prepare import PCBDataset
 from neuro.detector import build_detector
 from neuro.utils import next_run_artifacts
 from symbolic.dataset import flatten_exported_symbolic_payload
@@ -26,7 +26,7 @@ def test_deeppcb_dataset_resolves_test_images(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    dataset = DeepPCBDataset(dataset_root=dataset_root, split_file="trainval.txt")
+    dataset = PCBDataset(dataset_root=dataset_root, split_file="trainval.txt")
     image, target = dataset[0]
 
     assert image.shape == (3, 640, 640)

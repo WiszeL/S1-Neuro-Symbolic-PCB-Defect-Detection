@@ -11,7 +11,7 @@ from torchmetrics.detection import MeanAveragePrecision
 from torchvision.ops import box_iou
 from tqdm import tqdm
 
-from .datasets import DeepPCBDataset
+from .prepare import PCBDataset
 from .detector import build_detector
 from .transforms import build_eval_transforms, build_train_transforms
 from .utils import (
@@ -287,7 +287,7 @@ def run_training(
     class_names = tuple(model_config["model"]["class_names"]) if "model" in model_config else tuple(model_config["class_names"])
     dataset_root = Path(train_config["dataset"]["root"])
 
-    train_dataset = DeepPCBDataset(
+    train_dataset = PCBDataset(
         dataset_root=dataset_root,
         split_file=train_config["dataset"]["train_split"],
         transforms=build_train_transforms(
@@ -296,7 +296,7 @@ def run_training(
         ),
         class_names=class_names,
     )
-    test_dataset = DeepPCBDataset(
+    test_dataset = PCBDataset(
         dataset_root=dataset_root,
         split_file=train_config["dataset"]["test_split"],
         transforms=build_eval_transforms(),

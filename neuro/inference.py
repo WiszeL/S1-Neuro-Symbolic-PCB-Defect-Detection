@@ -10,8 +10,9 @@ import torch
 from PIL import Image
 from torch import Tensor
 
+from .config import NeuroConfig, load_yaml
 from .detector import build_detector
-from .utils import load_yaml, select_device
+from .utils import select_device
 
 
 def load_checkpoint_model(
@@ -20,7 +21,7 @@ def load_checkpoint_model(
     device: str | None = None,
 ) -> tuple[torch.nn.Module, dict[str, Any]]:
     resolved_device = select_device(device)
-    model_config = load_yaml(model_config_path)
+    model_config = load_yaml(model_config_path, NeuroConfig)
     checkpoint = torch.load(checkpoint_path, map_location=resolved_device, weights_only=True)
 
     model = build_detector(model_config)
