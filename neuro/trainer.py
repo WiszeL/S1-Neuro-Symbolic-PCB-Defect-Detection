@@ -11,9 +11,9 @@ from torchmetrics.detection import MeanAveragePrecision
 from torchvision.ops import box_iou
 from tqdm import tqdm
 
-from .prepare import PCBDataset
+from .prepare_dataset import PCBDataset
 from .detector import build_detector
-from .transforms import build_eval_transforms, build_train_transforms
+from .preprocess_dataset import test_preprocess, train_preprocess
 from .utils import (
     detection_collate_fn,
     mean_dict,
@@ -290,16 +290,15 @@ def run_training(
     train_dataset = PCBDataset(
         dataset_root=dataset_root,
         split_file=train_config["dataset"]["train_split"],
-        transforms=build_train_transforms(
+        transforms=train_preprocess(
             horizontal_flip_prob=float(train_config["transforms"]["horizontal_flip_prob"]),
-            vertical_flip_prob=float(train_config["transforms"]["vertical_flip_prob"]),
         ),
         class_names=class_names,
     )
     test_dataset = PCBDataset(
         dataset_root=dataset_root,
         split_file=train_config["dataset"]["test_split"],
-        transforms=build_eval_transforms(),
+        transforms=test_preprocess(),
         class_names=class_names,
     )
 

@@ -13,14 +13,6 @@ class NetConfig(TypedDict):
     neck_attention_reduction: int
 
 
-class ImageConfig(TypedDict):
-    train_min_sizes: list[int]
-    test_min_size: int
-    max_size: int
-    mean: list[float]
-    std: list[float]
-
-
 class AnchorConfig(TypedDict):
     sizes: list[list[int]]
     aspect_ratios: list[list[float]]
@@ -41,7 +33,6 @@ class SoftNmsConfig(TypedDict):
 
 class NeuroConfig(TypedDict):
     net: NetConfig
-    image: ImageConfig
     anchors: AnchorConfig
     proposal: ProposalConfig
     soft_nms: SoftNmsConfig
@@ -52,10 +43,19 @@ class NeuroConfig(TypedDict):
 
 class DatasetConfig(TypedDict):
     path: str
+    size: list[int]
     class_names: list[str]
     batch_size: int
     num_workers: int
+
+
+class PreprocessingConfig(TypedDict):
     horizontal_flip_prob: float
+    train_min_sizes: list[int]
+    test_min_size: int
+    max_size: int
+    mean: list[float]
+    std: list[float]
 
 
 class TrainConfig(TypedDict):
@@ -84,6 +84,7 @@ class NeuroTrainConfig(TypedDict):
     device: str
     amp: bool
     dataset: DatasetConfig
+    preprocessing: PreprocessingConfig
     train: TrainConfig
     evaluation: EvaluationConfig
 

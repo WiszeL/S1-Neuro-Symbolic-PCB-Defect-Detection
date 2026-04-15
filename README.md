@@ -17,6 +17,8 @@ What is intentionally not implemented:
 - `configs/`: explicit model and training settings
 - `notebooks/`: orchestration notebooks for baseline training, baseline inference, symbolic training, and hybrid inference
 - `neuro/`: pure Faster R-CNN baseline code
+  - `prepare_dataset.py`: DeepPCB dataset records, image loading, and torchvision `BoundingBoxes` target preparation
+  - `preprocess_dataset.py`: torchvision-native train/eval preprocessing and Faster R-CNN input preprocessing
 - `symbolic/`: strict teacher-student export, symbolic dataset handling, sparse oblique tree, and TAO training
 - `neurosym/`: frozen-detector + symbolic-classifier hybrid inference and symbolic heatmaps
 - `dataset/DeepPCB/`: raw DeepPCB structure with `trainval.txt`, `test.txt`, `groupXXXXX/`, and `*_not/`
@@ -35,12 +37,20 @@ What is intentionally not implemented:
 - Use the provided `trainval.txt` for training and `test.txt` only for the final evaluation
 - The loader reads the raw nested groups directly
 - Non-referential mode uses `*_test.jpg` and ignores `*_temp.jpg`
+- DeepPCB images are treated as fixed-size `640 x 640` inputs through `dataset.size` in `configs/neuro_train.yaml`
+
+## Dataset And Preprocessing
+
+- `prepare_dataset.py` prepares dataset records and targets. It keeps image loading in `PCBDataset.__getitem__()` and stores annotations as torchvision `tv_tensors.BoundingBoxes` with the configured DeepPCB canvas size.
+- `preprocess_dataset.py` owns image preprocessing. Training uses `ToImage`, `ToDtype(torch.float32, scale=True)`, and torchvision v2 `RandomHorizontalFlip`, so image and bounding boxes are transformed together.
+- Evaluation preprocessing only converts images to tensors and scales pixel values to `[0, 1]`; it does not apply random augmentation.
+- Faster R-CNN input preprocessing is handled by `RCNNPreprocessing`, a `GeneralizedRCNNTransform` subclass. It applies ImageNet mean/std normalization, multi-scale resizing during training, fixed-size resizing during evaluation, and internal batching/padding at model forward time.
 
 ## Running The Workflow
 
 Run the notebooks in order:
 
-1. `notebooks/01_train_deeppcb.ipynb`
+1. `notebooks/01_train_neuro.ipynb`
 2. `notebooks/02_inference_and_export_features.ipynb`
 3. `notebooks/03_train_symbolic_sodt.ipynb`
 4. `notebooks/04_neurosym_inference_heatmap.ipynb`

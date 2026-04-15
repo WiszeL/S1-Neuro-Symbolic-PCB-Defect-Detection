@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from neuro.prepare import PCBDataset
+from neuro.prepare_dataset import PCBDataset
 from neuro.detector import build_detector
 from neuro.utils import next_run_artifacts
 from symbolic.dataset import flatten_exported_symbolic_payload

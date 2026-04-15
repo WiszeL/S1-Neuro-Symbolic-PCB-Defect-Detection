@@ -2,7 +2,7 @@ import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 import torch
 import matplotlib.pyplot as plt
@@ -10,20 +10,28 @@ import matplotlib.patches as patches
 from PIL import Image
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchvision.transforms import functional as F
+from torchvision import tv_tensors
 
 
 from .config import NeuroTrainConfig
 
-DetectionTarget = dict[str, Tensor]
-DetectionSample = tuple[Tensor, DetectionTarget]
-PCBTransform = Callable[[Image.Image, DetectionTarget], DetectionSample]
+
+class PCBTarget(TypedDict):
+    boxes: tv_tensors.BoundingBoxes
+    labels: Tensor
+    image_id: Tensor
+    area: Tensor
+    iscrowd: Tensor
+
+
+PCBItem = tuple[Tensor, PCBTarget]
+PCBPreprocess = Callable[[Image.Image, PCBTarget], tuple[Tensor, PCBTarget]]
 InspectionSummary = dict[str, Any]
 
 @dataclass(frozen=True)
-class PCBSample:
+class PCBRecord:
     image_path: Path
-    boxes: Tensor
+    boxes: tv_tensors.BoundingBoxes
     labels: Tensor
 
 
@@ -63,9 +71,10 @@ def _parse_annotation(annotation_path: Path) -> tuple[Tensor, Tensor]:
 
 def _build_dataset_manifest(
     dataset_root: Path, 
-    split_file: str
-) -> list[PCBSample]:
-    samples: list[PCBSample] = []
+    split_file: str,
+    image_size: tuple[int, int],
+) -> list[PCBRecord]:
+    samples: list[PCBRecord] = []
 
     # Get split file
     split_path = dataset_root / split_file
@@ -98,38 +107,84 @@ def _build_dataset_manifest(
             raise FileNotFoundError(f"Annotation file not found: {annotation_path}")
 
         boxes, labels = _parse_annotation(annotation_path)
+        bounding_boxes = tv_tensors.BoundingBoxes(
+            boxes,
+            format="XYXY",
+            canvas_size=image_size,
+        )
 
         # Add
         samples.append(
-            PCBSample(
+            PCBRecord(
                 image_path=image_path,
-                boxes=boxes,
+                boxes=bounding_boxes,
                 labels=labels
             )
         )
 
     return samples
 
+class PCBDataset(Dataset[PCBItem]):
+    def __init__(
+        self,
+        train_config: NeuroTrainConfig,
+        split_file: str,
+    ) -> None:
+        self.split_file = split_file
+        self.samples = _build_dataset_manifest(
+            Path(train_config["dataset"]["path"]),
+            self.split_file,
+            image_size=tuple(int(size) for size in train_config["dataset"]["size"]),
+        )
+        self.class_names = tuple(train_config["dataset"]["class_names"])
 
-def _summarize_image_sizes(samples: list[PCBSample]) -> str:
-    # Only inspect the provided subset; scanning every image is slow on large splits.
-    image_sizes: list[tuple[int, int]] = []
-    for sample in samples:
-        with Image.open(sample.image_path) as image:
-            image_sizes.append(image.size)
+    def __len__(self) -> int:
+        return len(self.samples)
 
-    unique_image_sizes = sorted(set(image_sizes))
-    if len(unique_image_sizes) == 1:
-        width, height = unique_image_sizes[0]
-        return f"{width}x{height}"
+    def __getitem__(self, index: int) -> PCBItem:
+        sample = self.samples[index]
 
-    return f"mixed ({len(unique_image_sizes)} sizes)"
+        # Load Image
+        image = Image.open(sample.image_path).convert("RGB")
+
+        # Build Target
+        area = (sample.boxes[:, 2] - sample.boxes[:, 0]) * (
+            sample.boxes[:, 3] - sample.boxes[:, 1]
+        )
+        target = {
+            "boxes": sample.boxes,
+            "labels": sample.labels,
+            "image_id": torch.tensor(index, dtype=torch.int64),
+            "area": area,
+            "iscrowd": torch.zeros((sample.boxes.shape[0],), dtype=torch.int64),
+        }
+
+        return self.preprocess(image, target)
+    
+    def add_preprocess(self, preprocess: PCBPreprocess):
+        self.preprocess = preprocess
+    
+    def inspect(self, n: int = 6) -> None:
+        if len(self.samples) == 0:
+            raise ValueError("Cannot inspect an empty dataset.")
+
+        n = min(max(n, 1), len(self.samples))
+        inspected_samples = random.sample(self.samples, k=n)
+
+        inspection = _build_inspection(
+            self.samples,
+            self.class_names,
+            inspected_samples,
+        )
+        _print_inspection_summary(self.split_file, inspection)
+        _plot_class_counts(inspection)
+        _plot_random_samples(inspected_samples, self.class_names)
 
 
 def _build_inspection(
-    samples: list[PCBSample],
+    samples: list[PCBRecord],
     class_names: tuple[str, ...],
-    inspected_samples: list[PCBSample],
+    inspected_samples: list[PCBRecord],
 ) -> InspectionSummary:
     # Full-split statistics use cached annotations, while image sizes use only
     # the sampled files chosen by inspect().
@@ -165,7 +220,6 @@ def _build_inspection(
         "min_boxes_per_image": int(annotation_counts.min().item()),
         "mean_boxes_per_image": float(annotation_counts.float().mean().item()),
         "max_boxes_per_image": int(annotation_counts.max().item()),
-        "image_size_summary": _summarize_image_sizes(inspected_samples),
         "image_size_checked_count": len(inspected_samples),
     }
 
@@ -177,10 +231,6 @@ def _print_inspection_summary(split_file: str, inspection: InspectionSummary) ->
     print(f"Files: {inspection['sample_count']:,}")
     print(f"Configured classes: {len(inspection['class_labels']):,}")
     print(f"Classes present in annotations: {inspection['present_class_count']:,}")
-    print(
-        f"Image size: {inspection['image_size_summary']} "
-        f"(checked {inspection['image_size_checked_count']} random samples)"
-    )
     print(f"Empty images: {inspection['empty_image_count']:,}")
     print(f"Total defect boxes: {inspection['total_defect_boxes']:,}")
     print(
@@ -205,7 +255,7 @@ def _plot_class_counts(inspection: InspectionSummary) -> None:
 
 def _draw_annotated_sample(
     ax,
-    sample: PCBSample,
+    sample: PCBRecord,
     class_names: tuple[str, ...],
     palette: list[str],
 ) -> None:
@@ -255,7 +305,7 @@ def _draw_annotated_sample(
 
 
 def _plot_random_samples(
-    samples: list[PCBSample],
+    samples: list[PCBRecord],
     class_names: tuple[str, ...],
 ) -> None:
     # The caller already chose the random subset so size reporting and plotting match.
@@ -306,62 +356,3 @@ def _plot_random_samples(
 
     sample_fig.tight_layout()
     plt.show()
-
-
-class PCBDataset(Dataset[DetectionSample]):
-    def __init__(
-        self,
-        train_config: NeuroTrainConfig,
-        split_file: str,
-        transforms: PCBTransform | None = None,
-    ) -> None:
-        self.split_file = split_file
-        self.samples = _build_dataset_manifest(
-            Path(train_config["dataset"]["path"]), 
-            self.split_file
-        )
-        self.class_names = tuple(train_config["dataset"]["class_names"])
-        self.transforms = transforms
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, index: int) -> DetectionSample:
-        sample = self.samples[index]
-
-        # Load Image
-        image = Image.open(sample.image_path).convert("RGB")
-
-        # Load Annotations
-        area = (sample.boxes[:, 2] - sample.boxes[:, 0]) * (sample.boxes[:, 3] - sample.boxes[:, 1])
-        target = {
-            "boxes": sample.boxes,
-            "labels": sample.labels,
-            "image_id": torch.tensor(index, dtype=torch.int64),
-            "area": area,
-            "iscrowd": torch.zeros((sample.boxes.shape[0],), dtype=torch.int64),
-        }
-
-        # Apply transform if exists and convert to Tensor
-        if self.transforms is not None:
-            image_tensor, target = self.transforms(image, target)
-        else:
-            image_tensor = F.to_tensor(image)
-
-        return image_tensor, target
-    
-    def inspect(self, n: int = 6) -> None:
-        if len(self.samples) == 0:
-            raise ValueError("Cannot inspect an empty dataset.")
-
-        n = min(max(n, 1), len(self.samples))
-        inspected_samples = random.sample(self.samples, k=n)
-
-        inspection = _build_inspection(
-            self.samples,
-            self.class_names,
-            inspected_samples,
-        )
-        _print_inspection_summary(self.split_file, inspection)
-        _plot_class_counts(inspection)
-        _plot_random_samples(inspected_samples, self.class_names)

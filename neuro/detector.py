@@ -13,12 +13,12 @@ from torchvision.models.detection.anchor_utils import AnchorGenerator
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.rpn import RegionProposalNetwork
-from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.ops.misc import FrozenBatchNorm2d
 from torchvision.ops import MultiScaleRoIAlign, box_iou
 from torchvision.ops import boxes as box_ops
 
 from .model_components import SFPSPyramid
+from .preprocess_dataset import RCNNPreprocessing
 
 
 def fastrcnn_loss_l1(
@@ -422,36 +422,6 @@ class InspectableRoIHeads(RoIHeads):
         return result, losses
 
 
-class PCBGeneralizedRCNNTransform(GeneralizedRCNNTransform):
-    def __init__(
-        self,
-        train_min_sizes: tuple[int, ...],
-        eval_min_size: int,
-        max_size: int,
-        image_mean: list[float],
-        image_std: list[float],
-    ) -> None:
-        super().__init__(
-            min_size=train_min_sizes,
-            max_size=max_size,
-            image_mean=image_mean,
-            image_std=image_std,
-        )
-        self.train_min_sizes = train_min_sizes
-        self.eval_min_size = eval_min_size
-
-    def resize(
-        self,
-        image: Tensor,
-        target: dict[str, Tensor] | None = None,
-    ) -> tuple[Tensor, dict[str, Tensor] | None]:
-        original_min_size = self.min_size
-        self.min_size = self.train_min_sizes if self.training else (self.eval_min_size,)
-        image, target = super().resize(image, target)
-        self.min_size = original_min_size
-        return image, target
-
-
 def replace_batch_norm_with_frozen_batch_norm(module: nn.Module) -> None:
     for name, child in module.named_children():
         if isinstance(child, nn.BatchNorm2d):
@@ -553,7 +523,7 @@ class SFPSPyramidDetector(FasterRCNN):
             box_detections_per_img=box_config["detections_per_img"],
         )
 
-        self.transform = PCBGeneralizedRCNNTransform(
+        self.transform = RCNNPreprocessing(
             train_min_sizes=train_min_sizes,
             eval_min_size=eval_min_size,
             max_size=max_size,
