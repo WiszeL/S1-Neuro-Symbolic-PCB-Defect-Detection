@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 
-from neuro.utils import ensure_dir, save_json
+from util.io import ensure_dir, save_json
 
 BACKGROUND_CLASS_NAME = "__background__"
 

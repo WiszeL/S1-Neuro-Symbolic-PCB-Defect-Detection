@@ -6,7 +6,8 @@ from typing import Any
 import torch
 from tqdm import tqdm
 
-from .utils import ensure_dir, select_device
+from util.device import select_device
+from util.io import ensure_dir
 
 
 @torch.inference_mode()

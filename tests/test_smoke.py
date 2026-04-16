@@ -6,10 +6,10 @@ from PIL import Image
 
 from neuro.prepare_dataset import PCBDataset
 from neuro.detector import build_detector
-from neuro.utils import next_run_artifacts
 from symbolic.dataset import flatten_exported_symbolic_payload
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 from symbolic.tao import fit_tree_with_tao
+from util.artifacts import next_run_artifacts
 
 
 def test_deeppcb_dataset_resolves_test_images(tmp_path: Path) -> None:

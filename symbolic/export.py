@@ -7,7 +7,8 @@ import torch
 from tqdm import tqdm
 from torchvision.ops import box_iou
 
-from neuro.utils import ensure_dir, select_device
+from util.device import select_device
+from util.io import ensure_dir
 
 from .utils import build_symbolic_class_names, save_symbolic_payload
 

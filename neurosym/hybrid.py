@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from neuro.utils import select_device
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
+from util.device import select_device
 
 from .utils import postprocess_symbolic_detections
 

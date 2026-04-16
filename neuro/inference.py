@@ -10,9 +10,10 @@ import torch
 from PIL import Image
 from torch import Tensor
 
+from util.device import select_device
+
 from .config import NeuroConfig, load_yaml
 from .detector import build_detector
-from .utils import select_device
 
 
 def load_checkpoint_model(

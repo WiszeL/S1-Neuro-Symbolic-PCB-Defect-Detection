@@ -134,7 +134,7 @@ class PCBDataset(Dataset[PCBItem]):
         self.samples = _build_dataset_manifest(
             Path(train_config["dataset"]["path"]),
             self.split_file,
-            image_size=tuple(int(size) for size in train_config["dataset"]["size"]),
+            image_size=tuple(train_config["dataset"]["size"]),
         )
         self.class_names = tuple(train_config["dataset"]["class_names"])
 

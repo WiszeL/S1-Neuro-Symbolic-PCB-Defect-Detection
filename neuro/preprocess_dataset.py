@@ -201,7 +201,7 @@ def visualize_preprocessing(
     plt.show()
 
 
-def visualize_train_rcnn_preprocessing(
+def visualize_rcnn_preprocessing(
     rcnn_preprocess: "RCNNPreprocessing",
     dataset: PCBDataset,
     n: int = 3,
@@ -301,16 +301,16 @@ def visualize_train_rcnn_preprocessing(
 class RCNNPreprocessing(GeneralizedRCNNTransform):
     def __init__(self, train_config: NeuroTrainConfig) -> None:
         preprocessing_config = train_config["preprocessing"]
-        train_min_sizes = tuple(int(size) for size in preprocessing_config["train_min_sizes"])
-        eval_min_size = int(preprocessing_config["test_min_size"])
+        train_min_sizes = preprocessing_config["train_min_sizes"]
+        eval_min_size = preprocessing_config["test_min_size"]
 
         # Mean/std normalization and max-size limiting are handled by
         # torchvision's GeneralizedRCNNTransform during the model forward pass.
         super().__init__(
             min_size=train_min_sizes,
-            max_size=int(preprocessing_config["max_size"]),
-            image_mean=list(preprocessing_config["mean"]),
-            image_std=list(preprocessing_config["std"]),
+            max_size=preprocessing_config["max_size"],
+            image_mean=preprocessing_config["mean"],
+            image_std=preprocessing_config["std"],
         )
         self.train_min_sizes = train_min_sizes
         self.eval_min_size = eval_min_size
