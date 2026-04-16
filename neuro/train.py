@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from typing import Any
 
 import torch
@@ -71,7 +70,12 @@ def train_one_epoch(
         enabled=train_config["amp"] and device.type == "cuda",
     )
 
-    progress = tqdm(data_loader, desc=f"Epoch {epoch_index + 1}/{epoch_count}", leave=False)
+    progress = tqdm(
+        data_loader,
+        desc=f"Epoch {epoch_index + 1}/{epoch_count}",
+        leave=True,
+        mininterval=1.0,
+    )
     for batch_index, (images, targets) in enumerate(progress):
         global_step = epoch_index * len(data_loader) + batch_index
         current_lr = set_scheduled_learning_rate(
@@ -124,6 +128,7 @@ def train_one_epoch(
             cls=f"{batch_summary.get('loss_classifier', 0.0):.4f}",
             reg=f"{batch_summary.get('loss_box_reg', 0.0):.4f}",
             rpn=f"{batch_summary.get('loss_objectness', 0.0):.4f}",
+            lr=f"{batch_summary.get('lr', 0.0):.2e}",
         )
 
     return mean_dict(batch_history)
@@ -147,8 +152,14 @@ def train_model(
     history: list[dict[str, float]] = []
     epoch_count = train_config["train"]["epochs"]
 
-    progress = tqdm(range(epoch_count), desc="Train Faster R-CNN")
-    for epoch_index in progress:
+    print(
+        "Starting Faster R-CNN training "
+        f"on {device} for {epoch_count} epochs "
+        f"({len(data_loader)} batches per epoch).",
+        flush=True,
+    )
+
+    for epoch_index in range(epoch_count):
         epoch_summary = train_one_epoch(
             model=model,
             data_loader=data_loader,
@@ -161,14 +172,6 @@ def train_model(
         )
         epoch_summary["epoch"] = epoch_index + 1
         history.append(epoch_summary)
-
-        progress.set_postfix(
-            loss=f"{epoch_summary.get('loss_total', 0.0):.4f}",
-            cls=f"{epoch_summary.get('loss_classifier', 0.0):.4f}",
-            reg=f"{epoch_summary.get('loss_box_reg', 0.0):.4f}",
-            rpn=f"{epoch_summary.get('loss_objectness', 0.0):.4f}",
-            lr=f"{epoch_summary.get('lr', 0.0):.2e}",
-        )
 
     return history
 
