@@ -309,8 +309,8 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
         positive_fraction: float = 0.5
         pre_nms_top_n_train: int = 2000
         pre_nms_top_n_test: int = 1000
-        post_nms_top_n_train: int = 1000
-        post_nms_top_n_test: int = 300
+        post_nms_top_n_train: int = 2000
+        post_nms_top_n_test: int = 1000
         nms_thresh: float = 0.7
         score_thresh: float = 0.0
 

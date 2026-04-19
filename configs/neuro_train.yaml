@@ -13,7 +13,7 @@ dataset:
     - spur
     - pinhole
     - spurious_copper
-  batch_size: 2
+  batch_size: 1
   num_workers: 4
 
 preprocessing:
