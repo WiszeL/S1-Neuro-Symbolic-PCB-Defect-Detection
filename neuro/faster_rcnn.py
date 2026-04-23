@@ -555,7 +555,7 @@ class NeuroFasterRCNN(nn.Module):
     BOX_BG_IOU_THRESH = 0.5
     BOX_BATCH_SIZE_PER_IMAGE = 512
     BOX_POSITIVE_FRACTION = 0.25
-    BOX_SCORE_THRESH = 0.05
+    BOX_SCORE_THRESH = 0.001
     DETECTIONS_PER_IMG = 100
 
     def __init__(
