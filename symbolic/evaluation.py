@@ -18,7 +18,7 @@ def _safe_macro_f1(
         from sklearn.metrics import f1_score
     except ImportError as exc:
         raise RuntimeError(
-            "scikit-learn is required for symbolic candidate evaluation metrics."
+            "scikit-learn is required for symbolic evaluation metrics."
         ) from exc
 
     return float(
@@ -65,11 +65,6 @@ def path_feature_indices(
     return np.unique(np.concatenate(non_empty, axis=0)).astype(np.int64)
 
 
-def _prediction_confidence(probabilities: np.ndarray, labels: np.ndarray) -> np.ndarray:
-    indices = np.arange(probabilities.shape[0], dtype=np.int64)
-    return probabilities[indices, labels]
-
-
 def _masked_feature_vector(
     feature_vector: np.ndarray,
     selected_indices: np.ndarray,
@@ -85,7 +80,7 @@ def _masked_feature_vector(
     return masked
 
 
-def evaluate_symbolic_candidate(
+def evaluate_symbolic_model(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_matrix: np.ndarray,
     teacher_labels: np.ndarray,
@@ -96,11 +91,11 @@ def evaluate_symbolic_candidate(
     features = np.asarray(feature_matrix, dtype=np.float32)
     labels = np.asarray(teacher_labels, dtype=np.int64)
     if features.ndim != 2:
-        raise ValueError("evaluate_symbolic_candidate expects a 2D feature matrix.")
+        raise ValueError("evaluate_symbolic_model expects a 2D feature matrix.")
 
     probabilities = tree.predict_proba(features)
     predictions = probabilities.argmax(axis=1).astype(np.int64)
-    predicted_confidences = _prediction_confidence(probabilities, predictions)
+    predicted_confidences = probabilities[np.arange(probabilities.shape[0], dtype=np.int64), predictions]
     generator = np.random.default_rng(random_state)
 
     necessity_confidence_drop: list[float] = []
@@ -314,23 +309,6 @@ def _compute_local_instance_heatmap(
     return torch.from_numpy(positive_map)
 
 
-def _normalize_heatmap(heatmap: Tensor) -> Tensor:
-    tensor = torch.clamp(heatmap.detach().cpu().float(), min=0.0)
-    total = float(tensor.sum().item())
-    if total <= 0.0:
-        return torch.zeros_like(tensor)
-    return tensor / total
-
-
-def _heatmap_entropy(heatmap: Tensor) -> float:
-    flattened = heatmap.reshape(-1)
-    positive = flattened[flattened > 0]
-    if positive.numel() == 0:
-        return 0.0
-    entropy = -torch.sum(positive * torch.log(positive))
-    return float(entropy.item() / np.log(max(flattened.numel(), 2)))
-
-
 def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
     target_cells = max(int(gt_mask.sum().item()), 1)
     flattened = heatmap.reshape(-1)
@@ -343,19 +321,6 @@ def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
     if union == 0:
         return 0.0
     return float(intersection / union)
-
-
-def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
-    peak_index = int(torch.argmax(heatmap.reshape(-1)).item())
-    row_index = peak_index // heatmap.shape[1]
-    col_index = peak_index % heatmap.shape[1]
-    return float(gt_mask[row_index, col_index].item())
-
-
-def _energy_in_region(heatmap: Tensor, gt_mask: Tensor) -> float:
-    if int(gt_mask.sum().item()) == 0:
-        return 0.0
-    return float(heatmap[gt_mask].sum().item())
 
 
 def _feature_perturbation_stability(
@@ -379,8 +344,14 @@ def _feature_perturbation_stability(
     ) * (noise_scale * feature_std)
     perturbed_heatmap = _compute_local_instance_heatmap(tree, feature_grid + perturbation)
 
-    base_vector = _normalize_heatmap(base_heatmap).reshape(-1)
-    perturbed_vector = _normalize_heatmap(perturbed_heatmap).reshape(-1)
+    base_vector = torch.clamp(base_heatmap.detach().cpu().float(), min=0.0)
+    base_total = float(base_vector.sum().item())
+    base_vector = (torch.zeros_like(base_vector) if base_total <= 0.0 else base_vector / base_total).reshape(-1)
+    perturbed_vector = torch.clamp(perturbed_heatmap.detach().cpu().float(), min=0.0)
+    perturbed_total = float(perturbed_vector.sum().item())
+    perturbed_vector = (
+        torch.zeros_like(perturbed_vector) if perturbed_total <= 0.0 else perturbed_vector / perturbed_total
+    ).reshape(-1)
     if float(base_vector.sum().item()) == 0.0 and float(perturbed_vector.sum().item()) == 0.0:
         return 1.0
 
@@ -427,7 +398,9 @@ def evaluate_symbolic_spatial_metrics(
         if gt_iou is not None and float(gt_iou[index]) <= 0.0:
             continue
 
-        heatmap = _normalize_heatmap(_compute_local_instance_heatmap(tree, feature_grids[index]))
+        heatmap = torch.clamp(_compute_local_instance_heatmap(tree, feature_grids[index]).detach().cpu().float(), min=0.0)
+        total = float(heatmap.sum().item())
+        heatmap = torch.zeros_like(heatmap) if total <= 0.0 else heatmap / total
         gt_mask = project_gt_box_to_roi_grid(
             proposal_box=proposal_boxes[index],
             matched_gt_box=matched_gt_boxes[index],
@@ -437,9 +410,18 @@ def evaluate_symbolic_spatial_metrics(
             continue
 
         overlap_scores.append(_topk_region_overlap(heatmap, gt_mask))
-        pointing_scores.append(_pointing_score(heatmap, gt_mask))
-        energy_scores.append(_energy_in_region(heatmap, gt_mask))
-        entropy_scores.append(_heatmap_entropy(heatmap))
+        peak_index = int(torch.argmax(heatmap.reshape(-1)).item())
+        row_index = peak_index // heatmap.shape[1]
+        col_index = peak_index % heatmap.shape[1]
+        pointing_scores.append(float(gt_mask[row_index, col_index].item()))
+        energy_scores.append(float(heatmap[gt_mask].sum().item()))
+        flattened = heatmap.reshape(-1)
+        positive = flattened[flattened > 0]
+        entropy_scores.append(
+            0.0
+            if positive.numel() == 0
+            else float((-torch.sum(positive * torch.log(positive))).item() / np.log(max(flattened.numel(), 2)))
+        )
         stability_scores.append(
             _feature_perturbation_stability(
                 tree,

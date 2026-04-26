@@ -8,9 +8,6 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from .utils import flatten_feature_grid, load_symbolic_payload
-
-
 @dataclass(frozen=True)
 class SymbolicTensorBundle:
     feature_grids: Tensor
@@ -19,6 +16,7 @@ class SymbolicTensorBundle:
     teacher_logits: Tensor
     teacher_scores: Tensor
     proposal_boxes: Tensor
+    transformed_proposal_boxes: Tensor
     matched_gt_boxes: Tensor | None
     has_matched_gt: Tensor | None
     image_ids: Tensor
@@ -29,37 +27,6 @@ class SymbolicTensorBundle:
     image_paths: tuple[str, ...]
     feature_shape: tuple[int, int, int]
     class_names: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class SymbolicFeatureScreening:
-    selected_feature_indices: Tensor
-    keep_mask: Tensor
-    original_feature_dim: int
-    selected_feature_dim: int
-    activation_threshold: float
-    min_feature_std: float
-    min_feature_range: float
-    min_activation_rate: float
-    removed_dead_features: int
-    removed_near_constant_features: int
-    removed_low_activation_features: int
-
-    def to_summary(self) -> dict[str, int | float]:
-        return {
-            "original_feature_dim": self.original_feature_dim,
-            "selected_feature_dim": self.selected_feature_dim,
-            "removed_dead_features": self.removed_dead_features,
-            "removed_near_constant_features": self.removed_near_constant_features,
-            "removed_low_activation_features": self.removed_low_activation_features,
-            "activation_threshold": self.activation_threshold,
-            "min_feature_std": self.min_feature_std,
-            "min_feature_range": self.min_feature_range,
-            "min_activation_rate": self.min_activation_rate,
-            "kept_fraction": (
-                float(self.selected_feature_dim) / float(max(self.original_feature_dim, 1))
-            ),
-        }
 
 
 def _iter_symbolic_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -107,55 +74,6 @@ def _balanced_sample_indices(
     return combined
 
 
-def build_symbolic_feature_screening(
-    feature_vectors: Tensor,
-    activation_threshold: float = 1e-8,
-    min_feature_std: float = 1e-5,
-    min_feature_range: float = 1e-5,
-    min_activation_rate: float = 0.0,
-) -> SymbolicFeatureScreening:
-    vectors = feature_vectors.detach().cpu().float()
-    original_feature_dim = int(vectors.shape[1])
-
-    max_abs = vectors.abs().max(dim=0).values
-    feature_std = vectors.std(dim=0, unbiased=False)
-    feature_range = vectors.max(dim=0).values - vectors.min(dim=0).values
-    activation_rate = (vectors.abs() > float(activation_threshold)).float().mean(dim=0)
-
-    dead_mask = max_abs <= float(activation_threshold)
-    near_constant_mask = (~dead_mask) & (feature_std <= float(min_feature_std)) & (feature_range <= float(min_feature_range))
-    low_activation_mask = torch.zeros_like(dead_mask)
-    if min_activation_rate > 0.0:
-        low_activation_mask = (~dead_mask) & (~near_constant_mask) & (activation_rate < float(min_activation_rate))
-
-    keep_mask = ~(dead_mask | near_constant_mask | low_activation_mask)
-    if int(keep_mask.sum().item()) == 0:
-        fallback_index = int(torch.argmax(max_abs).item())
-        keep_mask[fallback_index] = True
-
-    selected_feature_indices = torch.where(keep_mask)[0].to(dtype=torch.int64)
-    return SymbolicFeatureScreening(
-        selected_feature_indices=selected_feature_indices,
-        keep_mask=keep_mask.to(dtype=torch.bool),
-        original_feature_dim=original_feature_dim,
-        selected_feature_dim=int(selected_feature_indices.shape[0]),
-        activation_threshold=float(activation_threshold),
-        min_feature_std=float(min_feature_std),
-        min_feature_range=float(min_feature_range),
-        min_activation_rate=float(min_activation_rate),
-        removed_dead_features=int(dead_mask.sum().item()),
-        removed_near_constant_features=int(near_constant_mask.sum().item()),
-        removed_low_activation_features=int(low_activation_mask.sum().item()),
-    )
-
-
-def apply_symbolic_feature_screening(
-    feature_vectors: Tensor,
-    screening: SymbolicFeatureScreening,
-) -> Tensor:
-    return feature_vectors.index_select(1, screening.selected_feature_indices)
-
-
 def flatten_exported_symbolic_payload(
     payload: dict[str, Any],
     include_background: bool = True,
@@ -169,6 +87,7 @@ def flatten_exported_symbolic_payload(
     teacher_logits: list[Tensor] = []
     teacher_scores: list[Tensor] = []
     proposal_boxes: list[Tensor] = []
+    transformed_proposal_boxes: list[Tensor] = []
     matched_gt_boxes: list[Tensor] = []
     has_matched_gt: list[Tensor] = []
     image_ids: list[Tensor] = []
@@ -183,6 +102,7 @@ def flatten_exported_symbolic_payload(
         logits = record["teacher_logits"]
         labels = record["teacher_labels"]
         scores = record["teacher_scores"].max(dim=1).values
+        transformed_boxes = record.get("transformed_proposal_boxes", record["proposal_boxes"])
 
         mask = torch.ones((labels.shape[0],), dtype=torch.bool)
         if not include_background:
@@ -195,11 +115,12 @@ def flatten_exported_symbolic_payload(
 
         selected_grids = grids[mask]
         feature_grids.append(selected_grids)
-        feature_vectors.append(flatten_feature_grid(selected_grids))
+        feature_vectors.append(selected_grids.flatten(start_dim=1))
         teacher_labels.append(labels[mask])
         teacher_logits.append(logits[mask])
         teacher_scores.append(record["teacher_scores"][mask])
         proposal_boxes.append(record["proposal_boxes"][mask])
+        transformed_proposal_boxes.append(transformed_boxes[mask])
         image_ids.append(torch.full((int(mask.sum().item()),), int(record["image_id"]), dtype=torch.int64))
         image_sizes.append(record["image_size"].repeat(int(mask.sum().item()), 1))
         transformed_image_sizes.append(record["transformed_image_size"].repeat(int(mask.sum().item()), 1))
@@ -223,6 +144,7 @@ def flatten_exported_symbolic_payload(
     stacked_logits = torch.cat(teacher_logits, dim=0)
     stacked_scores = torch.cat(teacher_scores, dim=0)
     stacked_boxes = torch.cat(proposal_boxes, dim=0)
+    stacked_transformed_boxes = torch.cat(transformed_proposal_boxes, dim=0)
     stacked_matched_gt_boxes = torch.cat(matched_gt_boxes, dim=0) if matched_gt_boxes else None
     stacked_has_matched_gt = torch.cat(has_matched_gt, dim=0) if has_matched_gt else None
     stacked_image_ids = torch.cat(image_ids, dim=0)
@@ -243,6 +165,7 @@ def flatten_exported_symbolic_payload(
         stacked_logits = stacked_logits[keep]
         stacked_scores = stacked_scores[keep]
         stacked_boxes = stacked_boxes[keep]
+        stacked_transformed_boxes = stacked_transformed_boxes[keep]
         if stacked_matched_gt_boxes is not None:
             stacked_matched_gt_boxes = stacked_matched_gt_boxes[keep]
         if stacked_has_matched_gt is not None:
@@ -263,6 +186,7 @@ def flatten_exported_symbolic_payload(
         teacher_logits=stacked_logits,
         teacher_scores=stacked_scores,
         proposal_boxes=stacked_boxes,
+        transformed_proposal_boxes=stacked_transformed_boxes,
         matched_gt_boxes=stacked_matched_gt_boxes,
         has_matched_gt=stacked_has_matched_gt,
         image_ids=stacked_image_ids,
@@ -285,7 +209,7 @@ class SymbolicRoIDataset(Dataset[dict[str, Tensor | str | int | float | None]]):
         max_samples_total: int | None = None,
         random_state: int = 42,
     ) -> None:
-        payload = load_symbolic_payload(export_path)
+        payload = torch.load(export_path, map_location="cpu", weights_only=True)
         self.bundle = flatten_exported_symbolic_payload(
             payload,
             include_background=include_background,
@@ -305,6 +229,7 @@ class SymbolicRoIDataset(Dataset[dict[str, Tensor | str | int | float | None]]):
             "teacher_logits": self.bundle.teacher_logits[index],
             "teacher_scores": self.bundle.teacher_scores[index],
             "proposal_box": self.bundle.proposal_boxes[index],
+            "transformed_proposal_box": self.bundle.transformed_proposal_boxes[index],
             "image_id": int(self.bundle.image_ids[index]),
             "image_size": self.bundle.image_sizes[index],
             "transformed_image_size": self.bundle.transformed_image_sizes[index],

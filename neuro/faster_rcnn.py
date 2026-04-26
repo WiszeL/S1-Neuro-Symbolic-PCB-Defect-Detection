@@ -939,12 +939,12 @@ class NeuroFasterRCNN(nn.Module):
         )
 
     @torch.inference_mode()
-    def extract_roi_features(
+    def _extract_proposal_feature_records(
         self,
         images: list[Tensor],
         targets: list[PCBTarget] | None = None,
     ) -> list[dict[str, Tensor]]:
-        """Export proposal boxes and RoI Align features for SODT training."""
+        """Collect proposal geometry and RoI Align outputs before box-head postprocessing."""
 
         self.eval()
         original_image_sizes = [tuple(image.shape[-2:]) for image in images]
@@ -962,8 +962,61 @@ class NeuroFasterRCNN(nn.Module):
             original_image_sizes,
         )
 
-        for record, boxes in zip(records, postprocessed_boxes):
+        for index, (record, boxes) in enumerate(zip(records, postprocessed_boxes)):
             record["transformed_proposal_boxes"] = record["proposal_boxes"]
             record["proposal_boxes"] = boxes["boxes"]
+            record["image_size"] = torch.tensor(
+                original_image_sizes[index],
+                device=record["proposal_boxes"].device,
+                dtype=torch.int64,
+            )
+            record["transformed_image_size"] = torch.tensor(
+                transformed_images.image_sizes[index],
+                device=record["proposal_boxes"].device,
+                dtype=torch.int64,
+            )
+
+        return records
+
+    @torch.inference_mode()
+    def extract_roi_features(
+        self,
+        images: list[Tensor],
+        targets: list[PCBTarget] | None = None,
+    ) -> list[dict[str, Tensor]]:
+        """Export proposal boxes and RoI Align features for SODT training."""
+
+        return self._extract_proposal_feature_records(images, targets)
+
+    @torch.inference_mode()
+    def extract_teacher_roi_samples(
+        self,
+        images: list[Tensor],
+        targets: list[PCBTarget] | None = None,
+    ) -> list[dict[str, Tensor]]:
+        """Export per-RoI pooled grids and teacher classifier outputs on the same proposals."""
+
+        records = self._extract_proposal_feature_records(images, targets)
+        pooled_features = torch.cat([record["pooled_features"] for record in records], dim=0)
+        proposal_counts = [record["proposal_boxes"].shape[0] for record in records]
+
+        roi_representations = self.box_head(pooled_features)
+        teacher_logits = self.box_predictor.classifier(roi_representations)
+        teacher_scores = F.softmax(teacher_logits, dim=-1)
+        teacher_labels = teacher_scores.argmax(dim=1)
+
+        logits_per_image = teacher_logits.split(proposal_counts, dim=0)
+        scores_per_image = teacher_scores.split(proposal_counts, dim=0)
+        labels_per_image = teacher_labels.split(proposal_counts, dim=0)
+
+        for record, logits, scores, labels in zip(
+            records,
+            logits_per_image,
+            scores_per_image,
+            labels_per_image,
+        ):
+            record["teacher_logits"] = logits
+            record["teacher_scores"] = scores
+            record["teacher_labels"] = labels
 
         return records

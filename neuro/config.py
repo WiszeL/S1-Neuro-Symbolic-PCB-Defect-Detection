@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
-import yaml
+from util.config import load_yaml
 
 
 # Model config
@@ -87,20 +87,3 @@ class NeuroTrainConfig(TypedDict):
     preprocessing: PreprocessingConfig
     train: TrainConfig
     evaluation: EvaluationConfig
-
-
-# Loader
-
-
-def load_yaml[T](path: Path, _: type[T]) -> T:
-    config_path = Path("configs") / path
-
-    with config_path.open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle)
-
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"Expected a mapping in {config_path}, but received {type(data).__name__}."
-        )
-
-    return cast(T, data)

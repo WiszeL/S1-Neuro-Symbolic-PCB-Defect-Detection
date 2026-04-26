@@ -23,17 +23,13 @@ def load_neurosymbolic_detector(
     model_config_path: str | Path,
     symbolic_checkpoint_path: str | Path,
     device: str | None = None,
-    selection_lane: str = "paper_faithful",
 ) -> tuple[NeuroSymbolicDetector, dict[str, Any]]:
     teacher_model, teacher_checkpoint = load_checkpoint_model(
         detector_checkpoint_path,
         model_config_path,
         device=device,
     )
-    symbolic_tree = load_symbolic_tree(
-        symbolic_checkpoint_path,
-        selection_lane=selection_lane,
-    )
+    symbolic_tree = load_symbolic_tree(symbolic_checkpoint_path)
     hybrid_model = NeuroSymbolicDetector(
         teacher_model=teacher_model,
         symbolic_tree=symbolic_tree,

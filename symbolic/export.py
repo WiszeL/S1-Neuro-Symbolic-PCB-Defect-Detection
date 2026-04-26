@@ -10,8 +10,6 @@ from torchvision.ops import box_iou
 from util.device import select_device
 from util.io import ensure_dir
 
-from .utils import build_symbolic_class_names, save_symbolic_payload
-
 
 def _select_teacher_roi_indices(
     teacher_labels: torch.Tensor,
@@ -131,6 +129,7 @@ def export_teacher_roi_dataset(
             "image_id": int(target["image_id"]),
             "image_path": str(dataset.samples[index].image_path),
             "proposal_boxes": selected_proposal_boxes.detach().cpu(),
+            "transformed_proposal_boxes": teacher_output["transformed_proposal_boxes"][keep].detach().cpu(),
             "pooled_features": teacher_output["pooled_features"][keep].detach().to(dtype=dtype).cpu(),
             "teacher_labels": teacher_output["teacher_labels"][keep].detach().cpu(),
             "teacher_logits": teacher_output["teacher_logits"][keep].detach().to(dtype=dtype).cpu(),
@@ -168,11 +167,13 @@ def export_teacher_roi_dataset(
 
     payload = {
         "storage_format": "sharded_pt_v1",
+        "feature_cut": "roi_align_pooled_grid",
         "symbolic_feature": "pooled_features",
-        "proposal_source": "rpn_pre_postprocess",
-        "class_names": build_symbolic_class_names(tuple(dataset.class_names)),
+        "symbolic_target": "teacher_label",
+        "proposal_source": "rpn_pre_detector_postprocess",
+        "class_names": ("__background__", *tuple(dataset.class_names)),
         "feature_shape": tuple(int(value) for value in record["pooled_features"].shape[1:]) if manifest_records else None,
-        "selection": {
+        "roi_sampling": {
             "max_positive_rois_per_image": max_positive_rois_per_image,
             "max_background_rois_per_image": max_background_rois_per_image,
         },
@@ -180,4 +181,6 @@ def export_teacher_roi_dataset(
         "shard_dir": str(shard_dir),
         "records": manifest_records,
     }
-    return save_symbolic_payload(payload, output_path)
+    ensure_dir(output_path.parent)
+    torch.save(payload, output_path)
+    return output_path
