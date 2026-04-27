@@ -162,6 +162,7 @@ def fit_tree_with_tao(
     show_progress: bool = False,
     progress_desc: str | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    node_progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     features = np.asarray(features, dtype=np.float32)
     labels = np.asarray(labels, dtype=np.int64)
@@ -191,9 +192,25 @@ def fit_tree_with_tao(
         # ---------------------------------------------------------------------
         for node_index in range(tree.num_internal_nodes - 1, -1, -1):
             node_indices = reduced_sets.get(node_index, np.zeros((0,), dtype=np.int64))
+            node_event = {
+                "phase": "start",
+                "iteration": iteration_index + 1,
+                "iterations": iterations,
+                "node_index": node_index,
+                "node_number": node_index + 1,
+                "node_position": tree.num_internal_nodes - node_index,
+                "num_internal_nodes": tree.num_internal_nodes,
+                "samples_at_node": int(node_indices.size),
+                "logistic_max_iter": logistic_max_iter,
+            }
+            if node_progress_callback is not None:
+                node_progress_callback(node_event)
+
             if node_indices.size == 0:
                 tree.node_weights[node_index] = 0.0
                 tree.node_bias[node_index] = 0.0
+                if node_progress_callback is not None:
+                    node_progress_callback({**node_event, "phase": "end", "status": "empty"})
                 continue
 
             node_features = features[node_indices]
@@ -206,6 +223,8 @@ def fit_tree_with_tao(
             sample_weights = np.abs(left_loss - right_loss)
 
             if float(sample_weights.sum()) == 0.0:
+                if node_progress_callback is not None:
+                    node_progress_callback({**node_event, "phase": "end", "status": "no_split_gain"})
                 continue
 
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
@@ -222,6 +241,15 @@ def fit_tree_with_tao(
             )
             tree.node_weights[node_index] = weights
             tree.node_bias[node_index] = bias
+            if node_progress_callback is not None:
+                node_progress_callback(
+                    {
+                        **node_event,
+                        "phase": "end",
+                        "status": "fit",
+                        "effective_lambda": effective_lambda,
+                    }
+                )
 
         reduced_sets = compute_reduced_sets(tree, features)
         update_leaf_predictions(tree, labels, reduced_sets)

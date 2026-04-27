@@ -53,8 +53,8 @@ def _format_progress_header(
             f"{total_node_fit_upper_bound} LIBLINEAR node fits."
         ),
         (
-            "Progress line shows TAO 1/1, iteration, mimic, sparsity, and ETA in one place. "
-            "No side logs are emitted while the bar is running."
+            "Progress line shows TAO iteration, internal node fit, LIBLINEAR max steps, "
+            "mimic, sparsity, and ETA in one place. No side logs are emitted while the bar is running."
         ),
     ]
 
@@ -337,27 +337,73 @@ def train_symbolic_tree(
         print(line)
 
     progress_bar = tqdm(
-        total=sodt_config["iterations"],
-        desc="TAO",
+        total=total_node_fit_upper_bound,
+        desc="TAO node fits",
         leave=True,
         dynamic_ncols=True,
     )
     progress_bar.set_postfix(
+        tao=f"0/{sodt_config['iterations']}",
+        node=f"0/{(2 ** sodt_config['tree_depth']) - 1}",
+        liblinear=f"<= {sodt_config['logistic_max_iter']}",
+        status="ready",
         mimic=f"{0.0:.4f}",
         nz=0,
         eta=_format_duration(0.0),
     )
 
     training_start_time = perf_counter()
+    latest_mimic_accuracy = 0.0
+    latest_nonzero_weights = 0
 
     def _on_iteration(metrics: dict[str, Any]) -> None:
-        progress_bar.update(1)
+        nonlocal latest_mimic_accuracy, latest_nonzero_weights
+        latest_mimic_accuracy = float(metrics["mimic_accuracy"])
+        latest_nonzero_weights = int(metrics["nonzero_weights"])
         elapsed = perf_counter() - training_start_time
-        mean_seconds = elapsed / max(metrics["iteration"], 1)
-        eta = mean_seconds * max(sodt_config["iterations"] - metrics["iteration"], 0)
+        mean_seconds = elapsed / max(progress_bar.n, 1)
+        eta = mean_seconds * max(total_node_fit_upper_bound - progress_bar.n, 0)
         progress_bar.set_postfix(
-            mimic=f"{float(metrics['mimic_accuracy']):.4f}",
-            nz=int(metrics["nonzero_weights"]),
+            tao=f"{int(metrics['iteration'])}/{sodt_config['iterations']}",
+            node=f"{(2 ** sodt_config['tree_depth']) - 1}/{(2 ** sodt_config['tree_depth']) - 1}",
+            liblinear=f"<= {sodt_config['logistic_max_iter']}",
+            status="iteration_done",
+            mimic=f"{latest_mimic_accuracy:.4f}",
+            nz=latest_nonzero_weights,
+            eta=_format_duration(eta),
+        )
+
+    def _on_node(event: dict[str, Any]) -> None:
+        elapsed = perf_counter() - training_start_time
+        completed_node_fits = progress_bar.n
+        mean_seconds = elapsed / max(completed_node_fits, 1)
+        eta = mean_seconds * max(total_node_fit_upper_bound - completed_node_fits, 0)
+        status = str(event.get("status", "solving"))
+        if event["phase"] == "start":
+            progress_bar.set_postfix(
+                tao=f"{int(event['iteration'])}/{int(event['iterations'])}",
+                node=f"{int(event['node_number'])}/{int(event['num_internal_nodes'])}",
+                liblinear=f"<= {int(event['logistic_max_iter'])}",
+                status=status,
+                samples=int(event["samples_at_node"]),
+                mimic=f"{latest_mimic_accuracy:.4f}",
+                nz=latest_nonzero_weights,
+                eta=_format_duration(eta),
+            )
+            return
+
+        progress_bar.update(1)
+        completed_node_fits = progress_bar.n
+        mean_seconds = elapsed / max(completed_node_fits, 1)
+        eta = mean_seconds * max(total_node_fit_upper_bound - completed_node_fits, 0)
+        progress_bar.set_postfix(
+            tao=f"{int(event['iteration'])}/{int(event['iterations'])}",
+            node=f"{int(event['node_number'])}/{int(event['num_internal_nodes'])}",
+            liblinear=f"<= {int(event['logistic_max_iter'])}",
+            status=status,
+            samples=int(event["samples_at_node"]),
+            mimic=f"{latest_mimic_accuracy:.4f}",
+            nz=latest_nonzero_weights,
             eta=_format_duration(eta),
         )
 
@@ -379,6 +425,7 @@ def train_symbolic_tree(
         random_state=sodt_config["random_state"],
         show_progress=False,
         progress_callback=_on_iteration,
+        node_progress_callback=_on_node,
     )
 
     progress_bar.close()
