@@ -1,15 +1,14 @@
 data:
   include_background: true
   min_teacher_score: null
-  max_samples_total: 4000
+  max_samples_total: 16000
 
 search:
-  max_depth: 4
-  depth_values: 4
-  iterations: 20
-  lambda_values: 1.0
-  alpha_values: 0.5
-  logistic_max_iter: 100
+  tree_depth: 5
+  iterations: 40
+  l1_lambda: 30
+  sparsity_alpha: .25
+  logistic_max_iter: 250
   tolerance: 0.0001
   zero_threshold: 0.00001
   random_state: 42

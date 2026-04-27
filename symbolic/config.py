@@ -10,11 +10,10 @@ class SymbolicDataConfig(TypedDict):
 
 
 class SymbolicSearchConfig(TypedDict):
-    max_depth: int
-    depth_values: int | list[int] | None
+    tree_depth: int
     iterations: int
-    lambda_values: float | list[float] | None
-    alpha_values: float | list[float] | None
+    l1_lambda: float
+    sparsity_alpha: float
     logistic_max_iter: int
     tolerance: float
     zero_threshold: float

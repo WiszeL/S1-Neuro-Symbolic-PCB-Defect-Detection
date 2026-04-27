@@ -78,35 +78,12 @@ def _format_progress_postfix(
     )
 
 
-def _as_single_config_value(value: Any, fallback: Any, name: str) -> Any:
-    if value is None:
-        value = fallback
-    if isinstance(value, list | tuple):
-        if len(value) != 1:
-            raise ValueError(
-                f"search.{name} must contain exactly one value for single-SODT training."
-            )
-        return value[0]
-    return value
-
-
 def _materialize_sodt_config(search_config: dict[str, Any]) -> dict[str, Any]:
-    max_depth = int(search_config["max_depth"])
-    tree_depth = int(
-        _as_single_config_value(search_config.get("depth_values"), fallback=max_depth, name="depth_values")
-    )
-    if tree_depth != max_depth:
-        raise ValueError("search.max_depth and search.depth_values must match for single-SODT training.")
-
     return {
-        "tree_depth": tree_depth,
+        "tree_depth": int(search_config["tree_depth"]),
         "iterations": int(search_config["iterations"]),
-        "l1_lambda": float(
-            _as_single_config_value(search_config.get("lambda_values"), fallback=1.0, name="lambda_values")
-        ),
-        "sparsity_alpha": float(
-            _as_single_config_value(search_config.get("alpha_values"), fallback=0.5, name="alpha_values")
-        ),
+        "l1_lambda": float(search_config["l1_lambda"]),
+        "sparsity_alpha": float(search_config["sparsity_alpha"]),
         "logistic_max_iter": int(search_config["logistic_max_iter"]),
         "tolerance": float(search_config["tolerance"]),
         "zero_threshold": float(search_config["zero_threshold"]),
@@ -155,10 +132,10 @@ def _load_symbolic_evaluation_data(
 def _build_symbolic_tree(
     bundle: Any,
     feature_matrix: Any,
-    max_depth: int,
+    tree_depth: int,
 ) -> SparseObliqueDecisionTreeClassifier:
     return SparseObliqueDecisionTreeClassifier(
-        max_depth=max_depth,
+        max_depth=tree_depth,
         num_classes=len(bundle.class_names),
         input_dim=int(feature_matrix.shape[1]),
         original_input_dim=int(feature_matrix.shape[1]),
@@ -440,7 +417,7 @@ def train_symbolic_tree(
     tree = _build_symbolic_tree(
         bundle,
         feature_matrix,
-        max_depth=sodt_config["tree_depth"],
+        tree_depth=sodt_config["tree_depth"],
     )
     history = fit_tree_with_tao(
         tree,
@@ -497,11 +474,10 @@ def train_symbolic_tree(
         "train_report": _model_report(trained_model),
         "heldout_review": heldout_review,
         "training_config": {
-            "max_depth": sodt_config["tree_depth"],
-            "depth_values": sodt_config["tree_depth"],
+            "tree_depth": sodt_config["tree_depth"],
             "iterations": sodt_config["iterations"],
-            "lambda_values": sodt_config["l1_lambda"],
-            "alpha_values": sodt_config["sparsity_alpha"],
+            "l1_lambda": sodt_config["l1_lambda"],
+            "sparsity_alpha": sodt_config["sparsity_alpha"],
             "logistic_max_iter": sodt_config["logistic_max_iter"],
             "tolerance": sodt_config["tolerance"],
             "zero_threshold": sodt_config["zero_threshold"],
