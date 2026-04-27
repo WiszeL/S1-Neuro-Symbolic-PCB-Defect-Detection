@@ -5,7 +5,7 @@ from time import perf_counter
 from typing import Any
 
 import torch
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from .dataset import flatten_exported_symbolic_payload
 from .config import SymbolicTrainConfig
@@ -57,21 +57,6 @@ def _format_progress_header(
             "No side logs are emitted while the bar is running."
         ),
     ]
-
-
-def _format_progress_postfix(
-    iteration: int,
-    total_iterations: int,
-    mimic_accuracy: float,
-    nonzero_weights: int,
-    eta: float,
-) -> str:
-    return (
-        f"iter {iteration}/{total_iterations} | "
-        f"mimic={mimic_accuracy:.4f} | "
-        f"nz={int(nonzero_weights)} | "
-        f"eta={_format_duration(eta)}"
-    )
 
 
 def _materialize_sodt_config(search_config: dict[str, Any]) -> dict[str, Any]:
@@ -353,11 +338,14 @@ def train_symbolic_tree(
 
     progress_bar = tqdm(
         total=sodt_config["iterations"],
-        desc="TAO 1/1",
+        desc="TAO",
         leave=True,
         dynamic_ncols=True,
-        mininterval=0.1,
-        bar_format="{desc}: {postfix}",
+    )
+    progress_bar.set_postfix(
+        mimic=f"{0.0:.4f}",
+        nz=0,
+        eta=_format_duration(0.0),
     )
 
     training_start_time = perf_counter()
@@ -367,26 +355,11 @@ def train_symbolic_tree(
         elapsed = perf_counter() - training_start_time
         mean_seconds = elapsed / max(metrics["iteration"], 1)
         eta = mean_seconds * max(sodt_config["iterations"] - metrics["iteration"], 0)
-        progress_bar.set_description_str("TAO 1/1")
-        progress_bar.set_postfix_str(
-            _format_progress_postfix(
-                iteration=int(metrics["iteration"]),
-                total_iterations=sodt_config["iterations"],
-                mimic_accuracy=float(metrics["mimic_accuracy"]),
-                nonzero_weights=int(metrics["nonzero_weights"]),
-                eta=eta,
-            )
+        progress_bar.set_postfix(
+            mimic=f"{float(metrics['mimic_accuracy']):.4f}",
+            nz=int(metrics["nonzero_weights"]),
+            eta=_format_duration(eta),
         )
-
-    progress_bar.set_postfix_str(
-        _format_progress_postfix(
-            iteration=0,
-            total_iterations=sodt_config["iterations"],
-            mimic_accuracy=0.0,
-            nonzero_weights=0,
-            eta=0.0,
-        )
-    )
 
     tree = _build_symbolic_tree(
         bundle,

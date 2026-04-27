@@ -29,10 +29,22 @@ class SymbolicTensorBundle:
     class_names: tuple[str, ...]
 
 
+def _resolve_shard_path(shard_path: str | Path) -> Path:
+    path = Path(shard_path)
+    if path.exists():
+        return path
+
+    normalized_path = Path(str(shard_path).replace("\\", "/"))
+    if normalized_path.exists():
+        return normalized_path
+
+    return path
+
+
 def _iter_symbolic_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if payload.get("storage_format") == "sharded_pt_v1":
         return [
-            torch.load(record["shard_path"], map_location="cpu", weights_only=True)
+            torch.load(_resolve_shard_path(record["shard_path"]), map_location="cpu", weights_only=True)
             for record in payload["records"]
         ]
     return list(payload["records"])

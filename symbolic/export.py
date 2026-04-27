@@ -87,7 +87,7 @@ def _match_proposals_to_ground_truth(
 
 
 @torch.inference_mode()
-def export_teacher_roi_dataset(
+def extract_dataset_from_teacher(
     model: torch.nn.Module,
     dataset: Any,
     output_path: str | Path,
@@ -96,8 +96,12 @@ def export_teacher_roi_dataset(
     max_background_rois_per_image: int = 40,
     storage_dtype: str = "float16",
 ) -> Path:
-    resolved_device = select_device(device)
     output_path = Path(output_path)
+    if output_path.exists():
+        print(f"Skipping teacher dataset extraction; found existing artifact at {output_path}.")
+        return output_path
+
+    resolved_device = select_device(device)
     shard_dir = ensure_dir(output_path.with_suffix(""))
 
     model = model.to(resolved_device)
@@ -161,7 +165,7 @@ def export_teacher_roi_dataset(
                 "image_path": record["image_path"],
                 "num_rois": int(record["teacher_labels"].shape[0]),
                 "label_counts": label_counts.tolist(),
-                "shard_path": str(shard_path),
+                "shard_path": shard_path.as_posix(),
             }
         )
 
