@@ -53,16 +53,13 @@ def _format_progress_header(
             f"{total_node_fit_upper_bound} LIBLINEAR node fits."
         ),
         (
-            "Progress line shows the TAO step, mimic, sparsity, and ETA in one place. "
+            "Progress line shows TAO 1/1, iteration, mimic, sparsity, and ETA in one place. "
             "No side logs are emitted while the bar is running."
         ),
     ]
 
 
 def _format_progress_postfix(
-    tree_depth: int,
-    l1_lambda: float,
-    sparsity_alpha: float,
     iteration: int,
     total_iterations: int,
     mimic_accuracy: float,
@@ -70,8 +67,7 @@ def _format_progress_postfix(
     eta: float,
 ) -> str:
     return (
-        f"d={tree_depth} lam={l1_lambda:g} a={sparsity_alpha:g} | "
-        f"tao {iteration}/{total_iterations} | "
+        f"iter {iteration}/{total_iterations} | "
         f"mimic={mimic_accuracy:.4f} | "
         f"nz={int(nonzero_weights)} | "
         f"eta={_format_duration(eta)}"
@@ -162,18 +158,6 @@ def _augment_tree_metrics(
     return augmented
 
 
-def _model_identifier(
-    tree_depth: int,
-    l1_lambda: float,
-    sparsity_alpha: float,
-) -> str:
-    return (
-        f"depth{int(tree_depth)}"
-        f"_lambda{float(l1_lambda):g}"
-        f"_alpha{float(sparsity_alpha):g}"
-    )
-
-
 def _evaluate_symbolic_model(
     tree: SparseObliqueDecisionTreeClassifier,
     bundle: Any,
@@ -212,7 +196,6 @@ def _evaluate_symbolic_model(
         },
     )
     return {
-        "model_id": _model_identifier(tree_depth, l1_lambda, sparsity_alpha),
         "tree_depth": int(tree_depth),
         "l1_lambda": float(l1_lambda),
         "sparsity_alpha": float(sparsity_alpha),
@@ -256,14 +239,12 @@ def _evaluate_trained_model_on_bundle(
         },
     )
     evaluated_model = {
-        "model_id": trained_model["model_id"],
         "tree_depth": trained_model["tree_depth"],
         "l1_lambda": trained_model["l1_lambda"],
         "sparsity_alpha": trained_model["sparsity_alpha"],
         "metrics": metrics,
     }
     return {
-        "model_id": trained_model["model_id"],
         "tree_depth": trained_model["tree_depth"],
         "l1_lambda": trained_model["l1_lambda"],
         "sparsity_alpha": trained_model["sparsity_alpha"],
@@ -300,7 +281,6 @@ def _build_heldout_review(
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
         "model": {
-            "model_id": heldout_model["model_id"],
             "tree_depth": heldout_model["tree_depth"],
             "l1_lambda": heldout_model["l1_lambda"],
             "sparsity_alpha": heldout_model["sparsity_alpha"],
@@ -315,7 +295,6 @@ def _build_heldout_review(
 
 def _model_report(model: dict[str, Any]) -> dict[str, Any]:
     return {
-        "model_id": model["model_id"],
         "tree_depth": model["tree_depth"],
         "num_leaves": model["metrics"]["num_leaves"],
         "l1_lambda": model["l1_lambda"],
@@ -374,10 +353,11 @@ def train_symbolic_tree(
 
     progress_bar = tqdm(
         total=sodt_config["iterations"],
-        desc="Symbolic SODT training",
+        desc="TAO 1/1",
         leave=True,
         dynamic_ncols=True,
         mininterval=0.1,
+        bar_format="{desc}: {postfix}",
     )
 
     training_start_time = perf_counter()
@@ -387,12 +367,9 @@ def train_symbolic_tree(
         elapsed = perf_counter() - training_start_time
         mean_seconds = elapsed / max(metrics["iteration"], 1)
         eta = mean_seconds * max(sodt_config["iterations"] - metrics["iteration"], 0)
-        progress_bar.set_description_str("Symbolic SODT training")
+        progress_bar.set_description_str("TAO 1/1")
         progress_bar.set_postfix_str(
             _format_progress_postfix(
-                tree_depth=sodt_config["tree_depth"],
-                l1_lambda=sodt_config["l1_lambda"],
-                sparsity_alpha=sodt_config["sparsity_alpha"],
                 iteration=int(metrics["iteration"]),
                 total_iterations=sodt_config["iterations"],
                 mimic_accuracy=float(metrics["mimic_accuracy"]),
@@ -403,9 +380,6 @@ def train_symbolic_tree(
 
     progress_bar.set_postfix_str(
         _format_progress_postfix(
-            tree_depth=sodt_config["tree_depth"],
-            l1_lambda=sodt_config["l1_lambda"],
-            sparsity_alpha=sodt_config["sparsity_alpha"],
             iteration=0,
             total_iterations=sodt_config["iterations"],
             mimic_accuracy=0.0,
@@ -465,7 +439,6 @@ def train_symbolic_tree(
         "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
         "model": {
-            "model_id": trained_model["model_id"],
             "tree_depth": trained_model["tree_depth"],
             "l1_lambda": trained_model["l1_lambda"],
             "sparsity_alpha": trained_model["sparsity_alpha"],
