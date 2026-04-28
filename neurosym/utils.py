@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
-
 import torch
-import torch.nn.functional as F
 from torch import Tensor
 from torchvision.ops import boxes as box_ops
 
-from neuro.detector import batched_soft_nms
+from neuro.faster_rcnn import NeuroFasterRCNN
 
 
 def postprocess_symbolic_detections(
-    roi_heads: Any,
-    class_logits: Tensor,
+    detector: NeuroFasterRCNN,
     box_regression: Tensor,
     proposals: list[Tensor],
     image_shapes: list[tuple[int, int]],
@@ -20,12 +16,12 @@ def postprocess_symbolic_detections(
     proposal_probabilities: Tensor,
     proposal_leaf_indices: Tensor,
 ) -> list[dict[str, Tensor]]:
-    device = class_logits.device
-    num_classes = class_logits.shape[-1]
+    device = proposal_probabilities.device
+    num_classes = proposal_probabilities.shape[-1]
     boxes_per_image = [boxes.shape[0] for boxes in proposals]
 
-    pred_boxes = roi_heads.box_coder.decode(box_regression, proposals)
-    pred_scores = F.softmax(class_logits, dim=-1)
+    pred_boxes = detector.box_coder.decode(box_regression, proposals)
+    pred_scores = proposal_probabilities
 
     pred_boxes_list = pred_boxes.split(boxes_per_image, dim=0)
     pred_scores_list = pred_scores.split(boxes_per_image, dim=0)
@@ -75,7 +71,7 @@ def postprocess_symbolic_detections(
             .reshape(-1)
         )
 
-        keep = torch.where(scores > roi_heads.score_thresh)[0]
+        keep = torch.where(scores > detector.BOX_SCORE_THRESH)[0]
         boxes = boxes[keep]
         scores = scores[keep]
         labels = labels[keep]
@@ -93,16 +89,11 @@ def postprocess_symbolic_detections(
         symbolic_probabilities = symbolic_probabilities[keep]
         symbolic_leaf_indices = symbolic_leaf_indices[keep]
 
-        if roi_heads.use_soft_nms:
-            keep, updated_scores = batched_soft_nms(
+        if detector.soft_nms_enabled:
+            keep, updated_scores = detector.batched_soft_nms(
                 boxes,
                 scores,
                 labels,
-                iou_thresh=roi_heads.nms_thresh,
-                score_thresh=roi_heads.soft_nms_score_thresh,
-                sigma=roi_heads.soft_nms_sigma,
-                detections_per_img=roi_heads.detections_per_img,
-                method=roi_heads.soft_nms_method,
             )
             boxes = boxes[keep]
             scores = updated_scores
@@ -112,7 +103,12 @@ def postprocess_symbolic_detections(
             symbolic_probabilities = symbolic_probabilities[keep]
             symbolic_leaf_indices = symbolic_leaf_indices[keep]
         else:
-            keep = box_ops.batched_nms(boxes, scores, labels, roi_heads.nms_thresh)[: roi_heads.detections_per_img]
+            keep = box_ops.batched_nms(
+                boxes,
+                scores,
+                labels,
+                detector.soft_nms_iou_thresh,
+            )[: detector.DETECTIONS_PER_IMG]
             boxes = boxes[keep]
             scores = scores[keep]
             labels = labels[keep]

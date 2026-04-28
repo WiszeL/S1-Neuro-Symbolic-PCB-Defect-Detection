@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import torch
 from torch import Tensor
 
-from neuro.inference import load_checkpoint_model
+from neuro.faster_rcnn import NeuroFasterRCNN
 from symbolic.train import load_symbolic_tree
+from util.device import select_device
 
 from .heatmap import (
     aggregate_projected_heatmaps,
     compute_symbolic_heatmap,
+    compute_node_local_evidence_maps,
     project_heatmap_to_image,
     resize_heatmap_to_box,
 )
@@ -20,22 +23,32 @@ from .hybrid import NeuroSymbolicDetector
 
 def load_neurosymbolic_detector(
     detector_checkpoint_path: str | Path,
-    model_config_path: str | Path,
+    neuro_config: dict[str, Any],
+    train_config: dict[str, Any],
     symbolic_checkpoint_path: str | Path,
     device: str | None = None,
 ) -> tuple[NeuroSymbolicDetector, dict[str, Any]]:
-    teacher_model, teacher_checkpoint = load_checkpoint_model(
+    resolved_device = select_device(device)
+    detector_neuro_config = deepcopy(neuro_config)
+    # The checkpoint supplies trained backbone weights; avoid an ImageNet weight download during inference init.
+    detector_neuro_config["net"]["backbone_pretrained"] = False
+    detector_checkpoint = torch.load(
         detector_checkpoint_path,
-        model_config_path,
-        device=device,
+        map_location=resolved_device,
+        weights_only=True,
     )
+    detector = NeuroFasterRCNN(
+        neuro_config=detector_neuro_config,  # type: ignore[arg-type]
+        train_config=train_config,  # type: ignore[arg-type]
+    )
+    detector.load_state_dict(detector_checkpoint["model_state_dict"])
     symbolic_tree = load_symbolic_tree(symbolic_checkpoint_path)
     hybrid_model = NeuroSymbolicDetector(
-        teacher_model=teacher_model,
+        detector=detector,
         symbolic_tree=symbolic_tree,
-        device=device,
+        device=str(resolved_device),
     )
-    return hybrid_model, teacher_checkpoint
+    return hybrid_model, detector_checkpoint
 
 
 @torch.inference_mode()
@@ -61,6 +74,32 @@ def explain_hybrid_detection(
         feature_grid=feature_grid,
         mode=mode,
     )
+    node_explanations = []
+    for node in compute_node_local_evidence_maps(model.symbolic_tree, feature_grid):
+        node_heatmap = node["node_heatmap"]
+        node_explanations.append(
+            {
+                **node,
+                "proposal_box_heatmap": resize_heatmap_to_box(
+                    node_heatmap,
+                    box=proposal_box,
+                ),
+                "projected_node_heatmap": project_heatmap_to_image(
+                    node_heatmap,
+                    box=proposal_box,
+                    image_shape=image_shape,
+                ),
+                "detection_box_heatmap": resize_heatmap_to_box(
+                    node_heatmap,
+                    box=detection_box,
+                ),
+                "projected_node_heatmap_on_detection_box": project_heatmap_to_image(
+                    node_heatmap,
+                    box=detection_box,
+                    image_shape=image_shape,
+                ),
+            }
+        )
 
     heatmap_keys = [
         "global_or_structural_density_map",
@@ -73,7 +112,7 @@ def explain_hybrid_detection(
     projected_maps = {
         key: project_heatmap_to_image(
             explanation[key],
-            box=detection_box,
+            box=proposal_box,
             image_shape=image_shape,
         )
         for key in heatmap_keys
@@ -81,7 +120,7 @@ def explain_hybrid_detection(
     box_maps = {
         key: resize_heatmap_to_box(
             explanation[key],
-            box=detection_box,
+            box=proposal_box,
         )
         for key in heatmap_keys
     }
@@ -89,7 +128,8 @@ def explain_hybrid_detection(
     explanation["projected_heatmap"] = projected_maps[mode] if mode in projected_maps else projected_maps["local_instance_evidence_map"]
     explanation["detection_box_heatmap"] = box_maps[mode] if mode in box_maps else box_maps["local_instance_evidence_map"]
     explanation["projected_maps"] = projected_maps
-    explanation["detection_box_maps"] = box_maps
+    explanation["proposal_box_maps"] = box_maps
+    explanation["node_explanations"] = node_explanations
     explanation["proposal_box"] = proposal_box.detach().cpu()
     explanation["detection_box"] = detection_box.detach().cpu()
     explanation["label"] = int(detection["labels"][detection_index])

@@ -64,6 +64,55 @@ def _top_channels(
     ]
 
 
+def _normalize_heatmap_array(heatmap: np.ndarray) -> np.ndarray:
+    normalized = np.asarray(heatmap, dtype=np.float32)
+    max_value = float(np.max(np.abs(normalized))) if normalized.size > 0 else 0.0
+    if max_value <= 0.0:
+        return np.zeros_like(normalized, dtype=np.float32)
+    return (normalized / max_value).astype(np.float32)
+
+
+def compute_node_local_evidence_maps(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+) -> list[dict[str, Any]]:
+    grid = _as_feature_grid(feature_grid)
+    feature_vector = grid.reshape(-1)
+    path = tree.decision_path(feature_vector)
+
+    node_explanations: list[dict[str, Any]] = []
+    for depth, step in enumerate(path):
+        direction = 1.0 if step.went_left else -1.0
+        weight_grid = tree.node_weight_grid(step.node_index)
+        signed_local = direction * weight_grid * grid
+        positive_evidence = np.maximum(signed_local, 0.0).sum(axis=0).astype(np.float32)
+        node_heatmap = _normalize_heatmap_array(positive_evidence)
+        positive_evidence_sum = float(positive_evidence.sum())
+
+        node_explanations.append(
+            {
+                "depth": int(depth),
+                "node_index": int(step.node_index),
+                "decision": "left" if step.went_left else "right",
+                "score": float(step.score),
+                "positive_evidence_sum": positive_evidence_sum,
+                "positive_evidence_cell_count": int(np.count_nonzero(positive_evidence > 0.0)),
+                "active_original_feature_count": int(
+                    tree.node_feature_indices(step.node_index, original_space=True).size
+                ),
+                "node_heatmap": node_heatmap,
+                "raw_node_heatmap": positive_evidence,
+                "top_local_cells": _top_grid_cells(node_heatmap, top_k=8),
+                "top_positive_local_channels": _top_channels(
+                    np.maximum(signed_local, 0.0).sum(axis=(1, 2)),
+                    top_k=8,
+                ),
+            }
+        )
+
+    return node_explanations
+
+
 def compute_symbolic_heatmap(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_grid: Tensor | np.ndarray,

@@ -1,5 +1,11 @@
 from .evaluation import evaluate_symbolic_spatial_metrics, project_gt_box_to_roi_grid
-from .heatmap import aggregate_projected_heatmaps, compute_symbolic_heatmap, project_heatmap_to_image, resize_heatmap_to_box
+from .heatmap import (
+    aggregate_projected_heatmaps,
+    compute_node_local_evidence_maps,
+    compute_symbolic_heatmap,
+    project_heatmap_to_image,
+    resize_heatmap_to_box,
+)
 from .hybrid import NeuroSymbolicDetector
 from .inference import (
     aggregate_detection_heatmaps,
@@ -15,6 +21,7 @@ __all__ = [
     "NeuroSymbolicDetector",
     "aggregate_detection_heatmaps",
     "aggregate_projected_heatmaps",
+    "compute_node_local_evidence_maps",
     "compute_symbolic_heatmap",
     "evaluate_symbolic_spatial_metrics",
     "explain_hybrid_detection",

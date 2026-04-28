@@ -5,10 +5,10 @@ data:
 
 search:
   tree_depth: 5
-  iterations: 40
-  l1_lambda: 10
-  sparsity_alpha: 1.0
+  iterations: 20
+  l1_lambda: 9
+  sparsity_alpha: 0.75
   logistic_max_iter: 250
   tolerance: 0.0001
-  zero_threshold: 0.0001
+  zero_threshold: 0.00001
   random_state: 42
