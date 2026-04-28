@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
+
 
 @dataclass(frozen=True)
 class SymbolicTensorBundle:
@@ -29,25 +31,24 @@ class SymbolicTensorBundle:
     class_names: tuple[str, ...]
 
 
-def _resolve_shard_path(shard_path: str | Path) -> Path:
-    path = Path(shard_path)
+def _numpy_dtype(storage_dtype: str) -> np.dtype[Any]:
+    if storage_dtype == "float16":
+        return np.dtype("float16")
+    if storage_dtype == "float32":
+        return np.dtype("float32")
+    raise ValueError(f"Unsupported symbolic storage dtype: {storage_dtype}")
+
+
+def _resolve_artifact_path(path_value: str | Path) -> Path:
+    path = Path(path_value)
     if path.exists():
         return path
 
-    normalized_path = Path(str(shard_path).replace("\\", "/"))
+    normalized_path = Path(str(path_value).replace("\\", "/"))
     if normalized_path.exists():
         return normalized_path
 
     return path
-
-
-def _iter_symbolic_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    if payload.get("storage_format") == "sharded_pt_v1":
-        return [
-            torch.load(_resolve_shard_path(record["shard_path"]), map_location="cpu", weights_only=True)
-            for record in payload["records"]
-        ]
-    return list(payload["records"])
 
 
 def _balanced_sample_indices(
@@ -86,6 +87,101 @@ def _balanced_sample_indices(
     return combined
 
 
+def _selected_indices_from_metadata(
+    metadata: dict[str, Any],
+    include_background: bool,
+    min_teacher_score: float | None,
+    max_samples_total: int | None,
+    random_state: int,
+) -> Tensor:
+    labels = metadata["teacher_labels"]
+    scores = metadata["teacher_scores"].max(dim=1).values
+
+    mask = torch.ones((labels.shape[0],), dtype=torch.bool)
+    if not include_background:
+        mask &= labels > 0
+    if min_teacher_score is not None:
+        mask &= scores >= float(min_teacher_score)
+
+    candidate_indices = torch.where(mask)[0]
+    if candidate_indices.numel() == 0:
+        raise ValueError("The symbolic export did not contain any RoI samples after filtering.")
+
+    if max_samples_total is None:
+        return candidate_indices
+
+    relative_keep = _balanced_sample_indices(
+        labels[candidate_indices],
+        max_samples_total=max_samples_total,
+        random_state=random_state,
+    )
+    return candidate_indices[relative_keep]
+
+
+def _index_optional_tensor(tensor: Tensor | None, indices: Tensor) -> Tensor | None:
+    if tensor is None:
+        return None
+    return tensor[indices]
+
+
+def _load_array_feature_grids(payload: dict[str, Any], indices: Tensor) -> Tensor:
+    feature_storage = payload["feature_storage"]
+    feature_path = _resolve_artifact_path(feature_storage["path"])
+    feature_shape = tuple(int(value) for value in feature_storage["shape"])
+    if not feature_path.exists():
+        raise FileNotFoundError(f"Missing symbolic feature storage: {feature_path}")
+
+    feature_array = np.memmap(
+        feature_path,
+        dtype=_numpy_dtype(feature_storage["dtype"]),
+        mode="r",
+        shape=feature_shape,
+    )
+    selected = np.asarray(feature_array[indices.cpu().numpy()])
+    return torch.from_numpy(selected)
+
+
+def _flatten_array_memmap_payload(
+    payload: dict[str, Any],
+    include_background: bool,
+    min_teacher_score: float | None,
+    max_samples_total: int | None,
+    random_state: int,
+) -> SymbolicTensorBundle:
+    metadata_path = _resolve_artifact_path(payload["metadata_path"])
+    metadata = torch.load(metadata_path, map_location="cpu", weights_only=True)
+    keep = _selected_indices_from_metadata(
+        metadata,
+        include_background=include_background,
+        min_teacher_score=min_teacher_score,
+        max_samples_total=max_samples_total,
+        random_state=random_state,
+    )
+
+    feature_grids = _load_array_feature_grids(payload, keep)
+    selected_image_paths = tuple(str(metadata["image_paths"][int(index)]) for index in keep.tolist())
+
+    return SymbolicTensorBundle(
+        feature_grids=feature_grids,
+        feature_vectors=feature_grids.flatten(start_dim=1),
+        teacher_labels=metadata["teacher_labels"][keep],
+        teacher_logits=metadata["teacher_logits"][keep],
+        teacher_scores=metadata["teacher_scores"][keep],
+        proposal_boxes=metadata["proposal_boxes"][keep],
+        transformed_proposal_boxes=metadata["transformed_proposal_boxes"][keep],
+        matched_gt_boxes=_index_optional_tensor(metadata.get("matched_gt_boxes"), keep),
+        has_matched_gt=_index_optional_tensor(metadata.get("has_matched_gt"), keep),
+        image_ids=metadata["image_ids"][keep],
+        image_sizes=metadata["image_sizes"][keep],
+        transformed_image_sizes=metadata["transformed_image_sizes"][keep],
+        gt_labels=_index_optional_tensor(metadata.get("gt_labels"), keep),
+        gt_iou=_index_optional_tensor(metadata.get("gt_iou"), keep),
+        image_paths=selected_image_paths,
+        feature_shape=tuple(int(value) for value in payload["feature_shape"]),
+        class_names=tuple(payload["class_names"]),
+    )
+
+
 def flatten_exported_symbolic_payload(
     payload: dict[str, Any],
     include_background: bool = True,
@@ -93,122 +189,18 @@ def flatten_exported_symbolic_payload(
     max_samples_total: int | None = None,
     random_state: int = 42,
 ) -> SymbolicTensorBundle:
-    feature_grids: list[Tensor] = []
-    feature_vectors: list[Tensor] = []
-    teacher_labels: list[Tensor] = []
-    teacher_logits: list[Tensor] = []
-    teacher_scores: list[Tensor] = []
-    proposal_boxes: list[Tensor] = []
-    transformed_proposal_boxes: list[Tensor] = []
-    matched_gt_boxes: list[Tensor] = []
-    has_matched_gt: list[Tensor] = []
-    image_ids: list[Tensor] = []
-    image_sizes: list[Tensor] = []
-    transformed_image_sizes: list[Tensor] = []
-    gt_labels: list[Tensor] = []
-    gt_iou: list[Tensor] = []
-    image_paths: list[str] = []
-
-    for record in _iter_symbolic_records(payload):
-        grids = record["pooled_features"]
-        logits = record["teacher_logits"]
-        labels = record["teacher_labels"]
-        scores = record["teacher_scores"].max(dim=1).values
-        transformed_boxes = record.get("transformed_proposal_boxes", record["proposal_boxes"])
-
-        mask = torch.ones((labels.shape[0],), dtype=torch.bool)
-        if not include_background:
-            mask &= labels > 0
-        if min_teacher_score is not None:
-            mask &= scores >= float(min_teacher_score)
-
-        if mask.sum() == 0:
-            continue
-
-        selected_grids = grids[mask]
-        feature_grids.append(selected_grids)
-        feature_vectors.append(selected_grids.flatten(start_dim=1))
-        teacher_labels.append(labels[mask])
-        teacher_logits.append(logits[mask])
-        teacher_scores.append(record["teacher_scores"][mask])
-        proposal_boxes.append(record["proposal_boxes"][mask])
-        transformed_proposal_boxes.append(transformed_boxes[mask])
-        image_ids.append(torch.full((int(mask.sum().item()),), int(record["image_id"]), dtype=torch.int64))
-        image_sizes.append(record["image_size"].repeat(int(mask.sum().item()), 1))
-        transformed_image_sizes.append(record["transformed_image_size"].repeat(int(mask.sum().item()), 1))
-        image_paths.extend([str(record["image_path"])] * int(mask.sum().item()))
-
-        if "matched_gt_boxes" in record:
-            matched_gt_boxes.append(record["matched_gt_boxes"][mask])
-        if "has_matched_gt" in record:
-            has_matched_gt.append(record["has_matched_gt"][mask])
-        if "gt_labels" in record:
-            gt_labels.append(record["gt_labels"][mask])
-        if "gt_iou" in record:
-            gt_iou.append(record["gt_iou"][mask])
-
-    if not feature_grids:
-        raise ValueError("The symbolic export did not contain any RoI samples after filtering.")
-
-    stacked_grids = torch.cat(feature_grids, dim=0)
-    stacked_vectors = torch.cat(feature_vectors, dim=0)
-    stacked_labels = torch.cat(teacher_labels, dim=0)
-    stacked_logits = torch.cat(teacher_logits, dim=0)
-    stacked_scores = torch.cat(teacher_scores, dim=0)
-    stacked_boxes = torch.cat(proposal_boxes, dim=0)
-    stacked_transformed_boxes = torch.cat(transformed_proposal_boxes, dim=0)
-    stacked_matched_gt_boxes = torch.cat(matched_gt_boxes, dim=0) if matched_gt_boxes else None
-    stacked_has_matched_gt = torch.cat(has_matched_gt, dim=0) if has_matched_gt else None
-    stacked_image_ids = torch.cat(image_ids, dim=0)
-    stacked_image_sizes = torch.cat(image_sizes, dim=0)
-    stacked_transformed_image_sizes = torch.cat(transformed_image_sizes, dim=0)
-    stacked_gt_labels = torch.cat(gt_labels, dim=0) if gt_labels else None
-    stacked_gt_iou = torch.cat(gt_iou, dim=0) if gt_iou else None
-
-    if max_samples_total is not None:
-        keep = _balanced_sample_indices(
-            stacked_labels,
-            max_samples_total=max_samples_total,
-            random_state=random_state,
+    if payload.get("storage_format") != "array_memmap_v1":
+        raise ValueError(
+            "Unsupported symbolic export format. Regenerate the export to create "
+            "an array_memmap_v1 symbolic artifact."
         )
-        stacked_grids = stacked_grids[keep]
-        stacked_vectors = stacked_vectors[keep]
-        stacked_labels = stacked_labels[keep]
-        stacked_logits = stacked_logits[keep]
-        stacked_scores = stacked_scores[keep]
-        stacked_boxes = stacked_boxes[keep]
-        stacked_transformed_boxes = stacked_transformed_boxes[keep]
-        if stacked_matched_gt_boxes is not None:
-            stacked_matched_gt_boxes = stacked_matched_gt_boxes[keep]
-        if stacked_has_matched_gt is not None:
-            stacked_has_matched_gt = stacked_has_matched_gt[keep]
-        stacked_image_ids = stacked_image_ids[keep]
-        stacked_image_sizes = stacked_image_sizes[keep]
-        stacked_transformed_image_sizes = stacked_transformed_image_sizes[keep]
-        image_paths = [image_paths[int(index)] for index in keep.tolist()]
-        if stacked_gt_labels is not None:
-            stacked_gt_labels = stacked_gt_labels[keep]
-        if stacked_gt_iou is not None:
-            stacked_gt_iou = stacked_gt_iou[keep]
 
-    return SymbolicTensorBundle(
-        feature_grids=stacked_grids,
-        feature_vectors=stacked_vectors,
-        teacher_labels=stacked_labels,
-        teacher_logits=stacked_logits,
-        teacher_scores=stacked_scores,
-        proposal_boxes=stacked_boxes,
-        transformed_proposal_boxes=stacked_transformed_boxes,
-        matched_gt_boxes=stacked_matched_gt_boxes,
-        has_matched_gt=stacked_has_matched_gt,
-        image_ids=stacked_image_ids,
-        image_sizes=stacked_image_sizes,
-        transformed_image_sizes=stacked_transformed_image_sizes,
-        gt_labels=stacked_gt_labels,
-        gt_iou=stacked_gt_iou,
-        image_paths=tuple(image_paths),
-        feature_shape=tuple(int(value) for value in stacked_grids.shape[1:]),
-        class_names=tuple(payload["class_names"]),
+    return _flatten_array_memmap_payload(
+        payload,
+        include_background=include_background,
+        min_teacher_score=min_teacher_score,
+        max_samples_total=max_samples_total,
+        random_state=random_state,
     )
 
 

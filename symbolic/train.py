@@ -5,7 +5,7 @@ from time import perf_counter
 from typing import Any
 
 import torch
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from .dataset import flatten_exported_symbolic_payload
 from .config import SymbolicTrainConfig
@@ -53,8 +53,7 @@ def _format_progress_header(
             f"{total_node_fit_upper_bound} LIBLINEAR node fits."
         ),
         (
-            "Progress line shows TAO iteration, internal node fit, LIBLINEAR max steps, "
-            "mimic, sparsity, and ETA in one place. No side logs are emitted while the bar is running."
+            "Each TAO iteration gets its own node-fit progress bar and remains visible after completion."
         ),
     ]
 
@@ -316,6 +315,8 @@ def train_symbolic_tree(
     data_config = config["data"]
     sodt_config = _materialize_sodt_config(config["search"])
 
+    load_start_time = perf_counter()
+    print(f"Loading symbolic training export from {export_path}...", flush=True)
     bundle, (feature_matrix, labels) = _load_symbolic_training_data(
         export_path,
         include_background=data_config["include_background"],
@@ -323,6 +324,7 @@ def train_symbolic_tree(
         max_samples_total=data_config["max_samples_total"],
         random_state=sodt_config["random_state"],
     )
+    print(f"Symbolic training data ready in {_format_duration(perf_counter() - load_start_time)}.", flush=True)
 
     total_node_fit_upper_bound = ((2 ** sodt_config["tree_depth"]) - 1) * sodt_config["iterations"]
     for line in _format_progress_header(
@@ -336,76 +338,46 @@ def train_symbolic_tree(
     ):
         print(line)
 
-    progress_bar = tqdm(
-        total=total_node_fit_upper_bound,
-        desc="TAO node fits",
-        leave=True,
-        dynamic_ncols=True,
-    )
-    progress_bar.set_postfix(
-        tao=f"0/{sodt_config['iterations']}",
-        node=f"0/{(2 ** sodt_config['tree_depth']) - 1}",
-        liblinear=f"<= {sodt_config['logistic_max_iter']}",
-        status="ready",
-        mimic=f"{0.0:.4f}",
-        nz=0,
-        eta=_format_duration(0.0),
-    )
-
-    training_start_time = perf_counter()
     latest_mimic_accuracy = 0.0
     latest_nonzero_weights = 0
+    current_node_bar: tqdm | None = None
+    current_iteration = 0
+
+    def _set_node_bar_status(status: str) -> None:
+        if current_node_bar is None:
+            return
+        current_node_bar.set_postfix_str(
+            f"{status} | mimic={latest_mimic_accuracy:.4f} nz={latest_nonzero_weights}",
+            refresh=True,
+        )
 
     def _on_iteration(metrics: dict[str, Any]) -> None:
         nonlocal latest_mimic_accuracy, latest_nonzero_weights
         latest_mimic_accuracy = float(metrics["mimic_accuracy"])
         latest_nonzero_weights = int(metrics["nonzero_weights"])
-        elapsed = perf_counter() - training_start_time
-        mean_seconds = elapsed / max(progress_bar.n, 1)
-        eta = mean_seconds * max(total_node_fit_upper_bound - progress_bar.n, 0)
-        progress_bar.set_postfix(
-            tao=f"{int(metrics['iteration'])}/{sodt_config['iterations']}",
-            node=f"{(2 ** sodt_config['tree_depth']) - 1}/{(2 ** sodt_config['tree_depth']) - 1}",
-            liblinear=f"<= {sodt_config['logistic_max_iter']}",
-            status="iteration_done",
-            mimic=f"{latest_mimic_accuracy:.4f}",
-            nz=latest_nonzero_weights,
-            eta=_format_duration(eta),
-        )
+        _set_node_bar_status("iteration_done")
 
     def _on_node(event: dict[str, Any]) -> None:
-        elapsed = perf_counter() - training_start_time
-        completed_node_fits = progress_bar.n
-        mean_seconds = elapsed / max(completed_node_fits, 1)
-        eta = mean_seconds * max(total_node_fit_upper_bound - completed_node_fits, 0)
+        nonlocal current_iteration, current_node_bar
+        iteration = int(event["iteration"])
+        if iteration != current_iteration:
+            if current_node_bar is not None:
+                current_node_bar.close()
+            current_iteration = iteration
+            current_node_bar = tqdm(
+                total=int(event["num_internal_nodes"]),
+                desc=f"TAO {iteration}/{int(event['iterations'])} nodes",
+                leave=True,
+            )
+
         status = str(event.get("status", "solving"))
         if event["phase"] == "start":
-            progress_bar.set_postfix(
-                tao=f"{int(event['iteration'])}/{int(event['iterations'])}",
-                node=f"{int(event['node_number'])}/{int(event['num_internal_nodes'])}",
-                liblinear=f"<= {int(event['logistic_max_iter'])}",
-                status=status,
-                samples=int(event["samples_at_node"]),
-                mimic=f"{latest_mimic_accuracy:.4f}",
-                nz=latest_nonzero_weights,
-                eta=_format_duration(eta),
-            )
+            _set_node_bar_status(status)
             return
 
-        progress_bar.update(1)
-        completed_node_fits = progress_bar.n
-        mean_seconds = elapsed / max(completed_node_fits, 1)
-        eta = mean_seconds * max(total_node_fit_upper_bound - completed_node_fits, 0)
-        progress_bar.set_postfix(
-            tao=f"{int(event['iteration'])}/{int(event['iterations'])}",
-            node=f"{int(event['node_number'])}/{int(event['num_internal_nodes'])}",
-            liblinear=f"<= {int(event['logistic_max_iter'])}",
-            status=status,
-            samples=int(event["samples_at_node"]),
-            mimic=f"{latest_mimic_accuracy:.4f}",
-            nz=latest_nonzero_weights,
-            eta=_format_duration(eta),
-        )
+        if current_node_bar is not None:
+            current_node_bar.update(1)
+        _set_node_bar_status(status)
 
     tree = _build_symbolic_tree(
         bundle,
@@ -428,7 +400,8 @@ def train_symbolic_tree(
         node_progress_callback=_on_node,
     )
 
-    progress_bar.close()
+    if current_node_bar is not None:
+        current_node_bar.close()
 
     trained_model = _evaluate_symbolic_model(
         tree,
