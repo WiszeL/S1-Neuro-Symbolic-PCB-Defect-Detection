@@ -12,20 +12,25 @@ from torch import Tensor
 
 from util.device import select_device
 
-from .config import NeuroConfig, load_yaml
-from .detector import build_detector
+from .config import NeuroConfig, NeuroTrainConfig, load_yaml
+from .faster_rcnn import NeuroFasterRCNN
 
 
 def load_checkpoint_model(
     checkpoint_path: str | Path,
     model_config_path: str | Path,
+    train_config_path: str | Path,
     device: str | None = None,
-) -> tuple[torch.nn.Module, dict[str, Any]]:
+) -> tuple[NeuroFasterRCNN, dict[str, Any]]:
     resolved_device = select_device(device)
     model_config = load_yaml(model_config_path, NeuroConfig)
+    train_config = load_yaml(train_config_path, NeuroTrainConfig)
     checkpoint = torch.load(checkpoint_path, map_location=resolved_device, weights_only=True)
 
-    model = build_detector(model_config)
+    model = NeuroFasterRCNN(
+        neuro_config=model_config,
+        train_config=train_config,
+    )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(resolved_device)
     model.eval()
@@ -35,7 +40,7 @@ def load_checkpoint_model(
 
 @torch.inference_mode()
 def run_inference(
-    model: torch.nn.Module,
+    model: NeuroFasterRCNN,
     images: list[Tensor],
     device: str | torch.device,
 ) -> list[dict[str, Tensor]]:

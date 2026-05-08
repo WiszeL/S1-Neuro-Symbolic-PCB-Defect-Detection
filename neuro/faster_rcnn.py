@@ -442,7 +442,6 @@ class RoIAlign(nn.Module):
                 {
                     "proposal_boxes": boxes,
                     "pooled_features": pooled,
-                    "pooled_feature_vectors": pooled.flatten(start_dim=1),
                 }
             )
 

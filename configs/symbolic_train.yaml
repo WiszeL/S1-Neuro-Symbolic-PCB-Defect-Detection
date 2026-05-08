@@ -1,9 +1,5 @@
 data:
-  include_background: true
-  min_teacher_score: null
   max_samples_total: 26000
-  max_positive_rois_per_image: null
-  max_background_rois_per_image: null
   storage_dtype: float16
 
 search:

@@ -73,15 +73,11 @@ def _materialize_sodt_config(search_config: dict[str, Any]) -> dict[str, Any]:
 
 def _load_symbolic_training_data(
     export_path: str | Path,
-    include_background: bool,
-    min_teacher_score: float | None,
     max_samples_total: int | None,
     random_state: int,
 ) -> tuple[Any, Any]:
     bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
-        include_background=include_background,
-        min_teacher_score=min_teacher_score,
         max_samples_total=max_samples_total,
         random_state=random_state,
         feature_dtype="float32",
@@ -94,14 +90,10 @@ def _load_symbolic_training_data(
 
 def _load_symbolic_evaluation_data(
     export_path: str | Path,
-    include_background: bool,
-    min_teacher_score: float | None,
     random_state: int,
 ) -> tuple[Any, Any, Any]:
     bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
-        include_background=include_background,
-        min_teacher_score=min_teacher_score,
         max_samples_total=None,
         random_state=random_state,
         feature_dtype="float32",
@@ -241,15 +233,11 @@ def _evaluate_trained_model_on_bundle(
 
 def _build_heldout_review(
     heldout_export_path: str | Path,
-    include_background: bool,
-    min_teacher_score: float | None,
     random_state: int,
     trained_model: dict[str, Any],
 ) -> dict[str, Any]:
     bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
         heldout_export_path,
-        include_background=include_background,
-        min_teacher_score=min_teacher_score,
         random_state=random_state,
     )
 
@@ -321,8 +309,6 @@ def train_symbolic_tree(
     print(f"Loading symbolic training export from {export_path}...", flush=True)
     bundle, (feature_matrix, labels) = _load_symbolic_training_data(
         export_path,
-        include_background=data_config["include_background"],
-        min_teacher_score=data_config["min_teacher_score"],
         max_samples_total=data_config["max_samples_total"],
         random_state=sodt_config["random_state"],
     )
@@ -420,8 +406,6 @@ def train_symbolic_tree(
     if heldout_export_path is not None:
         heldout_review = _build_heldout_review(
             heldout_export_path=heldout_export_path,
-            include_background=data_config["include_background"],
-            min_teacher_score=data_config["min_teacher_score"],
             random_state=sodt_config["random_state"],
             trained_model=trained_model,
         )
@@ -450,8 +434,6 @@ def train_symbolic_tree(
             "tolerance": sodt_config["tolerance"],
             "zero_threshold": sodt_config["zero_threshold"],
             "random_state": sodt_config["random_state"],
-            "include_background": data_config["include_background"],
-            "min_teacher_score": data_config["min_teacher_score"],
             "max_samples_total": data_config["max_samples_total"],
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",

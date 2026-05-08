@@ -49,7 +49,6 @@ class SparseObliqueDecisionTreeClassifier:
 
         self.num_internal_nodes = (2**max_depth) - 1
         self.num_leaves = 2**max_depth
-        self.num_total_nodes = self.num_internal_nodes + self.num_leaves
 
         self.node_weights = np.zeros((self.num_internal_nodes, input_dim), dtype=np.float32)
         self.node_bias = np.zeros((self.num_internal_nodes,), dtype=np.float32)

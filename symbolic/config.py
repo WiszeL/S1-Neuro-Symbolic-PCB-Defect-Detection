@@ -4,11 +4,7 @@ from typing import TypedDict
 
 
 class SymbolicDataConfig(TypedDict):
-    include_background: bool
-    min_teacher_score: float | None
     max_samples_total: int | None
-    max_positive_rois_per_image: int | None
-    max_background_rois_per_image: int | None
     storage_dtype: str
 
 

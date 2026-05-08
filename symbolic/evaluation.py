@@ -7,6 +7,7 @@ import torch
 from torch import Tensor
 
 from .sodt import SparseObliqueDecisionTreeClassifier
+from util.geometry import project_gt_box_to_roi_grid
 
 
 def _safe_macro_f1(

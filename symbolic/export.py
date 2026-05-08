@@ -14,15 +14,10 @@ from util.io import ensure_dir
 
 _METADATA_TENSOR_FIELDS = [
     "teacher_labels",
-    "teacher_logits",
-    "teacher_scores",
     "proposal_boxes",
     "transformed_proposal_boxes",
     "matched_gt_boxes",
     "has_matched_gt",
-    "image_ids",
-    "image_sizes",
-    "transformed_image_sizes",
     "gt_labels",
     "gt_iou",
 ]
@@ -34,48 +29,6 @@ def _storage_dtypes(storage_dtype: str) -> tuple[torch.dtype, np.dtype[Any]]:
     if storage_dtype == "float32":
         return torch.float32, np.dtype("float32")
     raise ValueError("storage_dtype must be either 'float16' or 'float32'.")
-
-
-def _select_teacher_roi_indices(
-    teacher_labels: torch.Tensor,
-    teacher_scores: torch.Tensor,
-    max_positive_rois_per_image: int | None,
-    max_background_rois_per_image: int | None,
-) -> torch.Tensor:
-    if teacher_labels.numel() == 0:
-        return torch.zeros((0,), dtype=torch.int64, device=teacher_labels.device)
-
-    non_background_scores = teacher_scores[:, 1:].max(dim=1).values
-    positive_indices = torch.where(teacher_labels > 0)[0]
-    background_indices = torch.where(teacher_labels == 0)[0]
-
-    if positive_indices.numel() > 0 and max_positive_rois_per_image is not None:
-        positive_order = torch.argsort(non_background_scores[positive_indices], descending=True)
-        positive_indices = positive_indices[positive_order[: max(max_positive_rois_per_image, 0)]]
-
-    if background_indices.numel() > 0 and max_background_rois_per_image is not None:
-        background_order = torch.argsort(non_background_scores[background_indices], descending=True)
-        ordered_background_indices = background_indices[background_order]
-        max_background_count = max(max_background_rois_per_image, 0)
-        if max_background_count == 0:
-            background_indices = ordered_background_indices[:0]
-        elif ordered_background_indices.numel() > max_background_count:
-            hard_background_count = max((max_background_count + 1) // 2, 1)
-            easy_background_count = max_background_count - hard_background_count
-            hard_background_indices = ordered_background_indices[:hard_background_count]
-            easy_background_indices = (
-                ordered_background_indices[-easy_background_count:]
-                if easy_background_count > 0
-                else ordered_background_indices[:0]
-            )
-            background_indices = torch.cat([hard_background_indices, easy_background_indices], dim=0)
-        else:
-            background_indices = ordered_background_indices
-
-    keep = torch.cat([positive_indices, background_indices], dim=0)
-    if keep.numel() == 0:
-        return keep
-    return keep[torch.argsort(keep)]
 
 
 def _match_proposals_to_ground_truth(
@@ -131,40 +84,33 @@ def _build_symbolic_record(
     sample_index: int,
     target: dict[str, torch.Tensor],
     teacher_output: dict[str, torch.Tensor],
-    keep: torch.Tensor,
     torch_dtype: torch.dtype,
 ) -> dict[str, Any]:
-    selected_proposal_boxes = teacher_output["proposal_boxes"][keep]
+    num_rois = int(teacher_output["teacher_labels"].shape[0])
+    proposal_boxes = teacher_output["proposal_boxes"]
     matched_ground_truth = _match_proposals_to_ground_truth(
-        proposal_boxes=selected_proposal_boxes,
+        proposal_boxes=proposal_boxes,
         target_boxes=target["boxes"],
         target_labels=target["labels"],
     )
 
-    record = {
+    record: dict[str, Any] = {
         "image_id": int(target["image_id"]),
         "image_path": str(dataset.samples[sample_index].image_path),
-        "proposal_boxes": selected_proposal_boxes.detach().cpu(),
-        "transformed_proposal_boxes": teacher_output["transformed_proposal_boxes"][keep].detach().cpu(),
-        "pooled_features": teacher_output["pooled_features"][keep].detach().to(dtype=torch_dtype).cpu(),
-        "teacher_labels": teacher_output["teacher_labels"][keep].detach().cpu(),
-        "teacher_logits": teacher_output["teacher_logits"][keep].detach().to(dtype=torch_dtype).cpu(),
-        "teacher_scores": teacher_output["teacher_scores"][keep].detach().to(dtype=torch_dtype).cpu(),
+        "num_rois": num_rois,
+        "proposal_boxes": proposal_boxes.detach().cpu(),
+        "transformed_proposal_boxes": teacher_output["transformed_proposal_boxes"].detach().cpu(),
+        "pooled_features": teacher_output["pooled_features"].detach().to(dtype=torch_dtype).cpu(),
+        "teacher_labels": teacher_output["teacher_labels"].detach().cpu(),
+        "teacher_logits": teacher_output["teacher_logits"].detach().to(dtype=torch_dtype).cpu(),
+        "teacher_scores": teacher_output["teacher_scores"].detach().to(dtype=torch_dtype).cpu(),
         "image_size": teacher_output["image_size"].detach().cpu(),
         "transformed_image_size": teacher_output["transformed_image_size"].detach().cpu(),
         "matched_gt_boxes": matched_ground_truth["matched_gt_boxes"].detach().cpu(),
         "has_matched_gt": matched_ground_truth["has_matched_gt"].detach().cpu(),
+        "gt_labels": matched_ground_truth["matched_gt_labels"].detach().cpu(),
+        "gt_iou": matched_ground_truth["matched_gt_iou"].detach().to(dtype=torch_dtype).cpu(),
     }
-
-    if "gt_labels" in teacher_output:
-        record["gt_labels"] = teacher_output["gt_labels"][keep].detach().cpu()
-    else:
-        record["gt_labels"] = matched_ground_truth["matched_gt_labels"].detach().cpu()
-
-    if "gt_iou" in teacher_output:
-        record["gt_iou"] = teacher_output["gt_iou"][keep].detach().to(dtype=torch_dtype).cpu()
-    else:
-        record["gt_iou"] = matched_ground_truth["matched_gt_iou"].detach().to(dtype=torch_dtype).cpu()
 
     return record
 
@@ -180,8 +126,9 @@ def _append_repeated_image_metadata(
     metadata_parts: dict[str, list[Any]],
 ) -> None:
     num_rois = int(record["teacher_labels"].shape[0])
-    metadata_parts["image_ids"].append(
-        torch.full((num_rois,), int(record["image_id"]), dtype=torch.int64)
+    metadata_parts["image_ids"] = (
+        metadata_parts.get("image_ids", [])
+        + [torch.full((num_rois,), int(record["image_id"]), dtype=torch.int64)]
     )
     metadata_parts["image_sizes"].append(record["image_size"].repeat(num_rois, 1))
     metadata_parts["transformed_image_sizes"].append(
@@ -195,8 +142,6 @@ def _append_symbolic_metadata(
     metadata_parts: dict[str, list[Any]],
 ) -> None:
     metadata_parts["teacher_labels"].append(record["teacher_labels"])
-    metadata_parts["teacher_logits"].append(record["teacher_logits"])
-    metadata_parts["teacher_scores"].append(record["teacher_scores"])
     metadata_parts["proposal_boxes"].append(record["proposal_boxes"])
     metadata_parts["transformed_proposal_boxes"].append(record["transformed_proposal_boxes"])
     metadata_parts["matched_gt_boxes"].append(record["matched_gt_boxes"])
@@ -211,6 +156,9 @@ def _finalize_symbolic_metadata(metadata_parts: dict[str, list[Any]]) -> dict[st
     for field in _METADATA_TENSOR_FIELDS:
         parts = metadata_parts[field]
         metadata[field] = torch.cat(parts, dim=0) if parts else None
+    metadata["image_ids"] = torch.cat(metadata_parts["image_ids"], dim=0) if metadata_parts.get("image_ids") else None
+    metadata["image_sizes"] = torch.cat(metadata_parts["image_sizes"], dim=0) if metadata_parts.get("image_sizes") else None
+    metadata["transformed_image_sizes"] = torch.cat(metadata_parts["transformed_image_sizes"], dim=0) if metadata_parts.get("transformed_image_sizes") else None
     metadata["image_paths"] = tuple(str(path) for path in metadata_parts["image_paths"])
     return metadata
 
@@ -222,8 +170,6 @@ def extract_dataset_from_teacher(
     output_path: str | Path,
     device: str | None = None,
     *,
-    max_positive_rois_per_image: int | None,
-    max_background_rois_per_image: int | None,
     storage_dtype: str,
 ) -> Path:
     output_path = Path(output_path)
@@ -255,19 +201,11 @@ def extract_dataset_from_teacher(
         target_on_device = {key: value.to(resolved_device) for key, value in target.items()}
         teacher_output = model.extract_teacher_roi_samples([image], [target_on_device])[0]
 
-        keep = _select_teacher_roi_indices(
-            teacher_labels=teacher_output["teacher_labels"],
-            teacher_scores=teacher_output["teacher_scores"],
-            max_positive_rois_per_image=max_positive_rois_per_image,
-            max_background_rois_per_image=max_background_rois_per_image,
-        )
-
         record = _build_symbolic_record(
             dataset=dataset,
             sample_index=index,
             target=target,
             teacher_output=teacher_output,
-            keep=keep,
             torch_dtype=torch_dtype,
         )
         num_rois = int(record["teacher_labels"].shape[0])
@@ -314,21 +252,6 @@ def extract_dataset_from_teacher(
         "proposal_source": "rpn_pre_detector_postprocess",
         "class_names": ("__background__", *tuple(dataset.class_names)),
         "feature_shape": feature_shape,
-        "roi_sampling": {
-            "max_positive_rois_per_image": max_positive_rois_per_image,
-            "max_background_rois_per_image": max_background_rois_per_image,
-            "positive_sampling": (
-                "all_teacher_positive_rois"
-                if max_positive_rois_per_image is None
-                else "highest_non_background_score"
-            ),
-            "background_sampling": (
-                "all_teacher_background_rois"
-                if max_background_rois_per_image is None
-                else "half_highest_non_background_score_half_lowest_non_background_score"
-            ),
-        },
-        "storage_dtype": storage_dtype,
         "storage_dir": str(storage_dir),
         "metadata_path": metadata_path.as_posix(),
         "feature_storage": {

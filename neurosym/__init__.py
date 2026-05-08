@@ -1,4 +1,4 @@
-from .evaluation import evaluate_symbolic_spatial_metrics, project_gt_box_to_roi_grid
+from .evaluation import evaluate_symbolic_spatial_metrics
 from .heatmap import (
     aggregate_projected_heatmaps,
     compute_node_local_evidence_maps,
@@ -16,6 +16,7 @@ from .inference import (
     select_detection_indices,
     subset_detection,
 )
+from util.geometry import project_gt_box_to_roi_grid
 
 __all__ = [
     "NeuroSymbolicDetector",
