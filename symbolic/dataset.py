@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,27 @@ from torch.utils.data import Dataset
 class SymbolicTensorBundle:
     feature_grids: Tensor
     feature_vectors: Tensor
+    teacher_labels: Tensor
+    teacher_logits: Tensor
+    teacher_scores: Tensor
+    proposal_boxes: Tensor
+    transformed_proposal_boxes: Tensor
+    matched_gt_boxes: Tensor | None
+    has_matched_gt: Tensor | None
+    image_ids: Tensor
+    image_sizes: Tensor
+    transformed_image_sizes: Tensor
+    gt_labels: Tensor | None
+    gt_iou: Tensor | None
+    image_paths: tuple[str, ...]
+    feature_shape: tuple[int, int, int]
+    class_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SymbolicArrayBundle:
+    feature_grids: np.ndarray
+    feature_vectors: np.ndarray
     teacher_labels: Tensor
     teacher_logits: Tensor
     teacher_scores: Tensor
@@ -139,6 +161,147 @@ def _load_array_feature_grids(payload: dict[str, Any], indices: Tensor) -> Tenso
     )
     selected = np.asarray(feature_array[indices.cpu().numpy()])
     return torch.from_numpy(selected)
+
+
+def _is_full_contiguous_selection(indices: Tensor, row_count: int) -> bool:
+    if int(indices.numel()) != int(row_count):
+        return False
+    if row_count == 0:
+        return True
+    expected = torch.arange(row_count, dtype=torch.int64)
+    return bool(torch.equal(indices.cpu(), expected))
+
+
+def _feature_cache_path(
+    payload: dict[str, Any],
+    indices: Tensor,
+    feature_dtype: np.dtype[Any],
+) -> Path:
+    feature_storage = payload["feature_storage"]
+    feature_path = _resolve_artifact_path(feature_storage["path"])
+    storage_dir = _resolve_artifact_path(payload.get("storage_dir", feature_path.parent))
+    if not storage_dir.exists():
+        storage_dir = feature_path.parent
+
+    index_array = indices.cpu().numpy().astype(np.int64, copy=False)
+    digest = hashlib.sha1()
+    digest.update(str(feature_path).encode("utf-8"))
+    digest.update(str(tuple(feature_storage["shape"])).encode("utf-8"))
+    digest.update(str(feature_storage["dtype"]).encode("utf-8"))
+    digest.update(str(feature_dtype).encode("utf-8"))
+    digest.update(index_array.tobytes())
+    key = digest.hexdigest()[:16]
+    return storage_dir / f"features_{feature_dtype.name}_{index_array.shape[0]}_{key}.dat"
+
+
+def _open_selected_feature_grids(
+    payload: dict[str, Any],
+    indices: Tensor,
+    feature_dtype: str,
+    cache_chunk_size: int,
+) -> np.ndarray:
+    feature_storage = payload["feature_storage"]
+    feature_path = _resolve_artifact_path(feature_storage["path"])
+    storage_shape = tuple(int(value) for value in feature_storage["shape"])
+    if len(storage_shape) != 4:
+        raise ValueError(f"Expected feature storage shape [N, C, H, W], got {storage_shape}.")
+    if not feature_path.exists():
+        raise FileNotFoundError(f"Missing symbolic feature storage: {feature_path}")
+
+    source_dtype = _numpy_dtype(feature_storage["dtype"])
+    target_dtype = _numpy_dtype(feature_dtype)
+    source = np.memmap(
+        feature_path,
+        dtype=source_dtype,
+        mode="r",
+        shape=storage_shape,
+    )
+
+    row_count = storage_shape[0]
+    selected_count = int(indices.numel())
+    grid_shape = storage_shape[1:]
+    if _is_full_contiguous_selection(indices, row_count) and source_dtype == target_dtype:
+        return source
+
+    cache_path = _feature_cache_path(payload, indices, target_dtype)
+    expected_bytes = int(selected_count * np.prod(grid_shape) * target_dtype.itemsize)
+    if not cache_path.exists() or cache_path.stat().st_size != expected_bytes:
+        source_flat = source.reshape(row_count, -1)
+        cache = np.memmap(
+            cache_path,
+            dtype=target_dtype,
+            mode="w+",
+            shape=(selected_count, *grid_shape),
+        )
+        cache_flat = cache.reshape(selected_count, -1)
+        keep = indices.cpu().numpy().astype(np.int64, copy=False)
+        chunk_size = max(int(cache_chunk_size), 1)
+        for start in range(0, selected_count, chunk_size):
+            stop = min(start + chunk_size, selected_count)
+            cache_flat[start:stop] = source_flat[keep[start:stop]].astype(target_dtype, copy=False)
+        cache.flush()
+        del cache
+
+    return np.memmap(
+        cache_path,
+        dtype=target_dtype,
+        mode="r",
+        shape=(selected_count, *grid_shape),
+    )
+
+
+def open_exported_symbolic_array_payload(
+    payload: dict[str, Any],
+    include_background: bool = True,
+    min_teacher_score: float | None = None,
+    max_samples_total: int | None = None,
+    random_state: int = 42,
+    feature_dtype: str = "float32",
+    cache_chunk_size: int = 256,
+) -> SymbolicArrayBundle:
+    if payload.get("storage_format") != "array_memmap_v1":
+        raise ValueError(
+            "Unsupported symbolic export format. Regenerate the export to create "
+            "an array_memmap_v1 symbolic artifact."
+        )
+
+    metadata_path = _resolve_artifact_path(payload["metadata_path"])
+    metadata = torch.load(metadata_path, map_location="cpu", weights_only=True)
+    keep = _selected_indices_from_metadata(
+        metadata,
+        include_background=include_background,
+        min_teacher_score=min_teacher_score,
+        max_samples_total=max_samples_total,
+        random_state=random_state,
+    )
+
+    feature_grids = _open_selected_feature_grids(
+        payload,
+        keep,
+        feature_dtype=feature_dtype,
+        cache_chunk_size=cache_chunk_size,
+    )
+    selected_image_paths = tuple(str(metadata["image_paths"][int(index)]) for index in keep.tolist())
+
+    return SymbolicArrayBundle(
+        feature_grids=feature_grids,
+        feature_vectors=feature_grids.reshape(feature_grids.shape[0], -1),
+        teacher_labels=metadata["teacher_labels"][keep],
+        teacher_logits=metadata["teacher_logits"][keep],
+        teacher_scores=metadata["teacher_scores"][keep],
+        proposal_boxes=metadata["proposal_boxes"][keep],
+        transformed_proposal_boxes=metadata["transformed_proposal_boxes"][keep],
+        matched_gt_boxes=_index_optional_tensor(metadata.get("matched_gt_boxes"), keep),
+        has_matched_gt=_index_optional_tensor(metadata.get("has_matched_gt"), keep),
+        image_ids=metadata["image_ids"][keep],
+        image_sizes=metadata["image_sizes"][keep],
+        transformed_image_sizes=metadata["transformed_image_sizes"][keep],
+        gt_labels=_index_optional_tensor(metadata.get("gt_labels"), keep),
+        gt_iou=_index_optional_tensor(metadata.get("gt_iou"), keep),
+        image_paths=selected_image_paths,
+        feature_shape=tuple(int(value) for value in payload["feature_shape"]),
+        class_names=tuple(payload["class_names"]),
+    )
 
 
 def _flatten_array_memmap_payload(

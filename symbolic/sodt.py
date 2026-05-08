@@ -7,6 +7,9 @@ import numpy as np
 import torch
 
 
+_PREDICTION_CHUNK_SIZE = 512
+
+
 @dataclass(frozen=True)
 class PathStep:
     node_index: int
@@ -94,16 +97,37 @@ class SparseObliqueDecisionTreeClassifier:
             f"got {prepared.shape[1]}."
         )
 
+    def _score_features_by_node_indices(
+        self,
+        features: np.ndarray,
+        node_indices: np.ndarray,
+    ) -> np.ndarray:
+        scores = np.empty((features.shape[0],), dtype=np.float32)
+        for node_index in np.unique(node_indices):
+            node_mask = node_indices == node_index
+            node_features = features[node_mask]
+            scores[node_mask] = (
+                node_features @ self.node_weights[int(node_index)]
+            ) + self.node_bias[int(node_index)]
+        return scores
+
     def predict_leaf_indices(self, features: np.ndarray) -> np.ndarray:
         features = self._prepare_features(features)
-        node_indices = np.zeros((features.shape[0],), dtype=np.int64)
+        leaf_indices = np.empty((features.shape[0],), dtype=np.int64)
 
-        for _ in range(self.max_depth):
-            scores = (features * self.node_weights[node_indices]).sum(axis=1) + self.node_bias[node_indices]
-            go_left = scores >= 0.0
-            node_indices = np.where(go_left, (2 * node_indices) + 1, (2 * node_indices) + 2)
+        for start in range(0, features.shape[0], _PREDICTION_CHUNK_SIZE):
+            stop = min(start + _PREDICTION_CHUNK_SIZE, features.shape[0])
+            chunk_features = features[start:stop]
+            node_indices = np.zeros((chunk_features.shape[0],), dtype=np.int64)
 
-        return node_indices - self.num_internal_nodes
+            for _ in range(self.max_depth):
+                scores = self._score_features_by_node_indices(chunk_features, node_indices)
+                go_left = scores >= 0.0
+                node_indices = np.where(go_left, (2 * node_indices) + 1, (2 * node_indices) + 2)
+
+            leaf_indices[start:stop] = node_indices - self.num_internal_nodes
+
+        return leaf_indices
 
     def predict(self, features: np.ndarray) -> np.ndarray:
         leaf_indices = self.predict_leaf_indices(features)
@@ -119,17 +143,25 @@ class SparseObliqueDecisionTreeClassifier:
 
     def predict_from_node(self, features: np.ndarray, node_index: int) -> np.ndarray:
         features = self._prepare_features(features)
-        current_nodes = np.full((features.shape[0],), node_index, dtype=np.int64)
+        predictions = np.empty((features.shape[0],), dtype=np.int64)
 
-        while np.any(current_nodes < self.num_internal_nodes):
-            internal_mask = current_nodes < self.num_internal_nodes
-            active_nodes = current_nodes[internal_mask]
-            active_features = features[internal_mask]
-            scores = (active_features * self.node_weights[active_nodes]).sum(axis=1) + self.node_bias[active_nodes]
-            next_nodes = np.where(scores >= 0.0, (2 * active_nodes) + 1, (2 * active_nodes) + 2)
-            current_nodes[internal_mask] = next_nodes
+        for start in range(0, features.shape[0], _PREDICTION_CHUNK_SIZE):
+            stop = min(start + _PREDICTION_CHUNK_SIZE, features.shape[0])
+            chunk_features = features[start:stop]
+            current_nodes = np.full((chunk_features.shape[0],), node_index, dtype=np.int64)
 
-        return self.leaf_labels[current_nodes - self.num_internal_nodes]
+            while np.any(current_nodes < self.num_internal_nodes):
+                internal_mask = current_nodes < self.num_internal_nodes
+                active_positions = np.where(internal_mask)[0]
+                active_nodes = current_nodes[active_positions]
+                active_features = chunk_features[active_positions]
+                scores = self._score_features_by_node_indices(active_features, active_nodes)
+                next_nodes = np.where(scores >= 0.0, (2 * active_nodes) + 1, (2 * active_nodes) + 2)
+                current_nodes[active_positions] = next_nodes
+
+            predictions[start:stop] = self.leaf_labels[current_nodes - self.num_internal_nodes]
+
+        return predictions
 
     def decision_path(self, feature: np.ndarray) -> list[PathStep]:
         feature = self._prepare_features(feature)

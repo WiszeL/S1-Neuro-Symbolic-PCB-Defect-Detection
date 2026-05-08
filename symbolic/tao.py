@@ -8,6 +8,9 @@ from tqdm import tqdm
 from .sodt import SparseObliqueDecisionTreeClassifier
 
 
+_TAO_CHUNK_SIZE = 512
+
+
 def initialize_tree_weights(
     tree: SparseObliqueDecisionTreeClassifier,
     random_state: int = 42,
@@ -26,6 +29,48 @@ def initialize_tree_weights(
     ).astype(np.float32)
 
 
+def _is_contiguous_indices(indices: np.ndarray) -> bool:
+    if indices.size == 0:
+        return True
+    return bool(np.all(indices == np.arange(indices[0], indices[0] + indices.size, dtype=indices.dtype)))
+
+
+def _select_rows(features: np.ndarray, indices: np.ndarray) -> np.ndarray:
+    if _is_contiguous_indices(indices):
+        return features[int(indices[0]) : int(indices[-1]) + 1] if indices.size > 0 else features[:0]
+    return features[indices]
+
+
+def _score_rows_for_node(
+    features: np.ndarray,
+    indices: np.ndarray,
+    weights: np.ndarray,
+    bias: float,
+    chunk_size: int = _TAO_CHUNK_SIZE,
+) -> np.ndarray:
+    scores = np.empty((indices.size,), dtype=np.float32)
+    for start in range(0, indices.size, chunk_size):
+        stop = min(start + chunk_size, indices.size)
+        rows = _select_rows(features, indices[start:stop])
+        scores[start:stop] = (rows @ weights) + bias
+    return scores
+
+
+def _predict_from_node_for_indices(
+    tree: SparseObliqueDecisionTreeClassifier,
+    features: np.ndarray,
+    indices: np.ndarray,
+    node_index: int,
+    chunk_size: int = _TAO_CHUNK_SIZE,
+) -> np.ndarray:
+    predictions = np.empty((indices.size,), dtype=np.int64)
+    for start in range(0, indices.size, chunk_size):
+        stop = min(start + chunk_size, indices.size)
+        rows = _select_rows(features, indices[start:stop])
+        predictions[start:stop] = tree.predict_from_node(rows, node_index)
+    return predictions
+
+
 def compute_reduced_sets(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
@@ -39,8 +84,12 @@ def compute_reduced_sets(
             reduced_sets[tree.right_child(node_index)] = np.zeros((0,), dtype=np.int64)
             continue
 
-        node_features = features[node_indices]
-        scores = (node_features * tree.node_weights[node_index]).sum(axis=1) + tree.node_bias[node_index]
+        scores = _score_rows_for_node(
+            features,
+            node_indices,
+            tree.node_weights[node_index],
+            tree.node_bias[node_index],
+        )
         go_left = scores >= 0.0
         reduced_sets[tree.left_child(node_index)] = node_indices[go_left]
         reduced_sets[tree.right_child(node_index)] = node_indices[~go_left]
@@ -213,26 +262,38 @@ def fit_tree_with_tao(
                     node_progress_callback({**node_event, "phase": "end", "status": "empty"})
                 continue
 
-            node_features = features[node_indices]
             node_labels = labels[node_indices]
-            left_predictions = tree.predict_from_node(node_features, tree.left_child(node_index))
-            right_predictions = tree.predict_from_node(node_features, tree.right_child(node_index))
+            left_predictions = _predict_from_node_for_indices(
+                tree,
+                features,
+                node_indices,
+                tree.left_child(node_index),
+            )
+            right_predictions = _predict_from_node_for_indices(
+                tree,
+                features,
+                node_indices,
+                tree.right_child(node_index),
+            )
 
             left_loss = (left_predictions != node_labels).astype(np.float32)
             right_loss = (right_predictions != node_labels).astype(np.float32)
             sample_weights = np.abs(left_loss - right_loss)
+            positive_weight_mask = sample_weights > 0.0
 
-            if float(sample_weights.sum()) == 0.0:
+            if not np.any(positive_weight_mask):
                 if node_progress_callback is not None:
                     node_progress_callback({**node_event, "phase": "end", "status": "no_split_gain"})
                 continue
 
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
+            solver_indices = node_indices[positive_weight_mask]
+            node_features = _select_rows(features, solver_indices)
             effective_lambda = float(l1_lambda * (max(node_indices.size, 1) ** (sparsity_alpha - 1.0)))
             weights, bias = solve_l1_logistic_reduced_problem(
                 node_features,
-                pseudolabels,
-                sample_weights,
+                pseudolabels[positive_weight_mask],
+                sample_weights[positive_weight_mask],
                 l1_lambda=effective_lambda,
                 max_iter=logistic_max_iter,
                 tolerance=tolerance,

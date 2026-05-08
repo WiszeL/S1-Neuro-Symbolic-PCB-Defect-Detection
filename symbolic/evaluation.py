@@ -293,7 +293,10 @@ def _compute_local_instance_heatmap(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_grid: Tensor | np.ndarray,
 ) -> Tensor:
-    grid = torch.as_tensor(feature_grid, dtype=torch.float32)
+    if isinstance(feature_grid, np.ndarray):
+        grid = torch.from_numpy(np.array(feature_grid, dtype=np.float32, copy=True))
+    else:
+        grid = torch.as_tensor(feature_grid, dtype=torch.float32)
     feature_vector = grid.reshape(-1).detach().cpu().numpy().astype(np.float32)
     path = tree.decision_path(feature_vector)
     if not path:
@@ -325,14 +328,17 @@ def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
 
 def _feature_perturbation_stability(
     tree: SparseObliqueDecisionTreeClassifier,
-    feature_grid: Tensor,
+    feature_grid: Tensor | np.ndarray,
     base_heatmap: Tensor,
     random_state: int,
     noise_scale: float = 0.02,
 ) -> float:
     generator = torch.Generator()
     generator.manual_seed(random_state)
-    feature_grid = feature_grid.detach().cpu().float()
+    if isinstance(feature_grid, np.ndarray):
+        feature_grid = torch.from_numpy(np.array(feature_grid, dtype=np.float32, copy=True))
+    else:
+        feature_grid = torch.as_tensor(feature_grid, dtype=torch.float32).detach().cpu()
     feature_std = float(feature_grid.std(unbiased=False).item())
     if feature_std <= 0.0:
         return 1.0
@@ -363,7 +369,7 @@ def _feature_perturbation_stability(
 
 def evaluate_symbolic_spatial_metrics(
     tree: SparseObliqueDecisionTreeClassifier,
-    feature_grids: Tensor,
+    feature_grids: Tensor | np.ndarray,
     proposal_boxes: Tensor,
     matched_gt_boxes: Tensor | None,
     has_matched_gt: Tensor | None,

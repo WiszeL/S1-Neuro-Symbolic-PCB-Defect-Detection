@@ -7,7 +7,7 @@ from typing import Any
 import torch
 from tqdm import tqdm
 
-from .dataset import flatten_exported_symbolic_payload
+from .dataset import open_exported_symbolic_array_payload
 from .config import SymbolicTrainConfig
 from .evaluation import evaluate_symbolic_model as evaluate_symbolic_metrics
 from .evaluation import evaluate_symbolic_spatial_metrics
@@ -78,15 +78,16 @@ def _load_symbolic_training_data(
     max_samples_total: int | None,
     random_state: int,
 ) -> tuple[Any, Any]:
-    bundle = flatten_exported_symbolic_payload(
+    bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
         include_background=include_background,
         min_teacher_score=min_teacher_score,
         max_samples_total=max_samples_total,
         random_state=random_state,
+        feature_dtype="float32",
     )
 
-    feature_matrix = bundle.feature_vectors.detach().cpu().numpy().astype("float32")
+    feature_matrix = bundle.feature_vectors
     labels = bundle.teacher_labels.detach().cpu().numpy().astype("int64")
     return bundle, (feature_matrix, labels)
 
@@ -97,14 +98,15 @@ def _load_symbolic_evaluation_data(
     min_teacher_score: float | None,
     random_state: int,
 ) -> tuple[Any, Any, Any]:
-    bundle = flatten_exported_symbolic_payload(
+    bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
         include_background=include_background,
         min_teacher_score=min_teacher_score,
         max_samples_total=None,
         random_state=random_state,
+        feature_dtype="float32",
     )
-    feature_matrix = bundle.feature_vectors.detach().cpu().numpy().astype("float32")
+    feature_matrix = bundle.feature_vectors
     labels = bundle.teacher_labels.detach().cpu().numpy().astype("int64")
     return bundle, feature_matrix, labels
 

@@ -1,14 +1,22 @@
 data:
   include_background: true
   min_teacher_score: null
-  max_samples_total: 16000
+  max_samples_total: 26000
+  max_positive_rois_per_image: null
+  max_background_rois_per_image: null
+  storage_dtype: float16
 
 search:
-  tree_depth: 5
-  iterations: 20
-  l1_lambda: 9
-  sparsity_alpha: 0.75
-  logistic_max_iter: 250
+  tree_depth: 4
+  iterations: 15
+  l1_lambda: 10
+  sparsity_alpha: .9
+  logistic_max_iter: 200
   tolerance: 0.0001
   zero_threshold: 0.00001
-  random_state: 42
+  random_state: 56
+
+# Best Combination:
+# 4; 24k; 20; 1; 56 (Explainest)
+# 4; 26k; 10; 0.9; 56 (BEST) <-- USE THISSS SO FAR!!!!
+# 4; 26k; 10; 0.85; 56 (most accurate)

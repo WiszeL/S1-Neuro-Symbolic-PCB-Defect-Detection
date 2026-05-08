@@ -36,22 +36,11 @@ def _storage_dtypes(storage_dtype: str) -> tuple[torch.dtype, np.dtype[Any]]:
     raise ValueError("storage_dtype must be either 'float16' or 'float32'.")
 
 
-def _truncate_feature_storage(
-    feature_path: Path,
-    row_count: int,
-    feature_shape: tuple[int, int, int],
-    numpy_dtype: np.dtype[Any],
-) -> None:
-    feature_count = int(np.prod(feature_shape))
-    with feature_path.open("r+b") as feature_file:
-        feature_file.truncate(row_count * feature_count * numpy_dtype.itemsize)
-
-
 def _select_teacher_roi_indices(
     teacher_labels: torch.Tensor,
     teacher_scores: torch.Tensor,
-    max_positive_rois_per_image: int,
-    max_background_rois_per_image: int,
+    max_positive_rois_per_image: int | None,
+    max_background_rois_per_image: int | None,
 ) -> torch.Tensor:
     if teacher_labels.numel() == 0:
         return torch.zeros((0,), dtype=torch.int64, device=teacher_labels.device)
@@ -60,13 +49,28 @@ def _select_teacher_roi_indices(
     positive_indices = torch.where(teacher_labels > 0)[0]
     background_indices = torch.where(teacher_labels == 0)[0]
 
-    if positive_indices.numel() > 0:
+    if positive_indices.numel() > 0 and max_positive_rois_per_image is not None:
         positive_order = torch.argsort(non_background_scores[positive_indices], descending=True)
-        positive_indices = positive_indices[positive_order[:max_positive_rois_per_image]]
+        positive_indices = positive_indices[positive_order[: max(max_positive_rois_per_image, 0)]]
 
-    if background_indices.numel() > 0:
+    if background_indices.numel() > 0 and max_background_rois_per_image is not None:
         background_order = torch.argsort(non_background_scores[background_indices], descending=True)
-        background_indices = background_indices[background_order[:max_background_rois_per_image]]
+        ordered_background_indices = background_indices[background_order]
+        max_background_count = max(max_background_rois_per_image, 0)
+        if max_background_count == 0:
+            background_indices = ordered_background_indices[:0]
+        elif ordered_background_indices.numel() > max_background_count:
+            hard_background_count = max((max_background_count + 1) // 2, 1)
+            easy_background_count = max_background_count - hard_background_count
+            hard_background_indices = ordered_background_indices[:hard_background_count]
+            easy_background_indices = (
+                ordered_background_indices[-easy_background_count:]
+                if easy_background_count > 0
+                else ordered_background_indices[:0]
+            )
+            background_indices = torch.cat([hard_background_indices, easy_background_indices], dim=0)
+        else:
+            background_indices = ordered_background_indices
 
     keep = torch.cat([positive_indices, background_indices], dim=0)
     if keep.numel() == 0:
@@ -217,9 +221,10 @@ def extract_dataset_from_teacher(
     dataset: Any,
     output_path: str | Path,
     device: str | None = None,
-    max_positive_rois_per_image: int = 24,
-    max_background_rois_per_image: int = 40,
-    storage_dtype: str = "float16",
+    *,
+    max_positive_rois_per_image: int | None,
+    max_background_rois_per_image: int | None,
+    storage_dtype: str,
 ) -> Path:
     output_path = Path(output_path)
     if output_path.exists():
@@ -230,6 +235,10 @@ def extract_dataset_from_teacher(
     storage_dir = ensure_dir(output_path.with_suffix(""))
     feature_path = storage_dir / "features.dat"
     metadata_path = storage_dir / "metadata.pt"
+    if feature_path.exists():
+        feature_path.unlink()
+    if metadata_path.exists():
+        metadata_path.unlink()
 
     model = model.to(resolved_device)
     model.eval()
@@ -237,8 +246,6 @@ def extract_dataset_from_teacher(
     manifest_records: list[dict[str, Any]] = []
     metadata_parts = _new_metadata_parts()
     torch_dtype, numpy_dtype = _storage_dtypes(storage_dtype)
-    max_rois = len(dataset) * (max_positive_rois_per_image + max_background_rois_per_image)
-    feature_memmap: np.memmap[Any, Any] | None = None
     feature_shape: tuple[int, int, int] | None = None
     row_count = 0
 
@@ -264,21 +271,20 @@ def extract_dataset_from_teacher(
             torch_dtype=torch_dtype,
         )
         num_rois = int(record["teacher_labels"].shape[0])
-        if num_rois > 0 and feature_memmap is None:
-            feature_shape = tuple(int(value) for value in record["pooled_features"].shape[1:])
-            feature_memmap = np.memmap(
-                feature_path,
-                dtype=numpy_dtype,
-                mode="w+",
-                shape=(max_rois, *feature_shape),
-            )
 
         row_start = row_count
         row_stop = row_start + num_rois
         if num_rois > 0:
-            if feature_memmap is None:
-                raise RuntimeError("Feature memmap was not initialized.")
-            feature_memmap[row_start:row_stop] = record["pooled_features"].numpy()
+            record_feature_shape = tuple(int(value) for value in record["pooled_features"].shape[1:])
+            if feature_shape is None:
+                feature_shape = record_feature_shape
+            elif feature_shape != record_feature_shape:
+                raise RuntimeError(
+                    f"Inconsistent RoI feature shape: expected {feature_shape}, got {record_feature_shape}."
+                )
+            feature_array = record["pooled_features"].numpy().astype(numpy_dtype, copy=False)
+            with feature_path.open("ab") as feature_file:
+                feature_array.tofile(feature_file)
             _append_symbolic_metadata(record, metadata_parts)
             row_count = row_stop
 
@@ -297,13 +303,6 @@ def extract_dataset_from_teacher(
             }
         )
 
-    if feature_memmap is not None:
-        feature_memmap.flush()
-        del feature_memmap
-        if feature_shape is None:
-            raise RuntimeError("Feature shape was not recorded.")
-        _truncate_feature_storage(feature_path, row_count, feature_shape, numpy_dtype)
-
     metadata = _finalize_symbolic_metadata(metadata_parts)
     torch.save(metadata, metadata_path)
 
@@ -318,6 +317,16 @@ def extract_dataset_from_teacher(
         "roi_sampling": {
             "max_positive_rois_per_image": max_positive_rois_per_image,
             "max_background_rois_per_image": max_background_rois_per_image,
+            "positive_sampling": (
+                "all_teacher_positive_rois"
+                if max_positive_rois_per_image is None
+                else "highest_non_background_score"
+            ),
+            "background_sampling": (
+                "all_teacher_background_rois"
+                if max_background_rois_per_image is None
+                else "half_highest_non_background_score_half_lowest_non_background_score"
+            ),
         },
         "storage_dtype": storage_dtype,
         "storage_dir": str(storage_dir),
