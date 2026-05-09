@@ -108,7 +108,7 @@ def evaluate_symbolic_model(
     random_trials: int = 3,
     random_state: int = 42,
 ) -> dict[str, Any]:
-    features = np.asarray(feature_matrix, dtype=np.float32)
+    features = feature_matrix if feature_matrix.dtype == np.float32 else np.asarray(feature_matrix, dtype=np.float32)
     labels = np.asarray(teacher_labels, dtype=np.int64)
     if features.ndim != 2:
         raise ValueError("evaluate_symbolic_model expects a 2D feature matrix.")

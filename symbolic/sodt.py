@@ -90,7 +90,12 @@ class SparseObliqueDecisionTreeClassifier:
     # ---------------------------------------------------------------------
 
     def _prepare_features(self, features: np.ndarray) -> np.ndarray:
-        prepared = np.asarray(features, dtype=np.float32)
+        # Preserve memmap arrays when dtype already matches to avoid
+        # materialising the entire dataset (~3 GB) into RAM.
+        if features.dtype == np.float32:
+            prepared = features
+        else:
+            prepared = np.asarray(features, dtype=np.float32)
         if prepared.ndim == 1:
             prepared = prepared.reshape(1, -1)
 

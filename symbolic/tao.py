@@ -196,6 +196,19 @@ def solve_l1_logistic_reduced_problem(
     return learned_weights, float(model.intercept_[0])
 
 
+def _ensure_float32_features(features: np.ndarray) -> np.ndarray:
+    """Ensure features are float32, preserving memmap when possible.
+
+    Unlike ``np.asarray(features, dtype=np.float32)`` which always copies a
+    memmap into a regular ndarray, this helper returns the original object
+    when the dtype already matches.  This keeps the data disk-backed and
+    avoids materialising several GB of RoI features into RAM.
+    """
+    if features.dtype == np.float32:
+        return features
+    return np.asarray(features, dtype=np.float32)
+
+
 def evaluate_tree(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
@@ -230,7 +243,7 @@ def fit_tree_with_tao(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     node_progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
-    features = np.asarray(features, dtype=np.float32)
+    features = _ensure_float32_features(features)
     labels = np.asarray(labels, dtype=np.int64)
 
     if features.ndim != 2:
