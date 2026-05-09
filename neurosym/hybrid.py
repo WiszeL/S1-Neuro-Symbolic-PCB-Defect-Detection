@@ -30,7 +30,13 @@ class NeuroSymbolicDetector(nn.Module):
         self.detector.eval()
 
     def _symbolic_predict(self, pooled_features: Tensor) -> tuple[Tensor, Tensor]:
-        feature_vectors = pooled_features.flatten(start_dim=1).detach().cpu().numpy().astype(np.float32)
+        feature_vectors = (
+            pooled_features.flatten(start_dim=1)
+            .detach()
+            .cpu()
+            .numpy()
+            .astype(np.float32)
+        )
         probabilities = self.symbolic_tree.predict_proba(feature_vectors)
         leaf_indices = self.symbolic_tree.predict_leaf_indices(feature_vectors)
         probability_tensor = torch.from_numpy(probabilities).to(
@@ -43,7 +49,9 @@ class NeuroSymbolicDetector(nn.Module):
     @torch.inference_mode()
     def forward(self, images: list[Tensor]) -> list[dict[str, Tensor]]:
         original_image_sizes = [tuple(image.shape[-2:]) for image in images]
-        images_list, _ = self.detector.transform([image.to(self.device) for image in images], None)
+        images_list, _ = self.detector.transform(
+            [image.to(self.device) for image in images], None
+        )
 
         features = self.detector.backbone(images_list.tensors)
         proposals, _ = self.detector.rpn(images_list, features, None)
@@ -54,7 +62,9 @@ class NeuroSymbolicDetector(nn.Module):
         )
         roi_representations = self.detector.box_head(pooled_features)
         box_regression = self.detector.box_predictor.box_regressor(roi_representations)
-        symbolic_probabilities, symbolic_leaf_indices = self._symbolic_predict(pooled_features)
+        symbolic_probabilities, symbolic_leaf_indices = self._symbolic_predict(
+            pooled_features
+        )
 
         results = postprocess_symbolic_detections(
             detector=self.detector,
@@ -78,7 +88,9 @@ class NeuroSymbolicDetector(nn.Module):
         )
 
         outputs: list[dict[str, Tensor]] = []
-        for result, boxes_dict, proposals_dict in zip(results, postprocessed_boxes, postprocessed_proposals):
+        for result, boxes_dict, proposals_dict in zip(
+            results, postprocessed_boxes, postprocessed_proposals
+        ):
             outputs.append(
                 {
                     "boxes": boxes_dict["boxes"].detach().cpu(),
@@ -86,8 +98,12 @@ class NeuroSymbolicDetector(nn.Module):
                     "labels": result["labels"].detach().cpu(),
                     "proposal_boxes": proposals_dict["boxes"].detach().cpu(),
                     "pooled_features": result["pooled_features"].detach().cpu(),
-                    "symbolic_probabilities": result["symbolic_probabilities"].detach().cpu(),
-                    "symbolic_leaf_indices": result["symbolic_leaf_indices"].detach().cpu(),
+                    "symbolic_probabilities": result["symbolic_probabilities"]
+                    .detach()
+                    .cpu(),
+                    "symbolic_leaf_indices": result["symbolic_leaf_indices"]
+                    .detach()
+                    .cpu(),
                 }
             )
 

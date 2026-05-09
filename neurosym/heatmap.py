@@ -28,7 +28,9 @@ def _top_grid_cells(
     if nonzero_indices.size == 0:
         return []
 
-    ranked_indices = nonzero_indices[np.argsort(np.abs(flattened[nonzero_indices]))[::-1]]
+    ranked_indices = nonzero_indices[
+        np.argsort(np.abs(flattened[nonzero_indices]))[::-1]
+    ]
     results: list[dict[str, int | float]] = []
     width = heatmap.shape[1]
     for flat_index in ranked_indices[: max(int(top_k), 0)]:
@@ -96,7 +98,9 @@ def compute_node_local_evidence_maps(
                 "decision": "left" if step.went_left else "right",
                 "score": float(step.score),
                 "positive_evidence_sum": positive_evidence_sum,
-                "positive_evidence_cell_count": int(np.count_nonzero(positive_evidence > 0.0)),
+                "positive_evidence_cell_count": int(
+                    np.count_nonzero(positive_evidence > 0.0)
+                ),
                 "active_original_feature_count": int(
                     tree.node_feature_indices(step.node_index, original_space=True).size
                 ),
@@ -158,7 +162,9 @@ def compute_symbolic_heatmap(
     # ---------------------------------------------------------------------
     # Gather the actual path weights in the original pooled-feature lattice
     # ---------------------------------------------------------------------
-    weight_grids = np.stack([tree.node_weight_grid(step.node_index) for step in path], axis=0)
+    weight_grids = np.stack(
+        [tree.node_weight_grid(step.node_index) for step in path], axis=0
+    )
     path_directions = np.asarray(
         [1.0 if step.went_left else -1.0 for step in path],
         dtype=np.float32,
@@ -168,7 +174,9 @@ def compute_symbolic_heatmap(
     # Build structural and local evidence maps from the symbolic path itself
     # ---------------------------------------------------------------------
     local_signed_contributions = path_directions * weight_grids * grid[None, ...]
-    structural_density_map = np.sum(np.abs(weight_grids), axis=(0, 1)).astype(np.float32)
+    structural_density_map = np.sum(np.abs(weight_grids), axis=(0, 1)).astype(
+        np.float32
+    )
     positive_local_evidence_map = np.sum(
         np.maximum(local_signed_contributions, 0.0),
         axis=(0, 1),
@@ -177,9 +185,15 @@ def compute_symbolic_heatmap(
         np.maximum(-local_signed_contributions, 0.0),
         axis=(0, 1),
     ).astype(np.float32)
-    signed_local_evidence_map = np.sum(local_signed_contributions, axis=(0, 1)).astype(np.float32)
-    combined_local_evidence_map = (positive_local_evidence_map + negative_local_evidence_map).astype(np.float32)
-    structural_channel_scores = np.sum(np.abs(weight_grids), axis=(0, 2, 3)).astype(np.float32)
+    signed_local_evidence_map = np.sum(local_signed_contributions, axis=(0, 1)).astype(
+        np.float32
+    )
+    combined_local_evidence_map = (
+        positive_local_evidence_map + negative_local_evidence_map
+    ).astype(np.float32)
+    structural_channel_scores = np.sum(np.abs(weight_grids), axis=(0, 2, 3)).astype(
+        np.float32
+    )
     positive_local_channel_scores = np.sum(
         np.maximum(local_signed_contributions, 0.0),
         axis=(0, 2, 3),
@@ -198,29 +212,33 @@ def compute_symbolic_heatmap(
         "combined_local_evidence_map": combined_local_evidence_map,
     }
     selected_mode = mode if mode in maps else "local_instance_evidence_map"
-    path_summary = tree.summarize_path(feature_vector, top_k=6)
+    path_summary = tree.summarize_path(feature_vector, top_k=6, path=path)
     path_trace = [
         {
             "node_index": int(step.node_index),
             "score": float(step.score),
             "went_left": bool(step.went_left),
-            "active_retained_feature_count": int(tree.node_feature_indices(step.node_index).size),
+            "active_retained_feature_count": int(
+                tree.node_feature_indices(step.node_index).size
+            ),
             "active_original_feature_count": int(
                 tree.node_feature_indices(step.node_index, original_space=True).size
             ),
         }
         for step in path
     ]
-    top_features = tree.top_feature_contributions(feature_vector, top_k=12)
+    top_features = tree.top_feature_contributions(feature_vector, top_k=12, path=path)
     top_positive_features = tree.top_feature_contributions(
         feature_vector,
         top_k=12,
         contribution_sign="positive",
+        path=path,
     )
     top_negative_features = tree.top_feature_contributions(
         feature_vector,
         top_k=12,
         contribution_sign="negative",
+        path=path,
     )
     top_local_cells = _top_grid_cells(positive_local_evidence_map, top_k=12)
     top_negative_local_cells = _top_grid_cells(negative_local_evidence_map, top_k=12)
@@ -235,8 +253,12 @@ def compute_symbolic_heatmap(
         "leaf_index": tree.leaf_index_for_feature(feature_vector),
         "reasoning_summary": {
             "path_length": int(path_summary["path_length"]),
-            "active_path_original_feature_count": int(path_summary["active_path_original_feature_count"]),
-            "mean_active_original_features_per_node": float(path_summary["mean_active_original_features_per_node"]),
+            "active_path_original_feature_count": int(
+                path_summary["active_path_original_feature_count"]
+            ),
+            "mean_active_original_features_per_node": float(
+                path_summary["mean_active_original_features_per_node"]
+            ),
             "map_types": {
                 "global_or_structural_density_map": (
                     "Intrinsic structural view of what the active symbolic path weights use in general."
@@ -285,6 +307,7 @@ def resize_heatmap_to_box(
         mode="bilinear",
         align_corners=False,
     )[0, 0]
+
 
 def project_heatmap_to_image(
     heatmap: Tensor | np.ndarray,

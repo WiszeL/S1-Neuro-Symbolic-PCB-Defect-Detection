@@ -16,29 +16,51 @@ def project_gt_box_to_roi_grid(
     proposal_width = max(float(proposal[2] - proposal[0]), 1e-6)
     proposal_height = max(float(proposal[3] - proposal[1]), 1e-6)
 
-    projected_x1 = ((gt_box[0] - proposal[0]) / proposal_width) * grid_width
-    projected_y1 = ((gt_box[1] - proposal[1]) / proposal_height) * grid_height
-    projected_x2 = ((gt_box[2] - proposal[0]) / proposal_width) * grid_width
-    projected_y2 = ((gt_box[3] - proposal[1]) / proposal_height) * grid_height
+    px1 = float(
+        torch.clamp(
+            ((gt_box[0] - proposal[0]) / proposal_width) * grid_width,
+            min=0.0,
+            max=float(grid_width),
+        )
+    )
+    py1 = float(
+        torch.clamp(
+            ((gt_box[1] - proposal[1]) / proposal_height) * grid_height,
+            min=0.0,
+            max=float(grid_height),
+        )
+    )
+    px2 = float(
+        torch.clamp(
+            ((gt_box[2] - proposal[0]) / proposal_width) * grid_width,
+            min=0.0,
+            max=float(grid_width),
+        )
+    )
+    py2 = float(
+        torch.clamp(
+            ((gt_box[3] - proposal[1]) / proposal_height) * grid_height,
+            min=0.0,
+            max=float(grid_height),
+        )
+    )
 
-    projected_x1 = float(torch.clamp(projected_x1, min=0.0, max=float(grid_width)))
-    projected_y1 = float(torch.clamp(projected_y1, min=0.0, max=float(grid_height)))
-    projected_x2 = float(torch.clamp(projected_x2, min=0.0, max=float(grid_width)))
-    projected_y2 = float(torch.clamp(projected_y2, min=0.0, max=float(grid_height)))
+    if px2 <= px1 or py2 <= py1:
+        return torch.zeros((grid_height, grid_width), dtype=torch.bool)
 
-    mask = torch.zeros((grid_height, grid_width), dtype=torch.bool)
-    if projected_x2 <= projected_x1 or projected_y2 <= projected_y1:
-        return mask
+    px1 = torch.as_tensor(px1)
+    py1 = torch.as_tensor(py1)
+    px2 = torch.as_tensor(px2)
+    py2 = torch.as_tensor(py2)
 
-    for row_index in range(grid_height):
-        for col_index in range(grid_width):
-            cell_x1 = float(col_index)
-            cell_y1 = float(row_index)
-            cell_x2 = float(col_index + 1)
-            cell_y2 = float(row_index + 1)
-            intersection_width = min(cell_x2, projected_x2) - max(cell_x1, projected_x1)
-            intersection_height = min(cell_y2, projected_y2) - max(cell_y1, projected_y1)
-            if intersection_width > 0.0 and intersection_height > 0.0:
-                mask[row_index, col_index] = True
+    cols = torch.arange(grid_width, dtype=torch.float32)
+    rows = torch.arange(grid_height, dtype=torch.float32)
+    cell_x1 = cols.unsqueeze(0)
+    cell_y1 = rows.unsqueeze(1)
+    cell_x2 = cols.unsqueeze(0) + 1
+    cell_y2 = rows.unsqueeze(1) + 1
 
-    return mask
+    iw = torch.clamp(torch.minimum(cell_x2, px2) - torch.maximum(cell_x1, px1), min=0)
+    ih = torch.clamp(torch.minimum(cell_y2, py2) - torch.maximum(cell_y1, py1), min=0)
+
+    return (iw > 0) & (ih > 0)

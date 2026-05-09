@@ -731,7 +731,9 @@ class NeuroFasterRCNN(nn.Module):
                 )
                 continue
 
-            match_quality_matrix = box_ops.box_iou(gt_boxes_per_image, proposals_per_image)
+            match_quality_matrix = box_ops.box_iou(
+                gt_boxes_per_image, proposals_per_image
+            )
             matched_idxs_per_image = self.proposal_matcher(match_quality_matrix)
             clamped_matched_idxs = matched_idxs_per_image.clamp(min=0)
 
@@ -876,7 +878,9 @@ class NeuroFasterRCNN(nn.Module):
         """
 
         if self.training and targets is None:
-            raise ValueError("targets must be provided when NeuroFasterRCNN is training.")
+            raise ValueError(
+                "targets must be provided when NeuroFasterRCNN is training."
+            )
 
         original_image_sizes = [tuple(image.shape[-2:]) for image in images]
 
@@ -893,9 +897,11 @@ class NeuroFasterRCNN(nn.Module):
             if transformed_targets is None:
                 raise ValueError("transformed targets are required for training.")
 
-            sampled_proposals, labels, regression_targets = self.select_training_samples(
-                proposals,
-                transformed_targets,
+            sampled_proposals, labels, regression_targets = (
+                self.select_training_samples(
+                    proposals,
+                    transformed_targets,
+                )
             )
             pooled_features = self.roi_align(
                 features,
@@ -996,7 +1002,9 @@ class NeuroFasterRCNN(nn.Module):
         """Export per-RoI pooled grids and teacher classifier outputs on the same proposals."""
 
         records = self._extract_proposal_feature_records(images, targets)
-        pooled_features = torch.cat([record["pooled_features"] for record in records], dim=0)
+        pooled_features = torch.cat(
+            [record["pooled_features"] for record in records], dim=0
+        )
         proposal_counts = [record["proposal_boxes"].shape[0] for record in records]
 
         roi_representations = self.box_head(pooled_features)

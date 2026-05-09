@@ -4,6 +4,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -12,7 +13,7 @@ from .config import SymbolicTrainConfig
 from .evaluation import evaluate_symbolic_model as evaluate_symbolic_metrics
 from .evaluation import evaluate_symbolic_spatial_metrics
 from .sodt import SparseObliqueDecisionTreeClassifier
-from .tao import evaluate_tree, fit_tree_with_tao
+from .tao import fit_tree_with_tao
 from util.io import ensure_dir, save_json
 
 
@@ -84,7 +85,7 @@ def _load_symbolic_training_data(
     )
 
     feature_matrix = bundle.feature_vectors
-    labels = bundle.teacher_labels.detach().cpu().numpy().astype("int64")
+    labels = bundle.teacher_labels.detach().cpu().numpy()
     return bundle, (feature_matrix, labels)
 
 
@@ -99,7 +100,7 @@ def _load_symbolic_evaluation_data(
         feature_dtype="float32",
     )
     feature_matrix = bundle.feature_vectors
-    labels = bundle.teacher_labels.detach().cpu().numpy().astype("int64")
+    labels = bundle.teacher_labels.detach().cpu().numpy()
     return bundle, feature_matrix, labels
 
 
@@ -123,13 +124,20 @@ def _augment_tree_metrics(
     metrics: dict[str, Any],
 ) -> dict[str, Any]:
     augmented = dict(metrics)
+    nonzero_counts = tree.nonzero_weight_counts()
     augmented.update(
         {
             "tree_depth": int(tree.max_depth),
             "num_leaves": int(tree.num_leaves),
             "num_internal_nodes": int(tree.num_internal_nodes),
+            "nonzero_weights": int(sum(nonzero_counts)),
+            "mean_nonzero_per_node": float(np.mean(nonzero_counts))
+            if nonzero_counts
+            else 0.0,
+            "active_internal_nodes": int(sum(count > 0 for count in nonzero_counts)),
             "mean_nonzero_per_active_node": float(
-                augmented["nonzero_weights"] / max(augmented["active_internal_nodes"], 1)
+                int(sum(nonzero_counts))
+                / max(int(sum(count > 0 for count in nonzero_counts)), 1)
             ),
         }
     )
@@ -147,7 +155,6 @@ def _evaluate_symbolic_model(
     history: list[dict[str, Any]],
     random_state: int,
 ) -> dict[str, Any]:
-    base_metrics = evaluate_tree(tree, feature_matrix, labels)
     symbolic_metrics = evaluate_symbolic_metrics(
         tree,
         feature_matrix=feature_matrix,
@@ -168,7 +175,6 @@ def _evaluate_symbolic_model(
     metrics = _augment_tree_metrics(
         tree,
         {
-            **base_metrics,
             **symbolic_metrics,
             **spatial_metrics,
         },
@@ -190,8 +196,9 @@ def _evaluate_trained_model_on_bundle(
     labels: Any,
     random_state: int,
 ) -> dict[str, Any]:
-    tree = SparseObliqueDecisionTreeClassifier.from_state_dict(trained_model["tree_state"])
-    base_metrics = evaluate_tree(tree, feature_matrix, labels)
+    tree = SparseObliqueDecisionTreeClassifier.from_state_dict(
+        trained_model["tree_state"]
+    )
     symbolic_metrics = evaluate_symbolic_metrics(
         tree,
         feature_matrix=feature_matrix,
@@ -208,10 +215,10 @@ def _evaluate_trained_model_on_bundle(
         gt_iou=bundle.gt_iou,
         random_state=random_state,
     )
+
     metrics = _augment_tree_metrics(
         tree,
         {
-            **base_metrics,
             **symbolic_metrics,
             **spatial_metrics,
         },
@@ -275,14 +282,22 @@ def _model_report(model: dict[str, Any]) -> dict[str, Any]:
         "sparsity_alpha": model["sparsity_alpha"],
         "mimic_accuracy": model["metrics"]["mimic_accuracy"],
         "macro_f1_vs_teacher": model["metrics"]["macro_f1_vs_teacher"],
-        "per_class_agreement_vs_teacher": model["metrics"]["per_class_agreement_vs_teacher"],
+        "per_class_agreement_vs_teacher": model["metrics"][
+            "per_class_agreement_vs_teacher"
+        ],
         "nonzero_weights": model["metrics"]["nonzero_weights"],
         "mean_nonzero_per_node": model["metrics"]["mean_nonzero_per_node"],
         "active_internal_nodes": model["metrics"]["active_internal_nodes"],
         "mean_path_feature_count": model["metrics"]["mean_path_feature_count"],
-        "necessity_advantage_over_random": model["metrics"]["necessity_advantage_over_random"],
-        "necessity_flip_advantage_over_random": model["metrics"]["necessity_flip_advantage_over_random"],
-        "sufficiency_advantage_over_random": model["metrics"]["sufficiency_advantage_over_random"],
+        "necessity_advantage_over_random": model["metrics"][
+            "necessity_advantage_over_random"
+        ],
+        "necessity_flip_advantage_over_random": model["metrics"][
+            "necessity_flip_advantage_over_random"
+        ],
+        "sufficiency_advantage_over_random": model["metrics"][
+            "sufficiency_advantage_over_random"
+        ],
         "sufficiency_retention_advantage_over_random": (
             model["metrics"]["sufficiency_retention_advantage_over_random"]
         ),
@@ -312,9 +327,14 @@ def train_symbolic_tree(
         max_samples_total=data_config["max_samples_total"],
         random_state=sodt_config["random_state"],
     )
-    print(f"Symbolic training data ready in {_format_duration(perf_counter() - load_start_time)}.", flush=True)
+    print(
+        f"Symbolic training data ready in {_format_duration(perf_counter() - load_start_time)}.",
+        flush=True,
+    )
 
-    total_node_fit_upper_bound = ((2 ** sodt_config["tree_depth"]) - 1) * sodt_config["iterations"]
+    total_node_fit_upper_bound = ((2 ** sodt_config["tree_depth"]) - 1) * sodt_config[
+        "iterations"
+    ]
     for line in _format_progress_header(
         feature_count=int(feature_matrix.shape[0]),
         feature_dim=int(feature_matrix.shape[1]),
@@ -437,7 +457,9 @@ def train_symbolic_tree(
             "max_samples_total": data_config["max_samples_total"],
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",
-            "heldout_export_path": str(heldout_export_path) if heldout_export_path is not None else None,
+            "heldout_export_path": str(heldout_export_path)
+            if heldout_export_path is not None
+            else None,
             "config_sections": dict(config),
         },
     }

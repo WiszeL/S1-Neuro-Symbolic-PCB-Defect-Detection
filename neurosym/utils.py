@@ -30,7 +30,15 @@ def postprocess_symbolic_detections(
     leaf_indices_list = proposal_leaf_indices.split(boxes_per_image, dim=0)
 
     results: list[dict[str, Tensor]] = []
-    for boxes, scores, proposals_per_image, pooled_per_image, probabilities_per_image, leaf_indices_per_image, image_shape in zip(
+    for (
+        boxes,
+        scores,
+        proposals_per_image,
+        pooled_per_image,
+        probabilities_per_image,
+        leaf_indices_per_image,
+        image_shape,
+    ) in zip(
         pred_boxes_list,
         pred_scores_list,
         proposals,
@@ -66,9 +74,7 @@ def postprocess_symbolic_detections(
             .reshape(-1, probabilities_per_image.shape[-1])
         )
         symbolic_leaf_indices = (
-            leaf_indices_per_image[:, None]
-            .expand(-1, num_classes - 1)
-            .reshape(-1)
+            leaf_indices_per_image[:, None].expand(-1, num_classes - 1).reshape(-1)
         )
 
         keep = torch.where(scores > detector.BOX_SCORE_THRESH)[0]

@@ -85,7 +85,10 @@ def _feature_perturbation_stability(
 
     base_vector = _normalize_heatmap(base_heatmap).reshape(-1)
     perturbed_vector = _normalize_heatmap(perturbed_heatmap).reshape(-1)
-    if float(base_vector.sum().item()) == 0.0 and float(perturbed_vector.sum().item()) == 0.0:
+    if (
+        float(base_vector.sum().item()) == 0.0
+        and float(perturbed_vector.sum().item()) == 0.0
+    ):
         return 1.0
 
     denominator = float(base_vector.norm().item() * perturbed_vector.norm().item())

@@ -25,7 +25,9 @@ def load_checkpoint_model(
     resolved_device = select_device(device)
     model_config = load_yaml(model_config_path, NeuroConfig)
     train_config = load_yaml(train_config_path, NeuroTrainConfig)
-    checkpoint = torch.load(checkpoint_path, map_location=resolved_device, weights_only=True)
+    checkpoint = torch.load(
+        checkpoint_path, map_location=resolved_device, weights_only=True
+    )
 
     model = NeuroFasterRCNN(
         neuro_config=model_config,
@@ -47,7 +49,10 @@ def run_inference(
     resolved_device = select_device(str(device))
     model.eval()
     outputs = model([image.to(resolved_device) for image in images])
-    return [{key: value.detach().cpu() for key, value in output.items()} for output in outputs]
+    return [
+        {key: value.detach().cpu() for key, value in output.items()}
+        for output in outputs
+    ]
 
 
 def visualize_prediction(
@@ -80,9 +85,18 @@ def visualize_prediction(
         width = x2 - x1
         height = y2 - y1
 
-        rectangle = patches.Rectangle((x1, y1), width, height, linewidth=2, edgecolor="red", facecolor="none")
+        rectangle = patches.Rectangle(
+            (x1, y1), width, height, linewidth=2, edgecolor="red", facecolor="none"
+        )
         ax.add_patch(rectangle)
         class_name = class_names[int(label) - 1]
-        ax.text(x1, max(y1 - 4, 0), f"{class_name} {float(score):.2f}", color="yellow", fontsize=9, backgroundcolor="black")
+        ax.text(
+            x1,
+            max(y1 - 4, 0),
+            f"{class_name} {float(score):.2f}",
+            color="yellow",
+            fontsize=9,
+            backgroundcolor="black",
+        )
 
     return ax

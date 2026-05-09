@@ -125,8 +125,14 @@ def explain_hybrid_detection(
         for key in heatmap_keys
     }
 
-    explanation["projected_heatmap"] = projected_maps[mode] if mode in projected_maps else projected_maps["local_instance_evidence_map"]
-    explanation["detection_box_heatmap"] = box_maps[mode] if mode in box_maps else box_maps["local_instance_evidence_map"]
+    explanation["projected_heatmap"] = (
+        projected_maps[mode]
+        if mode in projected_maps
+        else projected_maps["local_instance_evidence_map"]
+    )
+    explanation["detection_box_heatmap"] = (
+        box_maps[mode] if mode in box_maps else box_maps["local_instance_evidence_map"]
+    )
     explanation["projected_maps"] = projected_maps
     explanation["proposal_box_maps"] = box_maps
     explanation["node_explanations"] = node_explanations
@@ -135,8 +141,12 @@ def explain_hybrid_detection(
     explanation["label"] = int(detection["labels"][detection_index])
     explanation["score"] = float(detection["scores"][detection_index])
     explanation["detection_index"] = int(detection_index)
-    explanation["symbolic_leaf_index"] = int(detection["symbolic_leaf_indices"][detection_index])
-    explanation["symbolic_probabilities"] = detection["symbolic_probabilities"][detection_index]
+    explanation["symbolic_leaf_index"] = int(
+        detection["symbolic_leaf_indices"][detection_index]
+    )
+    explanation["symbolic_probabilities"] = detection["symbolic_probabilities"][
+        detection_index
+    ]
     explanation["symbolic_label_confidence"] = float(
         detection["symbolic_probabilities"][detection_index][explanation["label"]]
     )
@@ -182,7 +192,11 @@ def subset_detection(
     if not detection_indices:
         empty_detection: dict[str, Tensor] = {}
         for key, value in detection.items():
-            if isinstance(value, Tensor) and value.ndim > 0 and value.shape[0] == detection["boxes"].shape[0]:
+            if (
+                isinstance(value, Tensor)
+                and value.ndim > 0
+                and value.shape[0] == detection["boxes"].shape[0]
+            ):
                 empty_detection[key] = value[:0]
             else:
                 empty_detection[key] = value
@@ -190,7 +204,11 @@ def subset_detection(
 
     subset: dict[str, Tensor] = {}
     for key, value in detection.items():
-        if isinstance(value, Tensor) and value.ndim > 0 and value.shape[0] == detection["boxes"].shape[0]:
+        if (
+            isinstance(value, Tensor)
+            and value.ndim > 0
+            and value.shape[0] == detection["boxes"].shape[0]
+        ):
             index_tensor = torch.as_tensor(
                 detection_indices,
                 dtype=torch.long,
@@ -239,9 +257,15 @@ def aggregate_detection_heatmaps(
     normalize: bool = True,
 ) -> Tensor:
     if not explanations:
-        raise ValueError("At least one explanation is required for heatmap aggregation.")
+        raise ValueError(
+            "At least one explanation is required for heatmap aggregation."
+        )
 
-    scores = [float(explanation["score"]) for explanation in explanations] if score_weighted else None
+    scores = (
+        [float(explanation["score"]) for explanation in explanations]
+        if score_weighted
+        else None
+    )
     return aggregate_projected_heatmaps(
         [explanation[map_key] for explanation in explanations],
         scores=scores,

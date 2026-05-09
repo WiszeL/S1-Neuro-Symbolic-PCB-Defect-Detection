@@ -255,8 +255,12 @@ def visualize_rcnn_preprocessing(
                     )
                 )
 
-            row_canvas_width = max(_image_size(image)[0], *(output[4] for output in rcnn_outputs))
-            row_canvas_height = max(_image_size(image)[1], *(output[5] for output in rcnn_outputs))
+            row_canvas_width = max(
+                _image_size(image)[0], *(output[4] for output in rcnn_outputs)
+            )
+            row_canvas_height = max(
+                _image_size(image)[1], *(output[5] for output in rcnn_outputs)
+            )
 
             _draw_target(
                 axes[row][0],

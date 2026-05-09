@@ -36,24 +36,42 @@ def _match_proposals_to_ground_truth(
     target_boxes: torch.Tensor,
     target_labels: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
-    target_boxes = target_boxes.to(device=proposal_boxes.device, dtype=proposal_boxes.dtype)
+    target_boxes = target_boxes.to(
+        device=proposal_boxes.device, dtype=proposal_boxes.dtype
+    )
     target_labels = target_labels.to(device=proposal_boxes.device, dtype=torch.int64)
 
     if proposal_boxes.numel() == 0:
         return {
-            "matched_gt_boxes": torch.zeros((0, 4), dtype=torch.float32, device=proposal_boxes.device),
-            "matched_gt_labels": torch.zeros((0,), dtype=torch.int64, device=proposal_boxes.device),
-            "matched_gt_iou": torch.zeros((0,), dtype=torch.float32, device=proposal_boxes.device),
-            "has_matched_gt": torch.zeros((0,), dtype=torch.bool, device=proposal_boxes.device),
+            "matched_gt_boxes": torch.zeros(
+                (0, 4), dtype=torch.float32, device=proposal_boxes.device
+            ),
+            "matched_gt_labels": torch.zeros(
+                (0,), dtype=torch.int64, device=proposal_boxes.device
+            ),
+            "matched_gt_iou": torch.zeros(
+                (0,), dtype=torch.float32, device=proposal_boxes.device
+            ),
+            "has_matched_gt": torch.zeros(
+                (0,), dtype=torch.bool, device=proposal_boxes.device
+            ),
         }
 
     if target_boxes.numel() == 0:
         num_boxes = proposal_boxes.shape[0]
         return {
-            "matched_gt_boxes": torch.zeros((num_boxes, 4), dtype=torch.float32, device=proposal_boxes.device),
-            "matched_gt_labels": torch.zeros((num_boxes,), dtype=torch.int64, device=proposal_boxes.device),
-            "matched_gt_iou": torch.zeros((num_boxes,), dtype=torch.float32, device=proposal_boxes.device),
-            "has_matched_gt": torch.zeros((num_boxes,), dtype=torch.bool, device=proposal_boxes.device),
+            "matched_gt_boxes": torch.zeros(
+                (num_boxes, 4), dtype=torch.float32, device=proposal_boxes.device
+            ),
+            "matched_gt_labels": torch.zeros(
+                (num_boxes,), dtype=torch.int64, device=proposal_boxes.device
+            ),
+            "matched_gt_iou": torch.zeros(
+                (num_boxes,), dtype=torch.float32, device=proposal_boxes.device
+            ),
+            "has_matched_gt": torch.zeros(
+                (num_boxes,), dtype=torch.bool, device=proposal_boxes.device
+            ),
         }
 
     overlaps = box_iou(proposal_boxes, target_boxes)
@@ -99,17 +117,33 @@ def _build_symbolic_record(
         "image_path": str(dataset.samples[sample_index].image_path),
         "num_rois": num_rois,
         "proposal_boxes": proposal_boxes.detach().cpu(),
-        "transformed_proposal_boxes": teacher_output["transformed_proposal_boxes"].detach().cpu(),
-        "pooled_features": teacher_output["pooled_features"].detach().to(dtype=torch_dtype).cpu(),
+        "transformed_proposal_boxes": teacher_output["transformed_proposal_boxes"]
+        .detach()
+        .cpu(),
+        "pooled_features": teacher_output["pooled_features"]
+        .detach()
+        .to(dtype=torch_dtype)
+        .cpu(),
         "teacher_labels": teacher_output["teacher_labels"].detach().cpu(),
-        "teacher_logits": teacher_output["teacher_logits"].detach().to(dtype=torch_dtype).cpu(),
-        "teacher_scores": teacher_output["teacher_scores"].detach().to(dtype=torch_dtype).cpu(),
+        "teacher_logits": teacher_output["teacher_logits"]
+        .detach()
+        .to(dtype=torch_dtype)
+        .cpu(),
+        "teacher_scores": teacher_output["teacher_scores"]
+        .detach()
+        .to(dtype=torch_dtype)
+        .cpu(),
         "image_size": teacher_output["image_size"].detach().cpu(),
-        "transformed_image_size": teacher_output["transformed_image_size"].detach().cpu(),
+        "transformed_image_size": teacher_output["transformed_image_size"]
+        .detach()
+        .cpu(),
         "matched_gt_boxes": matched_ground_truth["matched_gt_boxes"].detach().cpu(),
         "has_matched_gt": matched_ground_truth["has_matched_gt"].detach().cpu(),
         "gt_labels": matched_ground_truth["matched_gt_labels"].detach().cpu(),
-        "gt_iou": matched_ground_truth["matched_gt_iou"].detach().to(dtype=torch_dtype).cpu(),
+        "gt_iou": matched_ground_truth["matched_gt_iou"]
+        .detach()
+        .to(dtype=torch_dtype)
+        .cpu(),
     }
 
     return record
@@ -126,10 +160,9 @@ def _append_repeated_image_metadata(
     metadata_parts: dict[str, list[Any]],
 ) -> None:
     num_rois = int(record["teacher_labels"].shape[0])
-    metadata_parts["image_ids"] = (
-        metadata_parts.get("image_ids", [])
-        + [torch.full((num_rois,), int(record["image_id"]), dtype=torch.int64)]
-    )
+    metadata_parts["image_ids"] = metadata_parts.get("image_ids", []) + [
+        torch.full((num_rois,), int(record["image_id"]), dtype=torch.int64)
+    ]
     metadata_parts["image_sizes"].append(record["image_size"].repeat(num_rois, 1))
     metadata_parts["transformed_image_sizes"].append(
         record["transformed_image_size"].repeat(num_rois, 1)
@@ -143,7 +176,9 @@ def _append_symbolic_metadata(
 ) -> None:
     metadata_parts["teacher_labels"].append(record["teacher_labels"])
     metadata_parts["proposal_boxes"].append(record["proposal_boxes"])
-    metadata_parts["transformed_proposal_boxes"].append(record["transformed_proposal_boxes"])
+    metadata_parts["transformed_proposal_boxes"].append(
+        record["transformed_proposal_boxes"]
+    )
     metadata_parts["matched_gt_boxes"].append(record["matched_gt_boxes"])
     metadata_parts["has_matched_gt"].append(record["has_matched_gt"])
     metadata_parts["gt_labels"].append(record["gt_labels"])
@@ -156,9 +191,21 @@ def _finalize_symbolic_metadata(metadata_parts: dict[str, list[Any]]) -> dict[st
     for field in _METADATA_TENSOR_FIELDS:
         parts = metadata_parts[field]
         metadata[field] = torch.cat(parts, dim=0) if parts else None
-    metadata["image_ids"] = torch.cat(metadata_parts["image_ids"], dim=0) if metadata_parts.get("image_ids") else None
-    metadata["image_sizes"] = torch.cat(metadata_parts["image_sizes"], dim=0) if metadata_parts.get("image_sizes") else None
-    metadata["transformed_image_sizes"] = torch.cat(metadata_parts["transformed_image_sizes"], dim=0) if metadata_parts.get("transformed_image_sizes") else None
+    metadata["image_ids"] = (
+        torch.cat(metadata_parts["image_ids"], dim=0)
+        if metadata_parts.get("image_ids")
+        else None
+    )
+    metadata["image_sizes"] = (
+        torch.cat(metadata_parts["image_sizes"], dim=0)
+        if metadata_parts.get("image_sizes")
+        else None
+    )
+    metadata["transformed_image_sizes"] = (
+        torch.cat(metadata_parts["transformed_image_sizes"], dim=0)
+        if metadata_parts.get("transformed_image_sizes")
+        else None
+    )
     metadata["image_paths"] = tuple(str(path) for path in metadata_parts["image_paths"])
     return metadata
 
@@ -174,7 +221,9 @@ def extract_dataset_from_teacher(
 ) -> Path:
     output_path = Path(output_path)
     if output_path.exists():
-        print(f"Skipping teacher dataset extraction; found existing artifact at {output_path}.")
+        print(
+            f"Skipping teacher dataset extraction; found existing artifact at {output_path}."
+        )
         return output_path
 
     resolved_device = select_device(device)
@@ -195,11 +244,17 @@ def extract_dataset_from_teacher(
     feature_shape: tuple[int, int, int] | None = None
     row_count = 0
 
-    for index in tqdm(range(len(dataset)), desc="Export symbolic teacher RoIs", leave=False):
+    for index in tqdm(
+        range(len(dataset)), desc="Export symbolic teacher RoIs", leave=False
+    ):
         image, target = dataset[index]
         image = image.to(resolved_device)
-        target_on_device = {key: value.to(resolved_device) for key, value in target.items()}
-        teacher_output = model.extract_teacher_roi_samples([image], [target_on_device])[0]
+        target_on_device = {
+            key: value.to(resolved_device) for key, value in target.items()
+        }
+        teacher_output = model.extract_teacher_roi_samples([image], [target_on_device])[
+            0
+        ]
 
         record = _build_symbolic_record(
             dataset=dataset,
@@ -213,14 +268,18 @@ def extract_dataset_from_teacher(
         row_start = row_count
         row_stop = row_start + num_rois
         if num_rois > 0:
-            record_feature_shape = tuple(int(value) for value in record["pooled_features"].shape[1:])
+            record_feature_shape = tuple(
+                int(value) for value in record["pooled_features"].shape[1:]
+            )
             if feature_shape is None:
                 feature_shape = record_feature_shape
             elif feature_shape != record_feature_shape:
                 raise RuntimeError(
                     f"Inconsistent RoI feature shape: expected {feature_shape}, got {record_feature_shape}."
                 )
-            feature_array = record["pooled_features"].numpy().astype(numpy_dtype, copy=False)
+            feature_array = (
+                record["pooled_features"].numpy().astype(numpy_dtype, copy=False)
+            )
             with feature_path.open("ab") as feature_file:
                 feature_array.tofile(feature_file)
             _append_symbolic_metadata(record, metadata_parts)

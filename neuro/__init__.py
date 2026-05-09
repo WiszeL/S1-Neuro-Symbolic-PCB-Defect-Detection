@@ -1,4 +1,6 @@
-from .config import NeuroTrainConfig, NeuroConfig, load_yaml
+from util.config import load_yaml
+
+from .config import NeuroTrainConfig, NeuroConfig
 from .faster_rcnn import NeuroFasterRCNN
 from .prepare_dataset import PCBDataset
 from .preprocess_dataset import RCNNPreprocessing, train_preprocess, test_preprocess

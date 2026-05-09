@@ -26,7 +26,9 @@ def set_scheduled_learning_rate(
     gamma = train_settings["sch_gamma"]
 
     if milestones:
-        decay_factor = gamma ** sum(epoch_index >= milestone for milestone in milestones)
+        decay_factor = gamma ** sum(
+            epoch_index >= milestone for milestone in milestones
+        )
     else:
         step_size = train_settings["sch_step_size"]
         decay_factor = gamma ** (epoch_index // step_size) if step_size > 0 else 1.0
@@ -148,7 +150,9 @@ def train_model(
     hyperparameters from NeuroTrainConfig.
     """
 
-    base_lrs = [float(parameter_group["lr"]) for parameter_group in optimizer.param_groups]
+    base_lrs = [
+        float(parameter_group["lr"]) for parameter_group in optimizer.param_groups
+    ]
     history: list[dict[str, float]] = []
     epoch_count = train_config["train"]["epochs"]
 
@@ -191,7 +195,9 @@ def count_detection_matches(
         "labels": prediction["labels"][mask],
     }
 
-    labels = torch.unique(torch.cat([filtered_prediction["labels"], target["labels"]], dim=0))
+    labels = torch.unique(
+        torch.cat([filtered_prediction["labels"], target["labels"]], dim=0)
+    )
     true_positives = 0
     false_positives = 0
     false_negatives = 0
@@ -211,13 +217,18 @@ def count_detection_matches(
             continue
 
         prediction_scores = filtered_prediction["scores"][prediction_indices]
-        predicted_boxes = predicted_boxes[torch.argsort(prediction_scores, descending=True)]
+        predicted_boxes = predicted_boxes[
+            torch.argsort(prediction_scores, descending=True)
+        ]
         ious = box_iou(predicted_boxes, target_boxes)
         matched_targets: set[int] = set()
 
         for row_index in range(predicted_boxes.shape[0]):
             best_iou, best_target_index = ious[row_index].max(dim=0)
-            if best_iou.item() >= iou_threshold and int(best_target_index) not in matched_targets:
+            if (
+                best_iou.item() >= iou_threshold
+                and int(best_target_index) not in matched_targets
+            ):
                 matched_targets.add(int(best_target_index))
                 true_positives += 1
             else:
@@ -290,7 +301,9 @@ def evaluate_model(
 
     coco_output = coco_metric.compute()
     paper_output = paper_metric.compute()
-    precision = total_true_positives / max(total_true_positives + total_false_positives, 1)
+    precision = total_true_positives / max(
+        total_true_positives + total_false_positives, 1
+    )
     recall = total_true_positives / max(total_true_positives + total_false_negatives, 1)
 
     summary: dict[str, Any] = {

@@ -61,7 +61,9 @@ def _balanced_sample_indices(
 
     for label in unique_labels.tolist():
         class_indices = torch.where(labels == label)[0]
-        shuffled = class_indices[torch.randperm(class_indices.shape[0], generator=generator)]
+        shuffled = class_indices[
+            torch.randperm(class_indices.shape[0], generator=generator)
+        ]
         selected_indices.append(shuffled[:per_class_quota])
         remaining_indices.append(shuffled[per_class_quota:])
 
@@ -72,7 +74,9 @@ def _balanced_sample_indices(
     if remaining_indices:
         leftover = torch.cat(remaining_indices, dim=0)
         if leftover.shape[0] > 0:
-            shuffled_leftover = leftover[torch.randperm(leftover.shape[0], generator=generator)]
+            shuffled_leftover = leftover[
+                torch.randperm(leftover.shape[0], generator=generator)
+            ]
             needed = max_samples_total - combined.shape[0]
             combined = torch.cat([combined, shuffled_leftover[:needed]], dim=0)
 
@@ -119,7 +123,9 @@ def _feature_cache_path(
 ) -> Path:
     feature_storage = payload["feature_storage"]
     feature_path = _resolve_artifact_path(feature_storage["path"])
-    storage_dir = _resolve_artifact_path(payload.get("storage_dir", feature_path.parent))
+    storage_dir = _resolve_artifact_path(
+        payload.get("storage_dir", feature_path.parent)
+    )
     if not storage_dir.exists():
         storage_dir = feature_path.parent
 
@@ -131,7 +137,9 @@ def _feature_cache_path(
     digest.update(str(feature_dtype).encode("utf-8"))
     digest.update(index_array.tobytes())
     key = digest.hexdigest()[:16]
-    return storage_dir / f"features_{feature_dtype.name}_{index_array.shape[0]}_{key}.dat"
+    return (
+        storage_dir / f"features_{feature_dtype.name}_{index_array.shape[0]}_{key}.dat"
+    )
 
 
 def _open_selected_feature_grids(
@@ -144,7 +152,9 @@ def _open_selected_feature_grids(
     feature_path = _resolve_artifact_path(feature_storage["path"])
     storage_shape = tuple(int(value) for value in feature_storage["shape"])
     if len(storage_shape) != 4:
-        raise ValueError(f"Expected feature storage shape [N, C, H, W], got {storage_shape}.")
+        raise ValueError(
+            f"Expected feature storage shape [N, C, H, W], got {storage_shape}."
+        )
     if not feature_path.exists():
         raise FileNotFoundError(f"Missing symbolic feature storage: {feature_path}")
 
@@ -160,7 +170,10 @@ def _open_selected_feature_grids(
     row_count = storage_shape[0]
     selected_count = int(indices.numel())
     grid_shape = storage_shape[1:]
-    if _is_full_contiguous_selection(indices, row_count) and source_dtype == target_dtype:
+    if (
+        _is_full_contiguous_selection(indices, row_count)
+        and source_dtype == target_dtype
+    ):
         return source
 
     cache_path = _feature_cache_path(payload, indices, target_dtype)
@@ -178,7 +191,9 @@ def _open_selected_feature_grids(
         chunk_size = max(int(cache_chunk_size), 1)
         for start in range(0, selected_count, chunk_size):
             stop = min(start + chunk_size, selected_count)
-            cache_flat[start:stop] = source_flat[keep[start:stop]].astype(target_dtype, copy=False)
+            cache_flat[start:stop] = source_flat[keep[start:stop]].astype(
+                target_dtype, copy=False
+            )
         cache.flush()
         del cache
 

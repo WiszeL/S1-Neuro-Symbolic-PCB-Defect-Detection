@@ -28,6 +28,7 @@ PCBItem = tuple[Tensor, PCBTarget]
 PCBPreprocess = Callable[[Image.Image, PCBTarget], tuple[Tensor, PCBTarget]]
 InspectionSummary = dict[str, Any]
 
+
 @dataclass(frozen=True)
 class PCBRecord:
     image_path: Path
@@ -70,7 +71,7 @@ def _parse_annotation(annotation_path: Path) -> tuple[Tensor, Tensor]:
 
 
 def _build_dataset_manifest(
-    dataset_root: Path, 
+    dataset_root: Path,
     split_file: str,
     image_size: tuple[int, int],
 ) -> list[PCBRecord]:
@@ -82,8 +83,7 @@ def _build_dataset_manifest(
         raise FileNotFoundError(f"Split file not found: {split_path}")
 
     for line_number, line in enumerate(
-        split_path.read_text(encoding="utf-8").splitlines(), 
-        start=1
+        split_path.read_text(encoding="utf-8").splitlines(), start=1
     ):
         # Get the image and annots reference from the split file
         if not line.strip():
@@ -97,7 +97,9 @@ def _build_dataset_manifest(
 
         # Image (lazy)
         image_reference = Path(image_reference)
-        image_path = dataset_root / image_reference.parent / f"{image_reference.stem}_test.jpg"
+        image_path = (
+            dataset_root / image_reference.parent / f"{image_reference.stem}_test.jpg"
+        )
         if not image_path.exists():
             raise FileNotFoundError(f"Image file not found: {image_path}")
 
@@ -115,14 +117,11 @@ def _build_dataset_manifest(
 
         # Add
         samples.append(
-            PCBRecord(
-                image_path=image_path,
-                boxes=bounding_boxes,
-                labels=labels
-            )
+            PCBRecord(image_path=image_path, boxes=bounding_boxes, labels=labels)
         )
 
     return samples
+
 
 class PCBDataset(Dataset[PCBItem]):
     def __init__(
@@ -160,10 +159,10 @@ class PCBDataset(Dataset[PCBItem]):
         }
 
         return self.preprocess(image, target)
-    
+
     def add_preprocess(self, preprocess: PCBPreprocess):
         self.preprocess = preprocess
-    
+
     def inspect(self, n: int = 6) -> None:
         if len(self.samples) == 0:
             raise ValueError("Cannot inspect an empty dataset.")
@@ -192,11 +191,15 @@ def _build_inspection(
         [sample.boxes.shape[0] for sample in samples],
         dtype=torch.int64,
     )
-    non_empty_labels = [sample.labels for sample in samples if sample.labels.numel() > 0]
+    non_empty_labels = [
+        sample.labels for sample in samples if sample.labels.numel() > 0
+    ]
 
     if non_empty_labels:
         labels = torch.cat(non_empty_labels, dim=0)
-        unique_labels, label_counts = torch.unique(labels, sorted=True, return_counts=True)
+        unique_labels, label_counts = torch.unique(
+            labels, sorted=True, return_counts=True
+        )
         label_count_by_id = {
             int(label): int(count)
             for label, count in zip(unique_labels.tolist(), label_counts.tolist())
@@ -244,7 +247,9 @@ def _print_inspection_summary(split_file: str, inspection: InspectionSummary) ->
 def _plot_class_counts(inspection: InspectionSummary) -> None:
     # Class imbalance is the main dataset-level signal worth plotting.
     class_fig, class_ax = plt.subplots(figsize=(10, 4.8))
-    class_ax.bar(inspection["class_labels"], inspection["class_counts"], color="#2f6f73")
+    class_ax.bar(
+        inspection["class_labels"], inspection["class_counts"], color="#2f6f73"
+    )
     class_ax.set_title("Annotations per Class", loc="left", fontsize=14, weight="bold")
     class_ax.set_ylabel("Annotations")
     class_ax.tick_params(axis="x", rotation=30)

@@ -32,12 +32,21 @@ def initialize_tree_weights(
 def _is_contiguous_indices(indices: np.ndarray) -> bool:
     if indices.size == 0:
         return True
-    return bool(np.all(indices == np.arange(indices[0], indices[0] + indices.size, dtype=indices.dtype)))
+    return bool(
+        np.all(
+            indices
+            == np.arange(indices[0], indices[0] + indices.size, dtype=indices.dtype)
+        )
+    )
 
 
 def _select_rows(features: np.ndarray, indices: np.ndarray) -> np.ndarray:
     if _is_contiguous_indices(indices):
-        return features[int(indices[0]) : int(indices[-1]) + 1] if indices.size > 0 else features[:0]
+        return (
+            features[int(indices[0]) : int(indices[-1]) + 1]
+            if indices.size > 0
+            else features[:0]
+        )
     return features[indices]
 
 
@@ -75,7 +84,9 @@ def compute_reduced_sets(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
 ) -> dict[int, np.ndarray]:
-    reduced_sets: dict[int, np.ndarray] = {0: np.arange(features.shape[0], dtype=np.int64)}
+    reduced_sets: dict[int, np.ndarray] = {
+        0: np.arange(features.shape[0], dtype=np.int64)
+    }
 
     for node_index in range(tree.num_internal_nodes):
         node_indices = reduced_sets.get(node_index, np.zeros((0,), dtype=np.int64))
@@ -95,7 +106,9 @@ def compute_reduced_sets(
         reduced_sets[tree.right_child(node_index)] = node_indices[~go_left]
 
     for leaf_offset in range(tree.num_leaves):
-        reduced_sets.setdefault(tree.num_internal_nodes + leaf_offset, np.zeros((0,), dtype=np.int64))
+        reduced_sets.setdefault(
+            tree.num_internal_nodes + leaf_offset, np.zeros((0,), dtype=np.int64)
+        )
 
     return reduced_sets
 
@@ -111,11 +124,13 @@ def update_leaf_predictions(
         if node_indices.size == 0:
             continue
 
-        counts = np.bincount(labels[node_indices], minlength=tree.num_classes).astype(np.float32)
+        counts = np.bincount(labels[node_indices], minlength=tree.num_classes).astype(
+            np.float32
+        )
         tree.leaf_labels[leaf_offset] = int(counts.argmax())
-        tree.leaf_distributions[leaf_offset] = (
-            counts + tree.leaf_smoothing
-        ) / (counts.sum() + (tree.leaf_smoothing * tree.num_classes))
+        tree.leaf_distributions[leaf_offset] = (counts + tree.leaf_smoothing) / (
+            counts.sum() + (tree.leaf_smoothing * tree.num_classes)
+        )
 
 
 def solve_l1_logistic_reduced_problem(
@@ -192,7 +207,9 @@ def evaluate_tree(
     return {
         "mimic_accuracy": accuracy,
         "nonzero_weights": int(sum(nonzero_counts)),
-        "mean_nonzero_per_node": float(np.mean(nonzero_counts)) if nonzero_counts else 0.0,
+        "mean_nonzero_per_node": float(np.mean(nonzero_counts))
+        if nonzero_counts
+        else 0.0,
         "active_internal_nodes": int(sum(count > 0 for count in nonzero_counts)),
     }
 
@@ -217,7 +234,9 @@ def fit_tree_with_tao(
     labels = np.asarray(labels, dtype=np.int64)
 
     if features.ndim != 2:
-        raise ValueError("TAO expects a 2D feature matrix of shape [num_samples, num_features].")
+        raise ValueError(
+            "TAO expects a 2D feature matrix of shape [num_samples, num_features]."
+        )
 
     if np.allclose(tree.node_weights, 0.0):
         initialize_tree_weights(tree, random_state=random_state)
@@ -259,7 +278,9 @@ def fit_tree_with_tao(
                 tree.node_weights[node_index] = 0.0
                 tree.node_bias[node_index] = 0.0
                 if node_progress_callback is not None:
-                    node_progress_callback({**node_event, "phase": "end", "status": "empty"})
+                    node_progress_callback(
+                        {**node_event, "phase": "end", "status": "empty"}
+                    )
                 continue
 
             node_labels = labels[node_indices]
@@ -283,13 +304,17 @@ def fit_tree_with_tao(
 
             if not np.any(positive_weight_mask):
                 if node_progress_callback is not None:
-                    node_progress_callback({**node_event, "phase": "end", "status": "no_split_gain"})
+                    node_progress_callback(
+                        {**node_event, "phase": "end", "status": "no_split_gain"}
+                    )
                 continue
 
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
             solver_indices = node_indices[positive_weight_mask]
             node_features = _select_rows(features, solver_indices)
-            effective_lambda = float(l1_lambda * (max(node_indices.size, 1) ** (sparsity_alpha - 1.0)))
+            effective_lambda = float(
+                l1_lambda * (max(node_indices.size, 1) ** (sparsity_alpha - 1.0))
+            )
             weights, bias = solve_l1_logistic_reduced_problem(
                 node_features,
                 pseudolabels[positive_weight_mask],

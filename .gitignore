@@ -3,3 +3,8 @@ checkpoints
 dataset
 __pycache__
 *.egg-info
+.ctx
+.opencode
+.codex
+.ruff_cache
+opencode.json
