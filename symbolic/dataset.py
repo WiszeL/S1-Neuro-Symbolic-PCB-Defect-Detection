@@ -45,6 +45,7 @@ def _resolve_artifact_path(path_value: str | Path) -> Path:
 
 def _balanced_sample_indices(
     labels: Tensor,
+    scores: Tensor | None,
     max_samples_total: int,
     random_state: int,
 ) -> Tensor:
@@ -61,11 +62,21 @@ def _balanced_sample_indices(
 
     for label in unique_labels.tolist():
         class_indices = torch.where(labels == label)[0]
-        shuffled = class_indices[
-            torch.randperm(class_indices.shape[0], generator=generator)
-        ]
-        selected_indices.append(shuffled[:per_class_quota])
-        remaining_indices.append(shuffled[per_class_quota:])
+        
+        if scores is not None:
+            # Sort by confidence (descending) to prioritize high-confidence RoIs
+            class_scores = scores[class_indices]
+            sorted_order = torch.argsort(class_scores, descending=True)
+            sorted_indices = class_indices[sorted_order]
+        else:
+            # Fallback to random shuffle if scores not available
+            shuffled = class_indices[
+                torch.randperm(class_indices.shape[0], generator=generator)
+            ]
+            sorted_indices = shuffled
+        
+        selected_indices.append(sorted_indices[:per_class_quota])
+        remaining_indices.append(sorted_indices[per_class_quota:])
 
     combined = torch.cat(selected_indices, dim=0)
     if combined.shape[0] >= max_samples_total:
@@ -74,11 +85,9 @@ def _balanced_sample_indices(
     if remaining_indices:
         leftover = torch.cat(remaining_indices, dim=0)
         if leftover.shape[0] > 0:
-            shuffled_leftover = leftover[
-                torch.randperm(leftover.shape[0], generator=generator)
-            ]
+            # Leftover is already sorted by confidence, take from the front
             needed = max_samples_total - combined.shape[0]
-            combined = torch.cat([combined, shuffled_leftover[:needed]], dim=0)
+            combined = torch.cat([combined, leftover[:needed]], dim=0)
 
     return combined
 
@@ -94,11 +103,31 @@ def _selected_indices_from_metadata(
     if max_samples_total is None:
         return candidate_indices
 
-    return _balanced_sample_indices(
+    # Get teacher_scores for confidence-weighted sampling, with fallback
+    scores = metadata.get("teacher_scores")
+    if scores is not None:
+        # Extract max probability/score per RoI for sorting
+        if scores.ndim == 2:
+            # If scores is [N, num_classes], take max per RoI
+            candidate_scores = scores.max(dim=1).values
+        else:
+            candidate_scores = scores
+    else:
+        candidate_scores = None
+
+    keep = _balanced_sample_indices(
         labels[candidate_indices],
+        scores=candidate_scores,
         max_samples_total=max_samples_total,
         random_state=random_state,
     )
+    
+    # Sort indices for efficient sequential memmap access during feature loading.
+    # This changes random access pattern in _open_selected_feature_grids() to sequential,
+    # dramatically speeding up cache creation. Training code doesn't care about order
+    # since features and labels are indexed by the same sorted keep indices.
+    keep = torch.sort(keep).values
+    return keep
 
 
 def _index_optional_tensor(tensor: Tensor | None, indices: Tensor) -> Tensor | None:

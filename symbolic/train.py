@@ -91,11 +91,12 @@ def _load_symbolic_training_data(
 
 def _load_symbolic_evaluation_data(
     export_path: str | Path,
-    random_state: int,
+    max_samples_total: int | None = None,
+    random_state: int = 42,
 ) -> tuple[Any, Any, Any]:
     bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
-        max_samples_total=None,
+        max_samples_total=max_samples_total,
         random_state=random_state,
         feature_dtype="float32",
     )
@@ -242,9 +243,11 @@ def _build_heldout_review(
     heldout_export_path: str | Path,
     random_state: int,
     trained_model: dict[str, Any],
+    max_samples_total: int | None = None,
 ) -> dict[str, Any]:
     bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
         heldout_export_path,
+        max_samples_total=max_samples_total,
         random_state=random_state,
     )
 
@@ -421,13 +424,19 @@ def train_symbolic_tree(
         sparsity_alpha=sodt_config["sparsity_alpha"],
         history=history,
         random_state=sodt_config["random_state"],
-    )
+     )
     heldout_review = None
     if heldout_export_path is not None:
+        # Use half of training max_samples_total for heldout evaluation (confidence-weighted)
+        heldout_max_samples = None
+        if data_config["max_samples_total"] is not None:
+            heldout_max_samples = data_config["max_samples_total"] // 2
+        
         heldout_review = _build_heldout_review(
             heldout_export_path=heldout_export_path,
             random_state=sodt_config["random_state"],
             trained_model=trained_model,
+            max_samples_total=heldout_max_samples,
         )
 
     artifact = {

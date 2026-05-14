@@ -14,6 +14,7 @@ from util.io import ensure_dir
 
 _METADATA_TENSOR_FIELDS = [
     "teacher_labels",
+    "teacher_scores",
     "proposal_boxes",
     "transformed_proposal_boxes",
     "matched_gt_boxes",
@@ -133,10 +134,6 @@ def _build_symbolic_record(
         .detach()
         .to(dtype=torch_dtype)
         .cpu(),
-        "image_size": teacher_output["image_size"].detach().cpu(),
-        "transformed_image_size": teacher_output["transformed_image_size"]
-        .detach()
-        .cpu(),
         "matched_gt_boxes": matched_ground_truth["matched_gt_boxes"].detach().cpu(),
         "has_matched_gt": matched_ground_truth["has_matched_gt"].detach().cpu(),
         "gt_labels": matched_ground_truth["matched_gt_labels"].detach().cpu(),
@@ -155,26 +152,12 @@ def _new_metadata_parts() -> dict[str, list[Any]]:
     return metadata_parts
 
 
-def _append_repeated_image_metadata(
-    record: dict[str, Any],
-    metadata_parts: dict[str, list[Any]],
-) -> None:
-    num_rois = int(record["teacher_labels"].shape[0])
-    metadata_parts["image_ids"] = metadata_parts.get("image_ids", []) + [
-        torch.full((num_rois,), int(record["image_id"]), dtype=torch.int64)
-    ]
-    metadata_parts["image_sizes"].append(record["image_size"].repeat(num_rois, 1))
-    metadata_parts["transformed_image_sizes"].append(
-        record["transformed_image_size"].repeat(num_rois, 1)
-    )
-    metadata_parts["image_paths"].extend([str(record["image_path"])] * num_rois)
-
-
 def _append_symbolic_metadata(
     record: dict[str, Any],
     metadata_parts: dict[str, list[Any]],
 ) -> None:
     metadata_parts["teacher_labels"].append(record["teacher_labels"])
+    metadata_parts["teacher_scores"].append(record["teacher_scores"])
     metadata_parts["proposal_boxes"].append(record["proposal_boxes"])
     metadata_parts["transformed_proposal_boxes"].append(
         record["transformed_proposal_boxes"]
@@ -183,7 +166,8 @@ def _append_symbolic_metadata(
     metadata_parts["has_matched_gt"].append(record["has_matched_gt"])
     metadata_parts["gt_labels"].append(record["gt_labels"])
     metadata_parts["gt_iou"].append(record["gt_iou"])
-    _append_repeated_image_metadata(record, metadata_parts)
+    num_rois = int(record["teacher_labels"].shape[0])
+    metadata_parts["image_paths"].extend([str(record["image_path"])] * num_rois)
 
 
 def _finalize_symbolic_metadata(metadata_parts: dict[str, list[Any]]) -> dict[str, Any]:
@@ -191,21 +175,6 @@ def _finalize_symbolic_metadata(metadata_parts: dict[str, list[Any]]) -> dict[st
     for field in _METADATA_TENSOR_FIELDS:
         parts = metadata_parts[field]
         metadata[field] = torch.cat(parts, dim=0) if parts else None
-    metadata["image_ids"] = (
-        torch.cat(metadata_parts["image_ids"], dim=0)
-        if metadata_parts.get("image_ids")
-        else None
-    )
-    metadata["image_sizes"] = (
-        torch.cat(metadata_parts["image_sizes"], dim=0)
-        if metadata_parts.get("image_sizes")
-        else None
-    )
-    metadata["transformed_image_sizes"] = (
-        torch.cat(metadata_parts["transformed_image_sizes"], dim=0)
-        if metadata_parts.get("transformed_image_sizes")
-        else None
-    )
     metadata["image_paths"] = tuple(str(path) for path in metadata_parts["image_paths"])
     return metadata
 
