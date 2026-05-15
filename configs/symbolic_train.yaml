@@ -1,5 +1,5 @@
 data:
-  max_samples_total: 26000
+  max_samples_total: 32000
   storage_dtype: float16
 
 search:
@@ -16,3 +16,4 @@ search:
 # 4; 24k; 20; 1; 56 (Explainest)
 # 4; 26k; 10; 0.9; 56 (BEST) <-- USE THISSS SO FAR!!!!
 # 4; 26k; 10; 0.85; 56 (most accurate)
+# KlawayarWayarKLicaKlawayar445

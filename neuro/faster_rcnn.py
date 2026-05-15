@@ -200,7 +200,7 @@ class SFPSPyramid(nn.Module):
 
             return weights[:, 0] * semantic_feature + weights[:, 1] * spatial_feature
 
-    def __init__(self, out_channels: int = 256, attention_reduction: int = 16) -> None:
+    def __init__(self, out_channels: int = 64, attention_reduction: int = 16) -> None:
         super().__init__()
         self.out_channels = out_channels
 
@@ -266,7 +266,7 @@ class BackboneWithNeck(nn.Module):
         self,
         pretrained: bool = True,
         freeze_batch_norm: bool = True,
-        out_channels: int = 256,
+        out_channels: int = 64,
         attention_reduction: int = 16,
     ) -> None:
         super().__init__()
@@ -459,7 +459,7 @@ class BoxHead(nn.Module):
     class Config:
         """Default dimensions for Faster R-CNN's two-FC box head."""
 
-        pooled_channels: int = 256
+        pooled_channels: int = 64
         pooled_size: int = 7
         representation_size: int = 1024
 

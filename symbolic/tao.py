@@ -40,14 +40,27 @@ def _is_contiguous_indices(indices: np.ndarray) -> bool:
     )
 
 
-def _select_rows(features: np.ndarray, indices: np.ndarray) -> np.ndarray:
+import gc
+
+def _select_rows(source: np.ndarray, indices: np.ndarray) -> np.ndarray:
+    if indices.size == 0:
+        return np.empty((0, source.shape[1]), dtype=source.dtype)
+    
+    # Optimization: if indices are contiguous, we can use a slice which is
+    # extremely fast and returns a view if source is a memmap.
     if _is_contiguous_indices(indices):
-        return (
-            features[int(indices[0]) : int(indices[-1]) + 1]
-            if indices.size > 0
-            else features[:0]
-        )
-    return features[indices]
+        return source[int(indices[0]) : int(indices[-1]) + 1]
+
+    # Chunked reads prevent massive numpy IO scatter-gather freezes
+    # when selecting thousands of fragmented rows from a memmap.
+    if indices.size <= _TAO_CHUNK_SIZE:
+        return source[indices]
+        
+    out = np.empty((indices.size, source.shape[1]), dtype=source.dtype)
+    for start in range(0, indices.size, _TAO_CHUNK_SIZE):
+        stop = min(start + _TAO_CHUNK_SIZE, indices.size)
+        out[start:stop] = source[indices[start:stop]]
+    return out
 
 
 def _score_rows_for_node(
@@ -137,26 +150,28 @@ def solve_l1_logistic_reduced_problem(
     features: np.ndarray,
     labels: np.ndarray,
     sample_weights: np.ndarray,
-    l1_lambda: float,
+    indices: np.ndarray | None = None,
+    l1_lambda: float = 0.1,
     max_iter: int = 200,
     tolerance: float = 1e-4,
     zero_threshold: float = 1e-5,
     random_state: int = 42,
 ) -> tuple[np.ndarray, float]:
-    if features.shape[0] == 0:
-        return np.zeros((features.shape[1],), dtype=np.float32), 0.0
+    if labels.size == 0:
+        dim = features.shape[1]
+        return np.zeros((dim,), dtype=np.float32), 0.0
 
-    features = np.asarray(features, dtype=np.float32)
+    # Avoid materializing the full 'features' memmap.
+    # We only materialize the specific rows needed for this node.
+    if indices is not None:
+        features = _select_rows(features, indices)
+    else:
+        # If no indices provided, we assume 'features' is already the subset.
+        # Still, we ensure it's float32 without making an extra copy if possible.
+        features = np.asarray(features, dtype=np.float32)
+
     labels = np.asarray(labels, dtype=np.int64)
-    sample_weights = np.asarray(sample_weights, dtype=np.float64)
-
-    positive_weight_mask = sample_weights > 0.0
-    if not np.any(positive_weight_mask):
-        return np.zeros((features.shape[1],), dtype=np.float32), 0.0
-
-    features = features[positive_weight_mask]
-    labels = labels[positive_weight_mask]
-    sample_weights = sample_weights[positive_weight_mask]
+    sample_weights = np.asarray(sample_weights, dtype=np.float32)
 
     unique_labels = np.unique(labels)
     if unique_labels.size == 1:
@@ -173,8 +188,16 @@ def solve_l1_logistic_reduced_problem(
     # ---------------------------------------------------------------------
     # Match the paper solver family: L1 logistic regression with LIBLINEAR
     # ---------------------------------------------------------------------
-    # The papers name the solver family but do not spell out the sklearn C mapping,
-    # so we use the standard inverse-regularization convention C = 1 / lambda.
+    # The papers specify L1-regularized logistic regression for the reduced problem.
+    # LIBLINEAR is the standard deterministic solver for this objective in TAO.
+    
+    # We convert directly to float64 here. This is what LIBLINEAR requires.
+    # By doing it now and letting the previous 'features' reference go,
+    # we avoid having both float32 and float64 copies in RAM simultaneously.
+    features_64 = features.astype(np.float64)
+    del features # Free the float32 subset immediately
+    gc.collect()
+
     effective_lambda = max(float(l1_lambda), 1e-12)
     model = LogisticRegression(
         penalty="l1",
@@ -185,15 +208,17 @@ def solve_l1_logistic_reduced_problem(
         tol=tolerance,
         max_iter=max_iter,
     )
-    model.fit(
-        features,
-        labels,
-        sample_weight=sample_weights,
-    )
-
+    
+    model.fit(features_64, labels, sample_weight=sample_weights)
+    
     learned_weights = model.coef_[0].astype(np.float32)
     learned_weights[np.abs(learned_weights) < zero_threshold] = 0.0
-    return learned_weights, float(model.intercept_[0])
+    bias = float(model.intercept_[0])
+    
+    del features_64, model
+    gc.collect()
+    
+    return learned_weights, bias
 
 
 def _ensure_float32_features(features: np.ndarray) -> np.ndarray:
@@ -324,14 +349,19 @@ def fit_tree_with_tao(
 
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
             solver_indices = node_indices[positive_weight_mask]
-            node_features = _select_rows(features, solver_indices)
+            
             effective_lambda = float(
                 l1_lambda * (max(node_indices.size, 1) ** (sparsity_alpha - 1.0))
             )
+            
+            # Pass the full features memmap and the subset indices separately.
+            # This allows the solver to stream the data in chunks rather than 
+            # materializing a multi-gigabyte array in RAM.
             weights, bias = solve_l1_logistic_reduced_problem(
-                node_features,
+                features,
                 pseudolabels[positive_weight_mask],
                 sample_weights[positive_weight_mask],
+                indices=solver_indices,
                 l1_lambda=effective_lambda,
                 max_iter=logistic_max_iter,
                 tolerance=tolerance,
@@ -340,6 +370,7 @@ def fit_tree_with_tao(
             )
             tree.node_weights[node_index] = weights
             tree.node_bias[node_index] = bias
+            gc.collect()
             if node_progress_callback is not None:
                 node_progress_callback(
                     {
