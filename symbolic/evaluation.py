@@ -11,13 +11,7 @@ from util.geometry import project_gt_box_to_roi_grid
 
 _NAN = float("nan")
 
-_SPATIAL_METRIC_NAMES = [
-    "box_grounded_roi_overlap",
-    "pointing_score",
-    "energy_in_defect_ratio",
-    "heatmap_entropy",
-    "stability_score",
-]
+
 
 
 def _safe_macro_f1(
@@ -68,21 +62,6 @@ def _ensure_writable_tensor(
     return torch.as_tensor(data, dtype=dtype)
 
 
-def path_feature_indices(
-    tree: SparseObliqueDecisionTreeClassifier,
-    feature_vector: np.ndarray,
-) -> np.ndarray:
-    path = tree.decision_path(feature_vector)
-    if not path:
-        return np.zeros((0,), dtype=np.int64)
-
-    active_indices = [
-        np.flatnonzero(tree.node_weights[step.node_index]) for step in path
-    ]
-    non_empty = [indices for indices in active_indices if indices.size > 0]
-    if not non_empty:
-        return np.zeros((0,), dtype=np.int64)
-    return np.unique(np.concatenate(non_empty, axis=0)).astype(np.int64)
 
 
 def _build_selected_mask(
@@ -146,7 +125,7 @@ def evaluate_symbolic_model(
         selected_per_row: list[np.ndarray] = []
         batch_subset_sizes = np.empty(B, dtype=np.int64)
         for i in range(B):
-            sel = path_feature_indices(tree, batch_features[i])
+            sel = tree.path_feature_indices(batch_features[i])
             selected_per_row.append(sel)
             batch_subset_sizes[i] = sel.size
 
@@ -303,17 +282,6 @@ def evaluate_symbolic_model(
         "necessity_flip_advantage_over_random": m_nec_flip - m_rnd_nec_flip,
         "sufficiency_advantage_over_random": m_suf_pres - m_rnd_suf_pres,
         "sufficiency_retention_advantage_over_random": m_suf_ret - m_rnd_suf_ret,
-        "evaluation_extension": {
-            "faithfulness_tests": [
-                "necessity",
-                "sufficiency",
-                "random_control",
-            ],
-            "note": (
-                "These necessity/sufficiency/random-control metrics are thesis-specific evaluation "
-                "extensions. They are not claimed as direct procedures from Hada or Kairgeldin."
-            ),
-        },
     }
 
 
@@ -355,6 +323,37 @@ def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
     return float(intersection / union)
 
 
+def _normalize_heatmap(heatmap: Tensor | np.ndarray) -> Tensor:
+    tensor = torch.as_tensor(heatmap, dtype=torch.float32)
+    tensor = torch.clamp(tensor, min=0.0)
+    total = float(tensor.sum().item())
+    if total <= 0.0:
+        return torch.zeros_like(tensor)
+    return tensor / total
+
+
+def _heatmap_entropy(heatmap: Tensor) -> float:
+    flattened = heatmap.reshape(-1)
+    positive = flattened[flattened > 0]
+    if positive.numel() == 0:
+        return 0.0
+    entropy = -torch.sum(positive * torch.log(positive))
+    return float(entropy.item() / np.log(max(flattened.numel(), 2)))
+
+
+def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
+    peak_index = int(torch.argmax(heatmap.reshape(-1)).item())
+    row_index = peak_index // heatmap.shape[1]
+    col_index = peak_index % heatmap.shape[1]
+    return float(gt_mask[row_index, col_index].item())
+
+
+def _energy_in_region(heatmap: Tensor, gt_mask: Tensor) -> float:
+    if int(gt_mask.sum().item()) == 0:
+        return 0.0
+    return float(heatmap[gt_mask].sum().item())
+
+
 def _feature_perturbation_stability(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_grid: Tensor | np.ndarray,
@@ -378,20 +377,13 @@ def _feature_perturbation_stability(
         tree, feature_grid + perturbation
     )
 
-    base_vector = torch.clamp(base_heatmap.detach().cpu().float(), min=0.0)
-    base_total = float(base_vector.sum().item())
-    base_vector = (
-        torch.zeros_like(base_vector) if base_total <= 0.0 else base_vector / base_total
-    ).reshape(-1)
-    perturbed_vector = torch.clamp(perturbed_heatmap.detach().cpu().float(), min=0.0)
-    perturbed_total = float(perturbed_vector.sum().item())
-    if base_total <= 0.0 and perturbed_total <= 0.0:
+    base_vector = _normalize_heatmap(base_heatmap).reshape(-1)
+    perturbed_vector = _normalize_heatmap(perturbed_heatmap).reshape(-1)
+    if (
+        float(base_vector.sum().item()) == 0.0
+        and float(perturbed_vector.sum().item()) == 0.0
+    ):
         return 1.0
-    perturbed_vector = (
-        torch.zeros_like(perturbed_vector)
-        if perturbed_total <= 0.0
-        else perturbed_vector / perturbed_total
-    ).reshape(-1)
 
     denominator = float(base_vector.norm().item() * perturbed_vector.norm().item())
     if denominator <= 0.0:
@@ -406,8 +398,6 @@ def _spatial_result(
     energy: float,
     entropy: float,
     stability: float,
-    metric_names: list[str],
-    note: str,
 ) -> dict[str, Any]:
     return {
         "evaluated_roi_count": count,
@@ -416,10 +406,6 @@ def _spatial_result(
         "energy_in_defect_ratio": energy,
         "heatmap_entropy": entropy,
         "stability_score": stability,
-        "evaluation_extension": {
-            "spatial_metrics": metric_names,
-            "note": note,
-        },
     }
 
 
@@ -440,8 +426,6 @@ def evaluate_symbolic_spatial_metrics(
             _NAN,
             _NAN,
             _NAN,
-            [],
-            "No matched GT boxes were available. Spatial explanation metrics could not be computed.",
         )
 
     overlap_scores: list[float] = []
@@ -456,44 +440,25 @@ def evaluate_symbolic_spatial_metrics(
         if gt_iou is not None and float(gt_iou[index]) <= 0.0:
             continue
 
-        heatmap = torch.clamp(
-            _compute_local_instance_heatmap(tree, feature_grids[index])
-            .detach()
-            .cpu()
-            .float(),
-            min=0.0,
-        )
-        total = float(heatmap.sum().item())
-        heatmap = torch.zeros_like(heatmap) if total <= 0.0 else heatmap / total
+        heatmap = _compute_local_instance_heatmap(tree, feature_grids[index])
+        normalized_heatmap = _normalize_heatmap(heatmap)
         gt_mask = project_gt_box_to_roi_grid(
             proposal_box=proposal_boxes[index],
             matched_gt_box=matched_gt_boxes[index],
-            grid_shape=tuple(int(value) for value in heatmap.shape),
+            grid_shape=tuple(int(value) for value in normalized_heatmap.shape),
         )
         if int(gt_mask.sum().item()) == 0:
             continue
 
-        overlap_scores.append(_topk_region_overlap(heatmap, gt_mask))
-        peak_index = int(torch.argmax(heatmap.reshape(-1)).item())
-        row_index = peak_index // heatmap.shape[1]
-        col_index = peak_index % heatmap.shape[1]
-        pointing_scores.append(float(gt_mask[row_index, col_index].item()))
-        energy_scores.append(float(heatmap[gt_mask].sum().item()))
-        flattened = heatmap.reshape(-1)
-        positive = flattened[flattened > 0]
-        entropy_scores.append(
-            0.0
-            if positive.numel() == 0
-            else float(
-                (-torch.sum(positive * torch.log(positive))).item()
-                / np.log(max(flattened.numel(), 2))
-            )
-        )
+        overlap_scores.append(_topk_region_overlap(normalized_heatmap, gt_mask))
+        pointing_scores.append(_pointing_score(normalized_heatmap, gt_mask))
+        energy_scores.append(_energy_in_region(normalized_heatmap, gt_mask))
+        entropy_scores.append(_heatmap_entropy(normalized_heatmap))
         stability_scores.append(
             _feature_perturbation_stability(
                 tree,
                 feature_grid=feature_grids[index],
-                base_heatmap=heatmap,
+                base_heatmap=normalized_heatmap,
                 random_state=random_state + index,
             )
         )
@@ -506,9 +471,6 @@ def evaluate_symbolic_spatial_metrics(
             _NAN,
             _NAN,
             _NAN,
-            _SPATIAL_METRIC_NAMES,
-            "Spatial metrics are box-grounded on the RoI grid because the current symbolic export contains GT "
-            "boxes, not pixel masks. They should not be overclaimed as pixel-level faithfulness.",
         )
 
     return _spatial_result(
@@ -518,7 +480,4 @@ def evaluate_symbolic_spatial_metrics(
         float(np.mean(energy_scores)),
         float(np.mean(entropy_scores)),
         float(np.mean(stability_scores)),
-        _SPATIAL_METRIC_NAMES,
-        "These spatial metrics are thesis-specific evaluation extensions. They are box-grounded on the RoI "
-        "grid when only GT boxes are available, and they should not be interpreted as pixel-level ground truth.",
     )

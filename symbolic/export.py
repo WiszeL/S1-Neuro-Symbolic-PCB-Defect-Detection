@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-
 import numpy as np
+import pandas as pd
 import torch
 from tqdm import tqdm
 from torchvision.ops import box_iou
@@ -292,3 +292,60 @@ def extract_dataset_from_teacher(
     ensure_dir(output_path.parent)
     torch.save(payload, output_path)
     return output_path
+
+
+def summarize_symbolic_export(export_path: Path | str, split_name: str) -> tuple[Any, pd.DataFrame, pd.DataFrame]:
+    manifest = torch.load(export_path, map_location="cpu", weights_only=True)
+    records = pd.DataFrame(manifest["records"])
+
+    if records.empty:
+        overview = pd.DataFrame(
+            [
+                {
+                    "split": split_name,
+                    "images": 0,
+                    "total_rois": 0,
+                    "background_rois": 0,
+                    "positive_rois": 0,
+                    "feature_shape": None,
+                    "feature_cut": manifest.get("feature_cut"),
+                    "symbolic_target": manifest.get("symbolic_target"),
+                    "proposal_source": manifest.get("proposal_source"),
+                }
+            ]
+        )
+        class_counts = pd.DataFrame(columns=["split", "class_name", "count"])
+        return manifest, overview, class_counts
+
+    class_names = list(manifest["class_names"])
+    label_counts = records["label_counts"].apply(pd.Series).fillna(0).sum(axis=0)
+    label_counts = label_counts.reindex(range(len(class_names)), fill_value=0).astype(
+        int
+    )
+
+    feature_shape = manifest.get("feature_shape")
+    overview = pd.DataFrame(
+        [
+            {
+                "split": split_name,
+                "images": int(len(records)),
+                "total_rois": int(records["num_rois"].sum()),
+                "background_rois": int(label_counts.iloc[0]),
+                "positive_rois": int(label_counts.iloc[1:].sum()),
+                "feature_shape": "x".join(str(value) for value in feature_shape)
+                if feature_shape
+                else None,
+                "feature_cut": manifest.get("feature_cut"),
+                "symbolic_target": manifest.get("symbolic_target"),
+                "proposal_source": manifest.get("proposal_source"),
+            }
+        ]
+    )
+    class_counts = pd.DataFrame(
+        {
+            "split": split_name,
+            "class_name": class_names,
+            "count": label_counts.tolist(),
+        }
+    )
+    return manifest, overview, class_counts

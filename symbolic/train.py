@@ -224,33 +224,28 @@ def _evaluate_trained_model_on_bundle(
             **spatial_metrics,
         },
     )
-    evaluated_model = {
-        "tree_depth": trained_model["tree_depth"],
-        "l1_lambda": trained_model["l1_lambda"],
-        "sparsity_alpha": trained_model["sparsity_alpha"],
-        "metrics": metrics,
-    }
     return {
         "tree_depth": trained_model["tree_depth"],
         "l1_lambda": trained_model["l1_lambda"],
         "sparsity_alpha": trained_model["sparsity_alpha"],
         "metrics": metrics,
-        "report": _model_report(evaluated_model),
     }
 
 
-def _build_heldout_review(
-    heldout_export_path: str | Path,
-    random_state: int,
-    trained_model: dict[str, Any],
+def evaluate_heldout(
+    export_path: str | Path,
+    checkpoint_path: str | Path,
+    random_state: int = 42,
 ) -> dict[str, Any]:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    
     bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
-        heldout_export_path,
+        export_path,
         random_state=random_state,
     )
 
     heldout_model = _evaluate_trained_model_on_bundle(
-        trained_model=trained_model,
+        trained_model=checkpoint,
         bundle=bundle,
         feature_matrix=feature_matrix,
         labels=labels,
@@ -258,55 +253,14 @@ def _build_heldout_review(
     )
 
     return {
-        "export_path": str(heldout_export_path),
+        "export_path": str(export_path),
         "sample_count": int(feature_matrix.shape[0]),
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
-        "model": {
-            "tree_depth": heldout_model["tree_depth"],
-            "l1_lambda": heldout_model["l1_lambda"],
-            "sparsity_alpha": heldout_model["sparsity_alpha"],
-            "metrics": heldout_model["metrics"],
-        },
-        "report": heldout_model["report"],
-        "note": (
-            "Held-out test evaluates the trained SODT once. It does not participate in training."
-        ),
-    }
-
-
-def _model_report(model: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "tree_depth": model["tree_depth"],
-        "num_leaves": model["metrics"]["num_leaves"],
-        "l1_lambda": model["l1_lambda"],
-        "sparsity_alpha": model["sparsity_alpha"],
-        "mimic_accuracy": model["metrics"]["mimic_accuracy"],
-        "macro_f1_vs_teacher": model["metrics"]["macro_f1_vs_teacher"],
-        "per_class_agreement_vs_teacher": model["metrics"][
-            "per_class_agreement_vs_teacher"
-        ],
-        "nonzero_weights": model["metrics"]["nonzero_weights"],
-        "mean_nonzero_per_node": model["metrics"]["mean_nonzero_per_node"],
-        "active_internal_nodes": model["metrics"]["active_internal_nodes"],
-        "mean_path_feature_count": model["metrics"]["mean_path_feature_count"],
-        "necessity_advantage_over_random": model["metrics"][
-            "necessity_advantage_over_random"
-        ],
-        "necessity_flip_advantage_over_random": model["metrics"][
-            "necessity_flip_advantage_over_random"
-        ],
-        "sufficiency_advantage_over_random": model["metrics"][
-            "sufficiency_advantage_over_random"
-        ],
-        "sufficiency_retention_advantage_over_random": (
-            model["metrics"]["sufficiency_retention_advantage_over_random"]
-        ),
-        "box_grounded_roi_overlap": model["metrics"]["box_grounded_roi_overlap"],
-        "pointing_score": model["metrics"]["pointing_score"],
-        "energy_in_defect_ratio": model["metrics"]["energy_in_defect_ratio"],
-        "heatmap_entropy": model["metrics"]["heatmap_entropy"],
-        "stability_score": model["metrics"]["stability_score"],
+        "tree_depth": heldout_model["tree_depth"],
+        "l1_lambda": heldout_model["l1_lambda"],
+        "sparsity_alpha": heldout_model["sparsity_alpha"],
+        "metrics": heldout_model["metrics"],
     }
 
 
@@ -316,7 +270,6 @@ def train_symbolic_tree(
     *,
     config: SymbolicTrainConfig,
     summary_path: str | Path | None = None,
-    heldout_export_path: str | Path | None = None,
 ) -> dict[str, Any]:
     data_config = config["data"]
     sodt_config = _materialize_sodt_config(config["search"])
@@ -432,17 +385,7 @@ def train_symbolic_tree(
         sparsity_alpha=sodt_config["sparsity_alpha"],
         history=history,
         random_state=sodt_config["random_state"],
-     )
-    heldout_review = None
-    if heldout_export_path is not None:
-        # Heldout uses the NATURAL distribution (no balancing, no limit).
-        # This reflects the real RoI distribution the tree will face at
-        # inference time and prevents artificially inflated accuracy metrics.
-        heldout_review = _build_heldout_review(
-            heldout_export_path=heldout_export_path,
-            random_state=sodt_config["random_state"],
-            trained_model=trained_model,
-        )
+    )
 
     artifact = {
         "tree_state": trained_model["tree_state"],
@@ -451,14 +394,9 @@ def train_symbolic_tree(
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
-        "model": {
-            "tree_depth": trained_model["tree_depth"],
-            "l1_lambda": trained_model["l1_lambda"],
-            "sparsity_alpha": trained_model["sparsity_alpha"],
-            "metrics": trained_model["metrics"],
-        },
-        "train_report": _model_report(trained_model),
-        "heldout_review": heldout_review,
+        "tree_depth": trained_model["tree_depth"],
+        "l1_lambda": trained_model["l1_lambda"],
+        "sparsity_alpha": trained_model["sparsity_alpha"],
         "training_config": {
             "tree_depth": sodt_config["tree_depth"],
             "iterations": sodt_config["iterations"],
@@ -471,9 +409,6 @@ def train_symbolic_tree(
             "neg_ratio": data_config.get("neg_ratio"),
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",
-            "heldout_export_path": str(heldout_export_path)
-            if heldout_export_path is not None
-            else None,
             "config_sections": dict(config),
         },
     }
@@ -487,9 +422,9 @@ def train_symbolic_tree(
         "history": trained_model["history"],
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
-        "model": artifact["model"],
-        "train_report": artifact["train_report"],
-        "heldout_review": heldout_review,
+        "tree_depth": trained_model["tree_depth"],
+        "l1_lambda": trained_model["l1_lambda"],
+        "sparsity_alpha": trained_model["sparsity_alpha"],
         "training_config": artifact["training_config"],
     }
     if summary_path is not None:

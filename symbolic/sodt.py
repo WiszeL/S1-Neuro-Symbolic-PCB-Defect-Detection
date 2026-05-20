@@ -230,148 +230,6 @@ class SparseObliqueDecisionTreeClassifier:
         original[self.selected_feature_indices] = retained
         return original
 
-    def _feature_coordinate(self, original_index: int) -> dict[str, int] | None:
-        if self.feature_shape is None:
-            return None
-
-        channels, height, width = self.feature_shape
-        channel_stride = height * width
-        channel_index = int(original_index // channel_stride)
-        spatial_index = int(original_index % channel_stride)
-        row_index = int(spatial_index // width)
-        col_index = int(spatial_index % width)
-        if not (
-            0 <= channel_index < channels
-            and 0 <= row_index < height
-            and 0 <= col_index < width
-        ):
-            return None
-        return {
-            "channel": channel_index,
-            "row": row_index,
-            "col": col_index,
-        }
-
-    def _rank_original_features(
-        self,
-        original_vector: np.ndarray,
-        top_k: int,
-        contribution_sign: str = "any",
-    ) -> list[dict[str, int | float]]:
-        vector = np.asarray(original_vector, dtype=np.float32).reshape(-1)
-        if contribution_sign == "positive":
-            candidate_indices = np.flatnonzero(vector > 0.0)
-            rank_values = vector[candidate_indices]
-        elif contribution_sign == "negative":
-            candidate_indices = np.flatnonzero(vector < 0.0)
-            rank_values = np.abs(vector[candidate_indices])
-        else:
-            candidate_indices = np.flatnonzero(vector != 0.0)
-            rank_values = np.abs(vector[candidate_indices])
-
-        if candidate_indices.size == 0:
-            return []
-
-        ranked_indices = candidate_indices[np.argsort(rank_values)[::-1]]
-        retained_lookup: dict[int, int] | None = None
-        if self.selected_feature_indices is not None:
-            retained_lookup = {
-                int(original_index): int(retained_index)
-                for retained_index, original_index in enumerate(
-                    self.selected_feature_indices.tolist()
-                )
-            }
-
-        results: list[dict[str, int | float]] = []
-        for original_index in ranked_indices[: max(int(top_k), 0)]:
-            record: dict[str, int | float] = {
-                "original_feature_index": int(original_index),
-                "signed_contribution": float(vector[original_index]),
-                "absolute_contribution": float(abs(vector[original_index])),
-            }
-            if retained_lookup is not None:
-                record["retained_feature_index"] = int(
-                    retained_lookup.get(int(original_index), -1)
-                )
-            else:
-                record["retained_feature_index"] = int(original_index)
-
-            coordinate = self._feature_coordinate(int(original_index))
-            if coordinate is not None:
-                record.update(coordinate)
-            results.append(record)
-        return results
-
-    def _rank_channels(
-        self,
-        original_vector: np.ndarray,
-        top_k: int,
-        contribution_sign: str = "absolute",
-    ) -> list[dict[str, int | float]]:
-        if self.feature_shape is None:
-            return []
-
-        grid = self._to_original_feature_vector(original_vector).reshape(
-            self.feature_shape
-        )
-        if contribution_sign == "positive":
-            channel_values = np.sum(np.maximum(grid, 0.0), axis=(1, 2))
-        elif contribution_sign == "negative":
-            channel_values = np.sum(np.maximum(-grid, 0.0), axis=(1, 2))
-        else:
-            channel_values = np.sum(np.abs(grid), axis=(1, 2))
-
-        nonzero_indices = np.flatnonzero(channel_values > 0.0)
-        if nonzero_indices.size == 0:
-            return []
-
-        ranked_indices = nonzero_indices[
-            np.argsort(channel_values[nonzero_indices])[::-1]
-        ]
-        return [
-            {
-                "channel": int(channel_index),
-                "score": float(channel_values[channel_index]),
-            }
-            for channel_index in ranked_indices[: max(int(top_k), 0)]
-        ]
-
-    def _rank_spatial_coordinates(
-        self,
-        original_vector: np.ndarray,
-        top_k: int,
-        contribution_sign: str = "absolute",
-    ) -> list[dict[str, int | float]]:
-        if self.feature_shape is None:
-            return []
-
-        grid = self._to_original_feature_vector(original_vector).reshape(
-            self.feature_shape
-        )
-        if contribution_sign == "positive":
-            spatial_values = np.sum(np.maximum(grid, 0.0), axis=0)
-        elif contribution_sign == "negative":
-            spatial_values = np.sum(np.maximum(-grid, 0.0), axis=0)
-        else:
-            spatial_values = np.sum(np.abs(grid), axis=0)
-
-        nonzero_indices = np.flatnonzero(spatial_values > 0.0)
-        if nonzero_indices.size == 0:
-            return []
-
-        width = spatial_values.shape[1]
-        ranked_indices = nonzero_indices[
-            np.argsort(spatial_values.reshape(-1)[nonzero_indices])[::-1]
-        ]
-        return [
-            {
-                "row": int(flat_index // width),
-                "col": int(flat_index % width),
-                "score": float(spatial_values.reshape(-1)[flat_index]),
-            }
-            for flat_index in ranked_indices[: max(int(top_k), 0)]
-        ]
-
     def node_feature_indices(
         self,
         node_index: int,
@@ -400,25 +258,6 @@ class SparseObliqueDecisionTreeClassifier:
             return np.zeros((0,), dtype=np.int64)
         return np.unique(np.concatenate(non_empty, axis=0)).astype(np.int64)
 
-    def top_feature_contributions(
-        self,
-        feature: np.ndarray,
-        top_k: int = 10,
-        contribution_sign: str = "any",
-        path: list[PathStep] | None = None,
-    ) -> list[dict[str, int | float]]:
-        prepared_feature = self._prepare_features(feature)[0]
-        contribution_vector = self.path_contribution_vector(
-            prepared_feature, original_space=True, path=path
-        )
-        if not np.any(contribution_vector):
-            return []
-        return self._rank_original_features(
-            contribution_vector,
-            top_k=top_k,
-            contribution_sign=contribution_sign,
-        )
-
     def path_contribution_vector(
         self,
         feature: np.ndarray,
@@ -443,128 +282,27 @@ class SparseObliqueDecisionTreeClassifier:
             return contribution_vector
         return self._to_original_feature_vector(contribution_vector)
 
-    def summarize_node(
-        self,
-        node_index: int,
-        feature: np.ndarray | None = None,
-        top_k: int = 5,
-    ) -> dict[str, Any]:
-        full_weight_vector = self.node_weight_full(node_index)
-        summary: dict[str, Any] = {
-            "node_index": int(node_index),
-            "active_retained_feature_count": int(
-                self.node_feature_indices(node_index).size
-            ),
-            "active_original_feature_count": int(
-                self.node_feature_indices(node_index, original_space=True).size
-            ),
-            "top_structural_features": self._rank_original_features(
-                full_weight_vector,
-                top_k=top_k,
-                contribution_sign="any",
-            ),
-            "top_structural_channels": self._rank_channels(
-                full_weight_vector,
-                top_k=top_k,
-                contribution_sign="absolute",
-            ),
-            "top_structural_coordinates": self._rank_spatial_coordinates(
-                full_weight_vector,
-                top_k=top_k,
-                contribution_sign="absolute",
-            ),
-        }
-
-        if feature is None:
-            return summary
-
-        prepared_feature = self._prepare_features(feature)[0]
-        score = float(
-            (prepared_feature * self.node_weights[node_index]).sum()
-            + self.node_bias[node_index]
-        )
-        went_left = score >= 0.0
-        local_vector = (
-            (1.0 if went_left else -1.0)
-            * self.node_weights[node_index]
-            * prepared_feature
-        )
-        local_vector_full = self._to_original_feature_vector(local_vector)
-        summary.update(
-            {
-                "score": score,
-                "went_left": bool(went_left),
-                "bias": float(self.node_bias[node_index]),
-                "top_positive_local_features": self._rank_original_features(
-                    local_vector_full,
-                    top_k=top_k,
-                    contribution_sign="positive",
-                ),
-                "top_negative_local_features": self._rank_original_features(
-                    local_vector_full,
-                    top_k=top_k,
-                    contribution_sign="negative",
-                ),
-                "top_positive_local_channels": self._rank_channels(
-                    local_vector_full,
-                    top_k=top_k,
-                    contribution_sign="positive",
-                ),
-                "top_negative_local_channels": self._rank_channels(
-                    local_vector_full,
-                    top_k=top_k,
-                    contribution_sign="negative",
-                ),
-                "top_positive_local_coordinates": self._rank_spatial_coordinates(
-                    local_vector_full,
-                    top_k=top_k,
-                    contribution_sign="positive",
-                ),
-                "top_negative_local_coordinates": self._rank_spatial_coordinates(
-                    local_vector_full,
-                    top_k=top_k,
-                    contribution_sign="negative",
-                ),
-            }
-        )
-        return summary
-
     def summarize_path(
         self,
         feature: np.ndarray,
-        top_k: int = 5,
         path: list[PathStep] | None = None,
     ) -> dict[str, Any]:
         prepared_feature = self._prepare_features(feature)[0]
         if path is None:
             path = self.decision_path(prepared_feature)
-        node_summaries = [
-            self.summarize_node(step.node_index, prepared_feature, top_k=top_k)
-            for step in path
-        ]
-        active_retained_indices = self.path_feature_indices(
-            prepared_feature, original_space=False
-        )
         active_original_indices = self.path_feature_indices(
             prepared_feature, original_space=True
         )
+        per_node_counts = [
+            int(self.node_feature_indices(step.node_index, original_space=True).size)
+            for step in path
+        ]
         return {
             "path_length": int(len(path)),
-            "leaf_index": int(self.leaf_index_for_feature(prepared_feature)),
-            "active_path_retained_feature_count": int(active_retained_indices.size),
             "active_path_original_feature_count": int(active_original_indices.size),
-            "active_path_original_feature_indices": active_original_indices.tolist(),
-            "mean_active_original_features_per_node": float(
-                np.mean(
-                    [
-                        summary["active_original_feature_count"]
-                        for summary in node_summaries
-                    ]
-                )
-            )
-            if node_summaries
+            "mean_active_original_features_per_node": float(np.mean(per_node_counts))
+            if per_node_counts
             else 0.0,
-            "nodes": node_summaries,
         }
 
     def node_weight_full(self, node_index: int) -> np.ndarray:

@@ -1,4 +1,3 @@
-from .evaluation import evaluate_symbolic_spatial_metrics
 from .heatmap import (
     aggregate_projected_heatmaps,
     compute_node_local_evidence_maps,
@@ -16,7 +15,13 @@ from .inference import (
     select_detection_indices,
     subset_detection,
 )
-from util.geometry import project_gt_box_to_roi_grid
+from .visualization import (
+    draw_neurosymbolic_explanation,
+    draw_numbered_detections,
+    heatmap_to_array,
+    image_to_array,
+    zoom_axis_to_box,
+)
 
 __all__ = [
     "NeuroSymbolicDetector",
@@ -24,14 +29,17 @@ __all__ = [
     "aggregate_projected_heatmaps",
     "compute_node_local_evidence_maps",
     "compute_symbolic_heatmap",
-    "evaluate_symbolic_spatial_metrics",
     "explain_hybrid_detection",
     "explain_hybrid_detections",
     "load_neurosymbolic_detector",
-    "project_gt_box_to_roi_grid",
     "project_heatmap_to_image",
     "resize_heatmap_to_box",
     "run_neurosymbolic_inference",
     "select_detection_indices",
     "subset_detection",
+    "draw_neurosymbolic_explanation",
+    "draw_numbered_detections",
+    "heatmap_to_array",
+    "image_to_array",
+    "zoom_axis_to_box",
 ]

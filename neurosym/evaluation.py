@@ -7,54 +7,18 @@ import torch
 from torch import Tensor
 
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
+from symbolic.evaluation import (
+    _normalize_heatmap,
+    _heatmap_entropy,
+    _topk_region_overlap,
+    _pointing_score,
+    _energy_in_region,
+)
 
 from .heatmap import compute_symbolic_heatmap
 from util.geometry import project_gt_box_to_roi_grid
 
 
-def _normalize_heatmap(heatmap: Tensor | np.ndarray) -> Tensor:
-    tensor = torch.as_tensor(heatmap, dtype=torch.float32)
-    tensor = torch.clamp(tensor, min=0.0)
-    total = float(tensor.sum().item())
-    if total <= 0.0:
-        return torch.zeros_like(tensor)
-    return tensor / total
-
-
-def _heatmap_entropy(heatmap: Tensor) -> float:
-    flattened = heatmap.reshape(-1)
-    positive = flattened[flattened > 0]
-    if positive.numel() == 0:
-        return 0.0
-    entropy = -torch.sum(positive * torch.log(positive))
-    return float(entropy.item() / np.log(max(flattened.numel(), 2)))
-
-
-def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
-    target_cells = max(int(gt_mask.sum().item()), 1)
-    flattened = heatmap.reshape(-1)
-    topk_indices = torch.topk(flattened, k=min(target_cells, flattened.numel())).indices
-    predicted_mask = torch.zeros_like(flattened, dtype=torch.bool)
-    predicted_mask[topk_indices] = True
-    predicted_mask = predicted_mask.reshape_as(gt_mask)
-    intersection = torch.logical_and(predicted_mask, gt_mask).sum().item()
-    union = torch.logical_or(predicted_mask, gt_mask).sum().item()
-    if union == 0:
-        return 0.0
-    return float(intersection / union)
-
-
-def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
-    peak_index = int(torch.argmax(heatmap.reshape(-1)).item())
-    row_index = peak_index // heatmap.shape[1]
-    col_index = peak_index % heatmap.shape[1]
-    return float(gt_mask[row_index, col_index].item())
-
-
-def _energy_in_region(heatmap: Tensor, gt_mask: Tensor) -> float:
-    if int(gt_mask.sum().item()) == 0:
-        return 0.0
-    return float(heatmap[gt_mask].sum().item())
 
 
 def _feature_perturbation_stability(
@@ -115,12 +79,6 @@ def evaluate_symbolic_spatial_metrics(
             "energy_in_defect_ratio": float("nan"),
             "heatmap_entropy": float("nan"),
             "stability_score": float("nan"),
-            "evaluation_extension": {
-                "spatial_metrics": [],
-                "note": (
-                    "No matched GT boxes were available. Spatial explanation metrics could not be computed."
-                ),
-            },
         }
 
     overlap_scores: list[float] = []
@@ -171,19 +129,6 @@ def evaluate_symbolic_spatial_metrics(
             "energy_in_defect_ratio": float("nan"),
             "heatmap_entropy": float("nan"),
             "stability_score": float("nan"),
-            "evaluation_extension": {
-                "spatial_metrics": [
-                    "box_grounded_roi_overlap",
-                    "pointing_score",
-                    "energy_in_defect_ratio",
-                    "heatmap_entropy",
-                    "stability_score",
-                ],
-                "note": (
-                    "Spatial metrics are box-grounded on the RoI grid because the current DeepPCB symbolic export "
-                    "contains GT boxes, not pixel masks. They should not be overclaimed as pixel-level faithfulness."
-                ),
-            },
         }
 
     return {
@@ -193,17 +138,4 @@ def evaluate_symbolic_spatial_metrics(
         "energy_in_defect_ratio": float(np.mean(energy_scores)),
         "heatmap_entropy": float(np.mean(entropy_scores)),
         "stability_score": float(np.mean(stability_scores)),
-        "evaluation_extension": {
-            "spatial_metrics": [
-                "box_grounded_roi_overlap",
-                "pointing_score",
-                "energy_in_defect_ratio",
-                "heatmap_entropy",
-                "stability_score",
-            ],
-            "note": (
-                "These spatial metrics are thesis-specific evaluation extensions. They are box-grounded on the RoI "
-                "grid when only GT boxes are available, and they should not be interpreted as pixel-level ground truth."
-            ),
-        },
     }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from typing import Any, Callable
 
 import numpy as np
@@ -40,7 +41,7 @@ def _is_contiguous_indices(indices: np.ndarray) -> bool:
     )
 
 
-import gc
+
 
 def _select_rows(source: np.ndarray, indices: np.ndarray) -> np.ndarray:
     if indices.size == 0:
