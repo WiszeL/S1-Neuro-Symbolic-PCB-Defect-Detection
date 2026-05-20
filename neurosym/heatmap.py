@@ -322,8 +322,20 @@ def project_heatmap_to_image(
     x1, y1, x2, y2 = box_tensor.round().int().tolist()
     resized = resize_heatmap_to_box(heatmap, box)
 
+    img_h, img_w = image_shape
+    cx1 = max(0, min(x1, img_w))
+    cx2 = max(0, min(x2, img_w))
+    cy1 = max(0, min(y1, img_h))
+    cy2 = max(0, min(y2, img_h))
+
+    rx1 = max(0, cx1 - x1)
+    rx2 = rx1 + (cx2 - cx1)
+    ry1 = max(0, cy1 - y1)
+    ry2 = ry1 + (cy2 - cy1)
+
     canvas = torch.zeros(image_shape, dtype=torch.float32)
-    canvas[y1:y2, x1:x2] = resized[: max(y2 - y1, 0), : max(x2 - x1, 0)]
+    if (cx2 > cx1) and (cy2 > cy1):
+        canvas[cy1:cy2, cx1:cx2] = resized[ry1:ry2, rx1:rx2]
     return canvas
 
 
