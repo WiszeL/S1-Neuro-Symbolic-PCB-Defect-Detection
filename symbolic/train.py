@@ -74,14 +74,14 @@ def _materialize_sodt_config(search_config: dict[str, Any]) -> dict[str, Any]:
 
 def _load_symbolic_training_data(
     export_path: str | Path,
-    max_samples_total: int | None,
     random_state: int,
+    neg_ratio: float | None = None,
 ) -> tuple[Any, Any]:
     bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
-        max_samples_total=max_samples_total,
         random_state=random_state,
         feature_dtype="float32",
+        neg_ratio=neg_ratio,
     )
 
     feature_matrix = bundle.feature_vectors
@@ -91,14 +91,14 @@ def _load_symbolic_training_data(
 
 def _load_symbolic_evaluation_data(
     export_path: str | Path,
-    max_samples_total: int | None = None,
     random_state: int = 42,
+    neg_ratio: float | None = None,
 ) -> tuple[Any, Any, Any]:
     bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
-        max_samples_total=max_samples_total,
         random_state=random_state,
         feature_dtype="float32",
+        neg_ratio=neg_ratio,
     )
     feature_matrix = bundle.feature_vectors
     labels = bundle.teacher_labels.detach().cpu().numpy()
@@ -243,11 +243,9 @@ def _build_heldout_review(
     heldout_export_path: str | Path,
     random_state: int,
     trained_model: dict[str, Any],
-    max_samples_total: int | None = None,
 ) -> dict[str, Any]:
     bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
         heldout_export_path,
-        max_samples_total=max_samples_total,
         random_state=random_state,
     )
 
@@ -327,13 +325,23 @@ def train_symbolic_tree(
     print(f"Loading symbolic training export from {export_path}...", flush=True)
     bundle, (feature_matrix, labels) = _load_symbolic_training_data(
         export_path,
-        max_samples_total=data_config["max_samples_total"],
         random_state=sodt_config["random_state"],
+        neg_ratio=data_config.get("neg_ratio"),
     )
     print(
         f"Symbolic training data ready in {_format_duration(perf_counter() - load_start_time)}.",
         flush=True,
     )
+
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    print("\n" + "=" * 45)
+    print(f"{'Selected RoI Class Distribution':^45}")
+    print("-" * 45)
+    print(f"{'Class Name':<25} | {'Selected RoIs':>15}")
+    print("-" * 45)
+    for label, count in zip(unique_labels, counts):
+        print(f"{bundle.class_names[label]:<25} | {count:>15,}")
+    print("=" * 45 + "\n")
 
     total_node_fit_upper_bound = ((2 ** sodt_config["tree_depth"]) - 1) * sodt_config[
         "iterations"
@@ -427,16 +435,13 @@ def train_symbolic_tree(
      )
     heldout_review = None
     if heldout_export_path is not None:
-        # Use half of training max_samples_total for heldout evaluation (confidence-weighted)
-        heldout_max_samples = None
-        if data_config["max_samples_total"] is not None:
-            heldout_max_samples = data_config["max_samples_total"] // 2
-        
+        # Heldout uses the NATURAL distribution (no balancing, no limit).
+        # This reflects the real RoI distribution the tree will face at
+        # inference time and prevents artificially inflated accuracy metrics.
         heldout_review = _build_heldout_review(
             heldout_export_path=heldout_export_path,
             random_state=sodt_config["random_state"],
             trained_model=trained_model,
-            max_samples_total=heldout_max_samples,
         )
 
     artifact = {
@@ -463,7 +468,7 @@ def train_symbolic_tree(
             "tolerance": sodt_config["tolerance"],
             "zero_threshold": sodt_config["zero_threshold"],
             "random_state": sodt_config["random_state"],
-            "max_samples_total": data_config["max_samples_total"],
+            "neg_ratio": data_config.get("neg_ratio"),
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",
             "heldout_export_path": str(heldout_export_path)

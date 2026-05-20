@@ -156,18 +156,32 @@ def solve_l1_logistic_reduced_problem(
     tolerance: float = 1e-4,
     zero_threshold: float = 1e-5,
     random_state: int = 42,
+    max_solver_samples: int = 30_000,
 ) -> tuple[np.ndarray, float]:
     if labels.size == 0:
         dim = features.shape[1]
         return np.zeros((dim,), dtype=np.float32), 0.0
+
+    # ---- Subsample if the node has too many samples ----
+    # LIBLINEAR needs float64 internally, so 150k × 3k × 8B = 3.6 GB.
+    # Capping at 30k keeps peak solver RAM under ~2 GB.
+    # Logistic regression converges well with 30k samples.
+    n = labels.size
+    if n > max_solver_samples:
+        rng = np.random.RandomState(random_state)
+        keep = np.sort(rng.choice(n, size=max_solver_samples, replace=False))
+        labels = labels[keep]
+        sample_weights = sample_weights[keep]
+        if indices is not None:
+            indices = indices[keep]
+        else:
+            features = features[keep]
 
     # Avoid materializing the full 'features' memmap.
     # We only materialize the specific rows needed for this node.
     if indices is not None:
         features = _select_rows(features, indices)
     else:
-        # If no indices provided, we assume 'features' is already the subset.
-        # Still, we ensure it's float32 without making an extra copy if possible.
         features = np.asarray(features, dtype=np.float32)
 
     labels = np.asarray(labels, dtype=np.int64)
@@ -188,8 +202,17 @@ def solve_l1_logistic_reduced_problem(
     # ---------------------------------------------------------------------
     # Match the paper solver family: L1 logistic regression with LIBLINEAR
     # ---------------------------------------------------------------------
-    # The papers specify L1-regularized logistic regression for the reduced problem.
-    # LIBLINEAR is the standard deterministic solver for this objective in TAO.
+    # The papers (Hada Eq. 3, Kairgeldin Eq. 4) define the reduced problem as:
+    #     E_i = SUM_{n in R_i} L(y_n, ...) + lambda_eff * ||w_i||_1
+    #
+    # sklearn's LogisticRegression minimizes:
+    #     (1/N_solver) * SUM L(...) + (1/C) * ||w||_1
+    #
+    # To match the paper's SUM-loss (not mean-loss), we need:
+    #     1/C = lambda_eff / N_solver   =>   C = N_solver / lambda_eff
+    #
+    # Without this N_solver factor, the regularization is N_solver times
+    # too weak relative to the loss, which is why sparsity never kicks in.
     
     # We convert directly to float64 here. This is what LIBLINEAR requires.
     # By doing it now and letting the previous 'features' reference go,
@@ -198,12 +221,15 @@ def solve_l1_logistic_reduced_problem(
     del features # Free the float32 subset immediately
     gc.collect()
 
+    n_solver = float(features_64.shape[0])
     effective_lambda = max(float(l1_lambda), 1e-12)
+    # C = N_solver / lambda_eff to match the paper's sum-loss formulation.
+    effective_C = max(n_solver / effective_lambda, 1e-12)
     model = LogisticRegression(
         penalty="l1",
         solver="liblinear",
         fit_intercept=True,
-        C=1.0 / effective_lambda,
+        C=effective_C,
         random_state=random_state,
         tol=tolerance,
         max_iter=max_iter,
@@ -250,6 +276,63 @@ def evaluate_tree(
         else 0.0,
         "active_internal_nodes": int(sum(count > 0 for count in nonzero_counts)),
     }
+
+
+def postprocess_tree(
+    tree: SparseObliqueDecisionTreeClassifier,
+    features: np.ndarray,
+    labels: np.ndarray,
+) -> int:
+    """Post-process tree: remove dead branches & pure subtrees (Hada Fig. 1).
+
+    A dead branch is an internal node whose reduced set is empty.
+    A pure subtree is one where every reachable leaf predicts the same class;
+    the subtree root can then be zeroed out (effectively pruning it).
+
+    Returns the number of internal nodes that were pruned (zeroed out).
+    """
+    reduced_sets = compute_reduced_sets(tree, features)
+    update_leaf_predictions(tree, labels, reduced_sets)
+
+    pruned_count = 0
+
+    def _subtree_leaf_labels(node_index: int) -> set[int]:
+        """Return the set of distinct leaf labels reachable from node_index."""
+        if tree.is_leaf_node(node_index):
+            leaf_pos = tree.leaf_position(node_index)
+            return {int(tree.leaf_labels[leaf_pos])}
+        left = tree.left_child(node_index)
+        right = tree.right_child(node_index)
+        return _subtree_leaf_labels(left) | _subtree_leaf_labels(right)
+
+    def _zero_subtree(node_index: int) -> None:
+        """Zero out all internal nodes in a subtree (dead branch removal)."""
+        if tree.is_leaf_node(node_index):
+            return
+        tree.node_weights[node_index] = 0.0
+        tree.node_bias[node_index] = 0.0
+        _zero_subtree(tree.left_child(node_index))
+        _zero_subtree(tree.right_child(node_index))
+
+    # Process in reverse BFS order (deepest first) so that pruning
+    # decisions propagate upward correctly.
+    for node_index in range(tree.num_internal_nodes - 1, -1, -1):
+        node_rs = reduced_sets.get(node_index, np.zeros((0,), dtype=np.int64))
+
+        # Dead branch: no samples reach this node
+        if node_rs.size == 0:
+            if np.any(tree.node_weights[node_index] != 0.0):
+                _zero_subtree(node_index)
+                pruned_count += 1
+            continue
+
+        # Pure subtree: all reachable leaves agree on the same class
+        reachable_labels = _subtree_leaf_labels(node_index)
+        if len(reachable_labels) == 1:
+            _zero_subtree(node_index)
+            pruned_count += 1
+
+    return pruned_count
 
 
 def fit_tree_with_tao(
@@ -350,9 +433,12 @@ def fit_tree_with_tao(
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
             solver_indices = node_indices[positive_weight_mask]
             
-            effective_lambda = float(
-                l1_lambda * (max(node_indices.size, 1) ** (sparsity_alpha - 1.0))
-            )
+            # Kairgeldin Eq. 3-4: effective lambda = lambda * h_alpha(|R_i|)
+            # where h_alpha(t) = t^alpha for t > 0, and 1 for t = 0.
+            # The paper's alpha exponent is applied directly to |R_i|.
+            n_at_node = max(node_indices.size, 1)
+            h_alpha = float(n_at_node ** sparsity_alpha)
+            effective_lambda = float(l1_lambda * h_alpha)
             
             # Pass the full features memmap and the subset indices separately.
             # This allows the solver to stream the data in chunks rather than 
@@ -394,5 +480,18 @@ def fit_tree_with_tao(
                 mimic=f"{metrics['mimic_accuracy']:.4f}",
                 nz=metrics["nonzero_weights"],
             )
+
+    # -------------------------------------------------------------------------
+    # Post-process: remove dead branches & pure subtrees (Hada Fig. 1)
+    # -------------------------------------------------------------------------
+    pruned_count = postprocess_tree(tree, features, labels)
+    if pruned_count > 0:
+        final_metrics = evaluate_tree(tree, features, labels)
+        final_metrics["iteration"] = iterations
+        final_metrics["postprocess_pruned_nodes"] = pruned_count
+        if history:
+            history[-1] = final_metrics
+        else:
+            history.append(final_metrics)
 
     return history

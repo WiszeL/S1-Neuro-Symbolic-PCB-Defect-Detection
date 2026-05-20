@@ -43,91 +43,66 @@ def _resolve_artifact_path(path_value: str | Path) -> Path:
     return path
 
 
-def _balanced_sample_indices(
+def _positive_all_neg_ratio_indices(
     labels: Tensor,
-    scores: Tensor | None,
-    max_samples_total: int,
+    neg_ratio: float,
     random_state: int,
+    background_label: int = 0,
 ) -> Tensor:
-    if labels.shape[0] <= max_samples_total:
-        return torch.arange(labels.shape[0], dtype=torch.int64)
+    """Select ALL positive (non-background) RoIs and N× background RoIs.
 
-    generator = torch.Generator()
-    generator.manual_seed(random_state)
+    This mirrors the common object detection sampling strategy (e.g. Faster R-CNN
+    RPN uses 1:1, but 1:3 is standard for the second stage).  The tree sees every
+    single defect example, and the ``random_state`` controls only which background
+    RoIs are sampled.
 
-    unique_labels = torch.unique(labels)
-    per_class_quota = max(max_samples_total // max(unique_labels.numel(), 1), 1)
-    selected_indices: list[Tensor] = []
-    remaining_indices: list[Tensor] = []
+    Args:
+        labels: 1-D tensor of integer class labels.
+        neg_ratio: How many background RoIs per total positive count.
+                   e.g. 3.0 means ``num_bg = 3 * num_positive``.
+        random_state: Seed for the background random shuffle.
+        background_label: Which label value is "background" (default 0).
+    """
+    positive_mask = labels != background_label
+    negative_mask = labels == background_label
 
-    for label in unique_labels.tolist():
-        class_indices = torch.where(labels == label)[0]
-        
-        if scores is not None:
-            # Sort by confidence (descending) to prioritize high-confidence RoIs
-            class_scores = scores[class_indices]
-            sorted_order = torch.argsort(class_scores, descending=True)
-            sorted_indices = class_indices[sorted_order]
-        else:
-            # Fallback to random shuffle if scores not available
-            shuffled = class_indices[
-                torch.randperm(class_indices.shape[0], generator=generator)
-            ]
-            sorted_indices = shuffled
-        
-        selected_indices.append(sorted_indices[:per_class_quota])
-        remaining_indices.append(sorted_indices[per_class_quota:])
+    positive_indices = torch.where(positive_mask)[0]
+    negative_indices = torch.where(negative_mask)[0]
 
-    combined = torch.cat(selected_indices, dim=0)
-    if combined.shape[0] >= max_samples_total:
-        return combined[:max_samples_total]
+    total_positive = positive_indices.shape[0]
+    max_neg = int(total_positive * neg_ratio)
 
-    if remaining_indices:
-        leftover = torch.cat(remaining_indices, dim=0)
-        if leftover.shape[0] > 0:
-            # Leftover is already sorted by confidence, take from the front
-            needed = max_samples_total - combined.shape[0]
-            combined = torch.cat([combined, leftover[:needed]], dim=0)
+    if negative_indices.shape[0] <= max_neg:
+        # Not enough backgrounds — take them all
+        selected_neg = negative_indices
+    else:
+        generator = torch.Generator()
+        generator.manual_seed(random_state)
+        perm = torch.randperm(negative_indices.shape[0], generator=generator)
+        selected_neg = negative_indices[perm[:max_neg]]
 
-    return combined
+    return torch.cat([positive_indices, selected_neg], dim=0)
 
 
 def _selected_indices_from_metadata(
     metadata: dict[str, Any],
-    max_samples_total: int | None,
     random_state: int,
+    neg_ratio: float | None = None,
 ) -> Tensor:
     labels = metadata["teacher_labels"]
-    candidate_indices = torch.arange(labels.shape[0], dtype=torch.int64)
 
-    if max_samples_total is None:
-        return candidate_indices
+    if neg_ratio is not None:
+        # ALL positive RoIs + neg_ratio × background RoIs
+        keep = _positive_all_neg_ratio_indices(
+            labels,
+            neg_ratio=neg_ratio,
+            random_state=random_state,
+        )
+        # Sort indices for efficient sequential memmap access
+        keep = torch.sort(keep).values
+        return keep
 
-    # Get teacher_scores for confidence-weighted sampling, with fallback
-    scores = metadata.get("teacher_scores")
-    if scores is not None:
-        # Extract max probability/score per RoI for sorting
-        if scores.ndim == 2:
-            # If scores is [N, num_classes], take max per RoI
-            candidate_scores = scores.max(dim=1).values
-        else:
-            candidate_scores = scores
-    else:
-        candidate_scores = None
-
-    keep = _balanced_sample_indices(
-        labels[candidate_indices],
-        scores=candidate_scores,
-        max_samples_total=max_samples_total,
-        random_state=random_state,
-    )
-    
-    # Sort indices for efficient sequential memmap access during feature loading.
-    # This changes random access pattern in _open_selected_feature_grids() to sequential,
-    # dramatically speeding up cache creation. Training code doesn't care about order
-    # since features and labels are indexed by the same sorted keep indices.
-    keep = torch.sort(keep).values
-    return keep
+    return torch.arange(labels.shape[0], dtype=torch.int64)
 
 
 def _index_optional_tensor(tensor: Tensor | None, indices: Tensor) -> Tensor | None:
@@ -236,10 +211,10 @@ def _open_selected_feature_grids(
 
 def open_exported_symbolic_array_payload(
     payload: dict[str, Any],
-    max_samples_total: int | None = None,
     random_state: int = 42,
     feature_dtype: str = "float32",
     cache_chunk_size: int = 256,
+    neg_ratio: float | None = None,
 ) -> SymbolicArrayBundle:
     if payload.get("storage_format") != "array_memmap_v1":
         raise ValueError(
@@ -251,8 +226,8 @@ def open_exported_symbolic_array_payload(
     metadata = torch.load(metadata_path, map_location="cpu", weights_only=True)
     keep = _selected_indices_from_metadata(
         metadata,
-        max_samples_total=max_samples_total,
         random_state=random_state,
+        neg_ratio=neg_ratio,
     )
 
     feature_grids = _open_selected_feature_grids(

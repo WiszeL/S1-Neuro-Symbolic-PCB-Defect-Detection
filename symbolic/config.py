@@ -4,7 +4,7 @@ from typing import TypedDict
 
 
 class SymbolicDataConfig(TypedDict):
-    max_samples_total: int | None
+    neg_ratio: float
     storage_dtype: str
 
 

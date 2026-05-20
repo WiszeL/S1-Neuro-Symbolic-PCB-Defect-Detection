@@ -1,19 +1,14 @@
 data:
-  max_samples_total: 32000
+  neg_ratio: 1
   storage_dtype: float16
 
 search:
-  tree_depth: 6
+  tree_depth: 5
   iterations: 15
-  l1_lambda: 50
-  sparsity_alpha: .9
+  l1_lambda: 5
+  sparsity_alpha: 1
   logistic_max_iter: 200
   tolerance: 0.0001
   zero_threshold: 0.00001
-  random_state: 56
-
-# Best Combination:
-# 4; 24k; 20; 1; 56 (Explainest)
-# 4; 26k; 10; 0.9; 56 (BEST) <-- USE THISSS SO FAR!!!!
-# 4; 26k; 10; 0.85; 56 (most accurate)
+  random_state: 112
 # KlawayarWayarKLicaKlawayar445
