@@ -192,7 +192,7 @@ def _open_selected_feature_grids(
         )
         cache_flat = cache.reshape(selected_count, -1)
         keep = indices.cpu().numpy().astype(np.int64, copy=False)
-        chunk_size = max(int(cache_chunk_size), 1)
+        chunk_size = max(cache_chunk_size, 1)
         for start in range(0, selected_count, chunk_size):
             stop = min(start + chunk_size, selected_count)
             cache_flat[start:stop] = source_flat[keep[start:stop]].astype(

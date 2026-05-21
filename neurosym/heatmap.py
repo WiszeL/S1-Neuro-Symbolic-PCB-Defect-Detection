@@ -33,7 +33,7 @@ def _top_grid_cells(
     ]
     results: list[dict[str, int | float]] = []
     width = heatmap.shape[1]
-    for flat_index in ranked_indices[: max(int(top_k), 0)]:
+    for flat_index in ranked_indices[: max(top_k, 0)]:
         row_index = int(flat_index // width)
         col_index = int(flat_index % width)
         results.append(
@@ -62,13 +62,13 @@ def _top_channels(
             "channel": int(channel_index),
             "score": float(scores[channel_index]),
         }
-        for channel_index in ranked_indices[: max(int(top_k), 0)]
+        for channel_index in ranked_indices[: max(top_k, 0)]
     ]
 
 
 def _normalize_heatmap_array(heatmap: np.ndarray) -> np.ndarray:
     normalized = np.asarray(heatmap, dtype=np.float32)
-    max_value = float(np.max(np.abs(normalized))) if normalized.size > 0 else 0.0
+    max_value = np.max(np.abs(normalized)) if normalized.size > 0 else 0.0
     if max_value <= 0.0:
         return np.zeros_like(normalized, dtype=np.float32)
     return (normalized / max_value).astype(np.float32)
@@ -89,15 +89,13 @@ def compute_node_local_evidence_maps(
         signed_local = direction * weight_grid * grid
         positive_evidence = np.maximum(signed_local, 0.0).sum(axis=0).astype(np.float32)
         node_heatmap = _normalize_heatmap_array(positive_evidence)
-        positive_evidence_sum = float(positive_evidence.sum())
-
         node_explanations.append(
             {
                 "depth": int(depth),
                 "node_index": int(step.node_index),
                 "decision": "left" if step.went_left else "right",
                 "score": float(step.score),
-                "positive_evidence_sum": positive_evidence_sum,
+                "positive_evidence_sum": float(positive_evidence.sum()),
                 "positive_evidence_cell_count": int(
                     np.count_nonzero(positive_evidence > 0.0)
                 ),
@@ -369,7 +367,7 @@ def aggregate_projected_heatmaps(
         aggregated = stacked.max(dim=0).values
 
     if normalize:
-        max_value = float(aggregated.abs().max().item())
+        max_value = aggregated.abs().max().item()
         if max_value > 0.0:
             aggregated = aggregated / max_value
 

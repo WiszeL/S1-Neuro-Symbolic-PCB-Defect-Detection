@@ -11,7 +11,7 @@ def project_gt_box_to_roi_grid(
 ) -> Tensor:
     proposal = torch.as_tensor(proposal_box, dtype=torch.float32)
     gt_box = torch.as_tensor(matched_gt_box, dtype=torch.float32)
-    grid_height, grid_width = int(grid_shape[0]), int(grid_shape[1])
+    grid_height, grid_width = grid_shape[0], grid_shape[1]
 
     proposal_width = max(float(proposal[2] - proposal[0]), 1e-6)
     proposal_height = max(float(proposal[3] - proposal[1]), 1e-6)
@@ -20,28 +20,28 @@ def project_gt_box_to_roi_grid(
         torch.clamp(
             ((gt_box[0] - proposal[0]) / proposal_width) * grid_width,
             min=0.0,
-            max=float(grid_width),
+            max=grid_width,
         )
     )
     py1 = float(
         torch.clamp(
             ((gt_box[1] - proposal[1]) / proposal_height) * grid_height,
             min=0.0,
-            max=float(grid_height),
+            max=grid_height,
         )
     )
     px2 = float(
         torch.clamp(
             ((gt_box[2] - proposal[0]) / proposal_width) * grid_width,
             min=0.0,
-            max=float(grid_width),
+            max=grid_width,
         )
     )
     py2 = float(
         torch.clamp(
             ((gt_box[3] - proposal[1]) / proposal_height) * grid_height,
             min=0.0,
-            max=float(grid_height),
+            max=grid_height,
         )
     )
 

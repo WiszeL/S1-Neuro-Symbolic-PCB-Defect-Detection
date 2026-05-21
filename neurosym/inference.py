@@ -181,7 +181,7 @@ def select_detection_indices(
         if float(score) >= score_threshold
     ]
     if max_detections is not None:
-        selected_indices = selected_indices[: max(int(max_detections), 0)]
+        selected_indices = selected_indices[: max(max_detections, 0)]
     return selected_indices
 
 
@@ -262,7 +262,7 @@ def aggregate_detection_heatmaps(
         )
 
     scores = (
-        [float(explanation["score"]) for explanation in explanations]
+        [explanation["score"] for explanation in explanations]
         if score_weighted
         else None
     )

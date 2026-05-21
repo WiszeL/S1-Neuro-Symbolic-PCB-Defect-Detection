@@ -105,7 +105,7 @@ def _build_symbolic_record(
     teacher_output: dict[str, torch.Tensor],
     torch_dtype: torch.dtype,
 ) -> dict[str, Any]:
-    num_rois = int(teacher_output["teacher_labels"].shape[0])
+    num_rois = teacher_output["teacher_labels"].shape[0]
     proposal_boxes = teacher_output["proposal_boxes"]
     matched_ground_truth = _match_proposals_to_ground_truth(
         proposal_boxes=proposal_boxes,
@@ -166,7 +166,7 @@ def _append_symbolic_metadata(
     metadata_parts["has_matched_gt"].append(record["has_matched_gt"])
     metadata_parts["gt_labels"].append(record["gt_labels"])
     metadata_parts["gt_iou"].append(record["gt_iou"])
-    num_rois = int(record["teacher_labels"].shape[0])
+    num_rois = record["teacher_labels"].shape[0]
     metadata_parts["image_paths"].extend([str(record["image_path"])] * num_rois)
 
 
@@ -232,7 +232,7 @@ def extract_dataset_from_teacher(
             teacher_output=teacher_output,
             torch_dtype=torch_dtype,
         )
-        num_rois = int(record["teacher_labels"].shape[0])
+        num_rois = record["teacher_labels"].shape[0]
 
         row_start = row_count
         row_stop = row_start + num_rois
@@ -262,7 +262,7 @@ def extract_dataset_from_teacher(
             {
                 "image_id": int(record["image_id"]),
                 "image_path": record["image_path"],
-                "num_rois": int(record["teacher_labels"].shape[0]),
+                "num_rois": record["teacher_labels"].shape[0],
                 "label_counts": label_counts.tolist(),
                 "row_start": row_start,
                 "row_stop": row_stop,
@@ -328,7 +328,7 @@ def summarize_symbolic_export(export_path: Path | str, split_name: str) -> tuple
         [
             {
                 "split": split_name,
-                "images": int(len(records)),
+                "images": len(records),
                 "total_rois": int(records["num_rois"].sum()),
                 "background_rois": int(label_counts.iloc[0]),
                 "positive_rois": int(label_counts.iloc[1:].sum()),

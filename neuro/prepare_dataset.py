@@ -218,11 +218,11 @@ def _build_inspection(
         "class_labels": class_labels,
         "class_counts": class_counts,
         "present_class_count": present_class_count,
-        "total_defect_boxes": int(annotation_counts.sum().item()),
-        "empty_image_count": int((annotation_counts == 0).sum().item()),
-        "min_boxes_per_image": int(annotation_counts.min().item()),
-        "mean_boxes_per_image": float(annotation_counts.float().mean().item()),
-        "max_boxes_per_image": int(annotation_counts.max().item()),
+        "total_defect_boxes": annotation_counts.sum().item(),
+        "empty_image_count": (annotation_counts == 0).sum().item(),
+        "min_boxes_per_image": annotation_counts.min().item(),
+        "mean_boxes_per_image": annotation_counts.float().mean().item(),
+        "max_boxes_per_image": annotation_counts.max().item(),
         "image_size_checked_count": len(inspected_samples),
     }
 

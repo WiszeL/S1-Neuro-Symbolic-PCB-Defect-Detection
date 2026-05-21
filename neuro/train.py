@@ -117,11 +117,11 @@ def train_one_epoch(
             optimizer.zero_grad(set_to_none=True)
 
         batch_summary = {
-            "loss_total": float(total_loss.detach().item()),
+            "loss_total": total_loss.detach().item(),
             "lr": current_lr,
         }
         batch_summary.update(
-            {name: float(loss.detach().item()) for name, loss in loss_dict.items()}
+            {name: loss.detach().item() for name, loss in loss_dict.items()}
         )
         batch_history.append(batch_summary)
 
@@ -307,13 +307,13 @@ def evaluate_model(
     recall = total_true_positives / max(total_true_positives + total_false_negatives, 1)
 
     summary: dict[str, Any] = {
-        "mAP@0.5:0.95": float(coco_output["map"].item()),
-        "mAP@0.5": float(coco_output["map_50"].item()),
-        "AP75": float(coco_output["map_75"].item()),
-        "AP@50:5:85": float(paper_output["map"].item()),
-        "precision": float(precision),
-        "recall": float(recall),
-        "mar_100": float(coco_output["mar_100"].item()),
+        "mAP@0.5:0.95": coco_output["map"].item(),
+        "mAP@0.5": coco_output["map_50"].item(),
+        "AP75": coco_output["map_75"].item(),
+        "AP@50:5:85": paper_output["map"].item(),
+        "precision": precision,
+        "recall": recall,
+        "mar_100": coco_output["mar_100"].item(),
         "precision_recall_score_threshold": float(
             evaluation_config["precision_score_threshold"]
         ),

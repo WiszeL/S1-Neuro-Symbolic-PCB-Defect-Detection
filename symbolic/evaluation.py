@@ -157,26 +157,18 @@ def evaluate_symbolic_model(
         sufficiency_confidence_retention[start_idx:end_idx] = batch_suf_ret
 
     # --- aggregate ---
-    mimic_accuracy = float((predictions == labels).mean())
-    macro_f1 = _safe_macro_f1(labels, predictions, num_classes=len(class_names))
-
-    m_nec_drop = float(necessity_confidence_drop.mean())
-    m_nec_flip = float(necessity_prediction_flip.mean())
-    m_suf_pres = float(sufficiency_prediction_preservation.mean())
-    m_suf_ret = float(sufficiency_confidence_retention.mean())
-
     return {
-        "mimic_accuracy": mimic_accuracy,
-        "macro_f1_vs_teacher": macro_f1,
+        "mimic_accuracy": float((predictions == labels).mean()),
+        "macro_f1_vs_teacher": _safe_macro_f1(labels, predictions, num_classes=len(class_names)),
         "per_class_agreement_vs_teacher": _per_class_agreement(
             labels, predictions, class_names
         ),
         "mean_path_feature_count": float(np.mean(subset_sizes)),
         "median_path_feature_count": float(np.median(subset_sizes)),
-        "necessity_confidence_drop": m_nec_drop,
-        "necessity_prediction_flip_rate": m_nec_flip,
-        "sufficiency_prediction_preservation": m_suf_pres,
-        "sufficiency_confidence_retention": m_suf_ret,
+        "necessity_confidence_drop": float(necessity_confidence_drop.mean()),
+        "necessity_prediction_flip_rate": float(necessity_prediction_flip.mean()),
+        "sufficiency_prediction_preservation": float(sufficiency_prediction_preservation.mean()),
+        "sufficiency_confidence_retention": float(sufficiency_confidence_retention.mean()),
     }
 
 
@@ -205,7 +197,7 @@ def _compute_local_instance_heatmap(
 
 
 def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
-    target_cells = max(int(gt_mask.sum().item()), 1)
+    target_cells = max(gt_mask.sum().item(), 1)
     flattened = heatmap.reshape(-1)
     topk_indices = torch.topk(flattened, k=min(target_cells, flattened.numel())).indices
     predicted_mask = torch.zeros_like(flattened, dtype=torch.bool)
@@ -221,7 +213,7 @@ def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
 def _normalize_heatmap(heatmap: Tensor | np.ndarray) -> Tensor:
     tensor = torch.as_tensor(heatmap, dtype=torch.float32)
     tensor = torch.clamp(tensor, min=0.0)
-    total = float(tensor.sum().item())
+    total = tensor.sum().item()
     if total <= 0.0:
         return torch.zeros_like(tensor)
     return tensor / total
@@ -237,16 +229,16 @@ def _heatmap_entropy(heatmap: Tensor) -> float:
 
 
 def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
-    peak_index = int(torch.argmax(heatmap.reshape(-1)).item())
+    peak_index = torch.argmax(heatmap.reshape(-1)).item()
     row_index = peak_index // heatmap.shape[1]
     col_index = peak_index % heatmap.shape[1]
     return float(gt_mask[row_index, col_index].item())
 
 
 def _energy_in_region(heatmap: Tensor, gt_mask: Tensor) -> float:
-    if int(gt_mask.sum().item()) == 0:
+    if gt_mask.sum().item() == 0:
         return 0.0
-    return float(heatmap[gt_mask].sum().item())
+    return heatmap[gt_mask].sum().item()
 
 
 def _feature_perturbation_stability(
@@ -259,7 +251,7 @@ def _feature_perturbation_stability(
     generator = torch.Generator()
     generator.manual_seed(random_state)
     feature_grid = _ensure_writable_tensor(feature_grid).detach().cpu()
-    feature_std = float(feature_grid.std(unbiased=False).item())
+    feature_std = feature_grid.std(unbiased=False).item()
     if feature_std <= 0.0:
         return 1.0
 
@@ -275,15 +267,15 @@ def _feature_perturbation_stability(
     base_vector = _normalize_heatmap(base_heatmap).reshape(-1)
     perturbed_vector = _normalize_heatmap(perturbed_heatmap).reshape(-1)
     if (
-        float(base_vector.sum().item()) == 0.0
-        and float(perturbed_vector.sum().item()) == 0.0
+        base_vector.sum().item() == 0.0
+        and perturbed_vector.sum().item() == 0.0
     ):
         return 1.0
 
-    denominator = float(base_vector.norm().item() * perturbed_vector.norm().item())
+    denominator = base_vector.norm().item() * perturbed_vector.norm().item()
     if denominator <= 0.0:
         return 0.0
-    return float(torch.dot(base_vector, perturbed_vector).item() / denominator)
+    return torch.dot(base_vector, perturbed_vector).item() / denominator
 
 
 def _spatial_result(
@@ -340,9 +332,9 @@ def evaluate_symbolic_spatial_metrics(
         gt_mask = project_gt_box_to_roi_grid(
             proposal_box=proposal_boxes[index],
             matched_gt_box=matched_gt_boxes[index],
-            grid_shape=tuple(int(value) for value in normalized_heatmap.shape),
+            grid_shape=tuple(normalized_heatmap.shape),
         )
-        if int(gt_mask.sum().item()) == 0:
+        if gt_mask.sum().item() == 0:
             continue
 
         overlap_scores.append(_topk_region_overlap(normalized_heatmap, gt_mask))
@@ -369,7 +361,7 @@ def evaluate_symbolic_spatial_metrics(
         )
 
     return _spatial_result(
-        int(len(overlap_scores)),
+        len(overlap_scores),
         float(np.mean(overlap_scores)),
         float(np.mean(pointing_scores)),
         float(np.mean(energy_scores)),

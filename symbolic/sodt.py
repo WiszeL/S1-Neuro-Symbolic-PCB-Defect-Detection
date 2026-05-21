@@ -298,8 +298,8 @@ class SparseObliqueDecisionTreeClassifier:
             for step in path
         ]
         return {
-            "path_length": int(len(path)),
-            "active_path_original_feature_count": int(active_original_indices.size),
+            "path_length": len(path),
+            "active_path_original_feature_count": active_original_indices.size,
             "mean_active_original_features_per_node": float(np.mean(per_node_counts))
             if per_node_counts
             else 0.0,

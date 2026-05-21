@@ -113,8 +113,8 @@ def _build_symbolic_tree(
     return SparseObliqueDecisionTreeClassifier(
         max_depth=tree_depth,
         num_classes=len(bundle.class_names),
-        input_dim=int(feature_matrix.shape[1]),
-        original_input_dim=int(feature_matrix.shape[1]),
+        input_dim=feature_matrix.shape[1],
+        original_input_dim=feature_matrix.shape[1],
         feature_shape=bundle.feature_shape,
         class_names=bundle.class_names,
     )
@@ -131,14 +131,14 @@ def _augment_tree_metrics(
             "tree_depth": int(tree.max_depth),
             "num_leaves": int(tree.num_leaves),
             "num_internal_nodes": int(tree.num_internal_nodes),
-            "nonzero_weights": int(sum(nonzero_counts)),
+            "nonzero_weights": sum(nonzero_counts),
             "mean_nonzero_per_node": float(np.mean(nonzero_counts))
             if nonzero_counts
             else 0.0,
-            "active_internal_nodes": int(sum(count > 0 for count in nonzero_counts)),
+            "active_internal_nodes": sum(count > 0 for count in nonzero_counts),
             "mean_nonzero_per_active_node": float(
-                int(sum(nonzero_counts))
-                / max(int(sum(count > 0 for count in nonzero_counts)), 1)
+                sum(nonzero_counts)
+                / max(sum(count > 0 for count in nonzero_counts), 1)
             ),
         }
     )
@@ -252,7 +252,7 @@ def evaluate_heldout(
 
     return {
         "export_path": str(export_path),
-        "sample_count": int(feature_matrix.shape[0]),
+        "sample_count": feature_matrix.shape[0],
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
         "tree_depth": heldout_model["tree_depth"],
@@ -294,17 +294,14 @@ def train_symbolic_tree(
         print(f"{bundle.class_names[label]:<25} | {count:>15,}")
     print("=" * 45 + "\n")
 
-    total_node_fit_upper_bound = ((2 ** sodt_config["tree_depth"]) - 1) * sodt_config[
-        "iterations"
-    ]
     for line in _format_progress_header(
-        feature_count=int(feature_matrix.shape[0]),
-        feature_dim=int(feature_matrix.shape[1]),
+        feature_count=feature_matrix.shape[0],
+        feature_dim=feature_matrix.shape[1],
         tree_depth=sodt_config["tree_depth"],
         l1_lambda=sodt_config["l1_lambda"],
         sparsity_alpha=sodt_config["sparsity_alpha"],
         iterations=sodt_config["iterations"],
-        total_node_fit_upper_bound=total_node_fit_upper_bound,
+        total_node_fit_upper_bound=((2 ** sodt_config["tree_depth"]) - 1) * sodt_config["iterations"],
     ):
         print(line)
 
@@ -323,8 +320,8 @@ def train_symbolic_tree(
 
     def _on_iteration(metrics: dict[str, Any]) -> None:
         nonlocal latest_mimic_accuracy, latest_nonzero_weights
-        latest_mimic_accuracy = float(metrics["mimic_accuracy"])
-        latest_nonzero_weights = int(metrics["nonzero_weights"])
+        latest_mimic_accuracy = metrics["mimic_accuracy"]
+        latest_nonzero_weights = metrics["nonzero_weights"]
         _set_node_bar_status("iteration_done")
 
     def _on_node(event: dict[str, Any]) -> None:

@@ -35,8 +35,8 @@ def zoom_axis_to_box(
     padding_ratio: float = 0.2,
     minimum_crop_size: int = 48,
 ) -> None:
-    image_height, image_width = int(image_shape[0]), int(image_shape[1])
-    x1, y1, x2, y2 = [float(value) for value in box.detach().cpu().tolist()]
+    image_height, image_width = image_shape[0], image_shape[1]
+    x1, y1, x2, y2 = box.detach().cpu().tolist()
     box_width = max(x2 - x1, 1.0)
     box_height = max(y2 - y1, 1.0)
     crop_width = max(box_width * (1.0 + 2.0 * padding_ratio), float(minimum_crop_size))
@@ -114,7 +114,7 @@ def draw_neurosymbolic_explanation(
     symbolic_tree: Any,
     selected_number: int = 1,
 ) -> None:
-    label_name = class_names[int(explanation["label"]) - 1]
+    label_name = class_names[explanation["label"] - 1]
 
     fig, axis = plt.subplots(figsize=(8, 8))
     draw_numbered_detections(

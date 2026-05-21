@@ -271,11 +271,11 @@ def evaluate_tree(
     nonzero_counts = tree.nonzero_weight_counts()
     return {
         "mimic_accuracy": accuracy,
-        "nonzero_weights": int(sum(nonzero_counts)),
+        "nonzero_weights": sum(nonzero_counts),
         "mean_nonzero_per_node": float(np.mean(nonzero_counts))
         if nonzero_counts
         else 0.0,
-        "active_internal_nodes": int(sum(count > 0 for count in nonzero_counts)),
+        "active_internal_nodes": sum(count > 0 for count in nonzero_counts),
     }
 
 
@@ -437,9 +437,7 @@ def fit_tree_with_tao(
             # Kairgeldin Eq. 3-4: effective lambda = lambda * h_alpha(|R_i|)
             # where h_alpha(t) = t^alpha for t > 0, and 1 for t = 0.
             # The paper's alpha exponent is applied directly to |R_i|.
-            n_at_node = max(node_indices.size, 1)
-            h_alpha = float(n_at_node ** sparsity_alpha)
-            effective_lambda = float(l1_lambda * h_alpha)
+            effective_lambda = float(l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha))
             
             # Pass the full features memmap and the subset indices separately.
             # This allows the solver to stream the data in chunks rather than 
