@@ -1,6 +1,8 @@
 from __future__ import annotations
+import time
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -239,6 +241,65 @@ def count_detection_matches(
     return true_positives, false_positives, false_negatives
 
 
+def _confusion_and_per_class(
+    prediction: dict[str, Tensor],
+    target: dict[str, Tensor],
+    iou_threshold: float,
+    score_threshold: float,
+    num_classes: int,
+) -> dict[str, Any]:
+    mask = prediction["scores"] >= score_threshold
+    filtered = {k: v[mask] for k, v in prediction.items()}
+
+    labels = torch.unique(torch.cat([filtered["labels"], target["labels"]], dim=0))
+
+    conf = torch.zeros(num_classes + 1, num_classes + 1, dtype=torch.int64)
+    cp = torch.zeros(num_classes, dtype=torch.int64)
+    cfp = torch.zeros(num_classes, dtype=torch.int64)
+    cfn = torch.zeros(num_classes, dtype=torch.int64)
+
+    for label in labels.tolist():
+        label = int(label)
+        pred_idx = torch.where(filtered["labels"] == label)[0]
+        tgt_idx = torch.where(target["labels"] == label)[0]
+        pred_boxes = filtered["boxes"][pred_idx]
+        tgt_boxes = target["boxes"][tgt_idx]
+
+        if pred_boxes.numel() == 0:
+            for _ in range(tgt_boxes.shape[0]):
+                conf[label, 0] += 1
+            cfn[label] = tgt_boxes.shape[0]
+            continue
+
+        if tgt_boxes.numel() == 0:
+            for _ in range(pred_boxes.shape[0]):
+                conf[0, label] += 1
+            cfp[label] = pred_boxes.shape[0]
+            continue
+
+        scores = filtered["scores"][pred_idx]
+        srt = torch.argsort(scores, descending=True)
+        pred_boxes = pred_boxes[srt]
+        ious = box_iou(pred_boxes, tgt_boxes)
+        matched = set()
+
+        for r in range(pred_boxes.shape[0]):
+            best_iou, best_tgt = ious[r].max(dim=0)
+            if best_iou.item() >= iou_threshold and best_tgt.item() not in matched:
+                matched.add(best_tgt.item())
+                conf[label, label] += 1
+                cp[label] += 1
+            else:
+                conf[0, label] += 1
+                cfp[label] += 1
+
+        fn = tgt_boxes.shape[0] - len(matched)
+        conf[label, 0] += fn
+        cfn[label] = fn
+
+    return {"confusion": conf, "class_tp": cp, "class_fp": cfp, "class_fn": cfn}
+
+
 @torch.inference_mode()
 def evaluate_model(
     model: torch.nn.Module,
@@ -263,12 +324,21 @@ def evaluate_model(
         iou_thresholds=evaluation_config["iou_thresholds"],
     )
 
+    num_classes = len(class_names) + 1
+    conf_matrix = torch.zeros(num_classes, num_classes, dtype=torch.int64)
+    class_tp = torch.zeros(num_classes, dtype=torch.int64)
+    class_fp = torch.zeros(num_classes, dtype=torch.int64)
+    class_fn = torch.zeros(num_classes, dtype=torch.int64)
+
     total_true_positives = 0
     total_false_positives = 0
     total_false_negatives = 0
+    forward_times: list[float] = []
 
     for images, targets in tqdm(data_loader, desc="Evaluate detector", leave=False):
+        t0 = time.perf_counter()
         outputs = model([image.to(device) for image in images])
+        forward_times.append(time.perf_counter() - t0)
 
         predictions_for_metric: list[dict[str, Tensor]] = []
         targets_for_metric: list[dict[str, Tensor]] = []
@@ -296,6 +366,18 @@ def evaluate_model(
             total_false_positives += fp
             total_false_negatives += fn
 
+            pc = _confusion_and_per_class(
+                prediction,
+                ground_truth,
+                iou_threshold=evaluation_config["precision_iou"],
+                score_threshold=evaluation_config["precision_score_threshold"],
+                num_classes=len(class_names),
+            )
+            conf_matrix += pc["confusion"]
+            class_tp += pc["class_tp"]
+            class_fp += pc["class_fp"]
+            class_fn += pc["class_fn"]
+
         coco_metric.update(predictions_for_metric, targets_for_metric)
         paper_metric.update(predictions_for_metric, targets_for_metric)
 
@@ -317,7 +399,23 @@ def evaluate_model(
         "precision_recall_score_threshold": float(
             evaluation_config["precision_score_threshold"]
         ),
+        "f1_score": 2 * precision * recall / max(precision + recall, 1e-10),
+        "inference_time_ms": float(np.mean(forward_times)) * 1000 if forward_times else 0.0,
+        "parameter_count": sum(p.numel() for p in model.parameters()),
     }
+
+    per_class_precision: dict[str, float] = {}
+    per_class_recall: dict[str, float] = {}
+    all_class_names: list[str] = ["__background__", *class_names]
+    for c in range(num_classes):
+        name = all_class_names[c]
+        per_class_precision[name] = float(class_tp[c] / max(class_tp[c] + class_fp[c], 1))
+        per_class_recall[name] = float(class_tp[c] / max(class_tp[c] + class_fn[c], 1))
+
+    summary["confusion_matrix"] = conf_matrix.tolist()
+    summary["confusion_matrix_labels"] = all_class_names
+    summary["per_class_precision"] = per_class_precision
+    summary["per_class_recall"] = per_class_recall
 
     if (
         evaluation_config["class_metrics"]
