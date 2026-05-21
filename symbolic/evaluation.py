@@ -95,7 +95,6 @@ def evaluate_symbolic_model(
 
     # Pre-allocate output arrays for N samples
     predictions = np.empty(N, dtype=np.int64)
-    subset_sizes = np.empty(N, dtype=np.int64)
     necessity_confidence_drop = np.empty(N, dtype=np.float64)
     necessity_prediction_flip = np.empty(N, dtype=np.float64)
     sufficiency_prediction_preservation = np.empty(N, dtype=np.float64)
@@ -120,13 +119,9 @@ def evaluate_symbolic_model(
 
         # --- collect path feature indices per row ---
         selected_per_row: list[np.ndarray] = []
-        batch_subset_sizes = np.empty(B, dtype=np.int64)
         for i in range(B):
             sel = tree.path_feature_indices(batch_features[i])
             selected_per_row.append(sel)
-            batch_subset_sizes[i] = sel.size
-
-        subset_sizes[start_idx:end_idx] = batch_subset_sizes
 
         # --- build boolean mask and masked feature matrices ---
         selected_mask = _build_selected_mask(B, D, selected_per_row)
@@ -170,8 +165,6 @@ def evaluate_symbolic_model(
         "per_class_agreement_vs_teacher": _per_class_agreement(
             labels, predictions, class_names
         ),
-        "mean_path_feature_count": float(np.mean(subset_sizes)),
-        "median_path_feature_count": float(np.median(subset_sizes)),
         "necessity_confidence_drop": float(necessity_confidence_drop.mean()),
         "necessity_prediction_flip_rate": float(necessity_prediction_flip.mean()),
         "sufficiency_prediction_preservation": float(
@@ -230,15 +223,6 @@ def _normalize_heatmap(heatmap: Tensor | np.ndarray) -> Tensor:
     return tensor / total
 
 
-def _heatmap_entropy(heatmap: Tensor) -> float:
-    flattened = heatmap.reshape(-1)
-    positive = flattened[flattened > 0]
-    if positive.numel() == 0:
-        return 0.0
-    entropy = -torch.sum(positive * torch.log(positive))
-    return float(entropy.item() / np.log(max(flattened.numel(), 2)))
-
-
 def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
     peak_index = torch.argmax(heatmap.reshape(-1)).item()
     row_index = peak_index // heatmap.shape[1]
@@ -246,61 +230,15 @@ def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
     return float(gt_mask[row_index, col_index].item())
 
 
-def _energy_in_region(heatmap: Tensor, gt_mask: Tensor) -> float:
-    if gt_mask.sum().item() == 0:
-        return 0.0
-    return heatmap[gt_mask].sum().item()
-
-
-def _feature_perturbation_stability(
-    tree: SparseObliqueDecisionTreeClassifier,
-    feature_grid: Tensor | np.ndarray,
-    base_heatmap: Tensor,
-    random_state: int,
-    noise_scale: float = 0.02,
-) -> float:
-    generator = torch.Generator()
-    generator.manual_seed(random_state)
-    feature_grid = _ensure_writable_tensor(feature_grid).detach().cpu()
-    feature_std = feature_grid.std(unbiased=False).item()
-    if feature_std <= 0.0:
-        return 1.0
-
-    perturbation = torch.randn(
-        feature_grid.shape,
-        generator=generator,
-        dtype=feature_grid.dtype,
-    ) * (noise_scale * feature_std)
-    perturbed_heatmap = _compute_local_instance_heatmap(
-        tree, feature_grid + perturbation
-    )
-
-    base_vector = _normalize_heatmap(base_heatmap).reshape(-1)
-    perturbed_vector = _normalize_heatmap(perturbed_heatmap).reshape(-1)
-    if base_vector.sum().item() == 0.0 and perturbed_vector.sum().item() == 0.0:
-        return 1.0
-
-    denominator = base_vector.norm().item() * perturbed_vector.norm().item()
-    if denominator <= 0.0:
-        return 0.0
-    return torch.dot(base_vector, perturbed_vector).item() / denominator
-
-
 def _spatial_result(
     count: int,
     overlap: float,
     pointing: float,
-    energy: float,
-    entropy: float,
-    stability: float,
 ) -> dict[str, Any]:
     return {
         "evaluated_roi_count": count,
         "box_grounded_roi_overlap": overlap,
         "pointing_score": pointing,
-        "energy_in_defect_ratio": energy,
-        "heatmap_entropy": entropy,
-        "stability_score": stability,
     }
 
 
@@ -314,20 +252,10 @@ def evaluate_symbolic_spatial_metrics(
     random_state: int = 42,
 ) -> dict[str, Any]:
     if matched_gt_boxes is None or has_matched_gt is None:
-        return _spatial_result(
-            0,
-            _NAN,
-            _NAN,
-            _NAN,
-            _NAN,
-            _NAN,
-        )
+        return _spatial_result(0, _NAN, _NAN)
 
     overlap_scores: list[float] = []
     pointing_scores: list[float] = []
-    energy_scores: list[float] = []
-    entropy_scores: list[float] = []
-    stability_scores: list[float] = []
 
     for index in tqdm(
         range(feature_grids.shape[0]),
@@ -351,32 +279,12 @@ def evaluate_symbolic_spatial_metrics(
 
         overlap_scores.append(_topk_region_overlap(normalized_heatmap, gt_mask))
         pointing_scores.append(_pointing_score(normalized_heatmap, gt_mask))
-        energy_scores.append(_energy_in_region(normalized_heatmap, gt_mask))
-        entropy_scores.append(_heatmap_entropy(normalized_heatmap))
-        stability_scores.append(
-            _feature_perturbation_stability(
-                tree,
-                feature_grid=feature_grids[index],
-                base_heatmap=normalized_heatmap,
-                random_state=random_state + index,
-            )
-        )
 
     if not overlap_scores:
-        return _spatial_result(
-            0,
-            _NAN,
-            _NAN,
-            _NAN,
-            _NAN,
-            _NAN,
-        )
+        return _spatial_result(0, _NAN, _NAN)
 
     return _spatial_result(
         len(overlap_scores),
         float(np.mean(overlap_scores)),
         float(np.mean(pointing_scores)),
-        float(np.mean(energy_scores)),
-        float(np.mean(entropy_scores)),
-        float(np.mean(stability_scores)),
     )
