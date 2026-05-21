@@ -294,7 +294,9 @@ def extract_dataset_from_teacher(
     return output_path
 
 
-def summarize_symbolic_export(export_path: Path | str, split_name: str) -> tuple[Any, pd.DataFrame, pd.DataFrame]:
+def summarize_symbolic_export(
+    export_path: Path | str, split_name: str
+) -> tuple[Any, pd.DataFrame, pd.DataFrame]:
     manifest = torch.load(export_path, map_location="cpu", weights_only=True)
     records = pd.DataFrame(manifest["records"])
 

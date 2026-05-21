@@ -137,8 +137,7 @@ def _augment_tree_metrics(
             else 0.0,
             "active_internal_nodes": sum(count > 0 for count in nonzero_counts),
             "mean_nonzero_per_active_node": float(
-                sum(nonzero_counts)
-                / max(sum(count > 0 for count in nonzero_counts), 1)
+                sum(nonzero_counts) / max(sum(count > 0 for count in nonzero_counts), 1)
             ),
         }
     )
@@ -238,7 +237,7 @@ def evaluate_heldout(
     print(f"Loading heldout evaluation data from {export_path}...", flush=True)
     t0 = perf_counter()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    
+
     bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
         export_path,
         random_state=random_state,
@@ -308,7 +307,8 @@ def train_symbolic_tree(
         l1_lambda=sodt_config["l1_lambda"],
         sparsity_alpha=sodt_config["sparsity_alpha"],
         iterations=sodt_config["iterations"],
-        total_node_fit_upper_bound=((2 ** sodt_config["tree_depth"]) - 1) * sodt_config["iterations"],
+        total_node_fit_upper_bound=((2 ** sodt_config["tree_depth"]) - 1)
+        * sodt_config["iterations"],
     ):
         print(line)
 
@@ -464,7 +464,9 @@ def prune_symbolic_tree(
 
     t0 = perf_counter()
     pruned_count = postprocess_tree(
-        tree, feature_matrix, labels,
+        tree,
+        feature_matrix,
+        labels,
         class_names=bundle.class_names,
         verbose=True,
     )
@@ -522,18 +524,21 @@ def prune_symbolic_tree(
 
     if summary_path is not None:
         ensure_dir(Path(summary_path).parent)
-        save_json({
-            "export_path": str(export_path),
-            "output_path": str(checkpoint_path),
-            "metrics": trained_model["metrics"],
-            "history": trained_model["history"],
-            "class_names": bundle.class_names,
-            "feature_shape": bundle.feature_shape,
-            "tree_depth": trained_model["tree_depth"],
-            "l1_lambda": trained_model["l1_lambda"],
-            "sparsity_alpha": trained_model["sparsity_alpha"],
-            "training_config": training_config,
-        }, summary_path)
+        save_json(
+            {
+                "export_path": str(export_path),
+                "output_path": str(checkpoint_path),
+                "metrics": trained_model["metrics"],
+                "history": trained_model["history"],
+                "class_names": bundle.class_names,
+                "feature_shape": bundle.feature_shape,
+                "tree_depth": trained_model["tree_depth"],
+                "l1_lambda": trained_model["l1_lambda"],
+                "sparsity_alpha": trained_model["sparsity_alpha"],
+                "training_config": training_config,
+            },
+            summary_path,
+        )
         print("Saving metrics... done")
 
     return {

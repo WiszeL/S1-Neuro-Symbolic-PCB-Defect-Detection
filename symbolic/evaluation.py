@@ -13,8 +13,6 @@ from util.geometry import project_gt_box_to_roi_grid
 _NAN = float("nan")
 
 
-
-
 def _safe_macro_f1(
     labels: np.ndarray,
     predictions: np.ndarray,
@@ -63,8 +61,6 @@ def _ensure_writable_tensor(
     return torch.as_tensor(data, dtype=dtype)
 
 
-
-
 def _build_selected_mask(
     n_rows: int,
     n_features: int,
@@ -86,7 +82,11 @@ def evaluate_symbolic_model(
     teacher_labels: np.ndarray,
     class_names: tuple[str, ...],
 ) -> dict[str, Any]:
-    features = feature_matrix if feature_matrix.dtype == np.float32 else np.asarray(feature_matrix, dtype=np.float32)
+    features = (
+        feature_matrix
+        if feature_matrix.dtype == np.float32
+        else np.asarray(feature_matrix, dtype=np.float32)
+    )
     labels = np.asarray(teacher_labels, dtype=np.int64)
     if features.ndim != 2:
         raise ValueError("evaluate_symbolic_model expects a 2D feature matrix.")
@@ -102,7 +102,11 @@ def evaluate_symbolic_model(
     sufficiency_confidence_retention = np.empty(N, dtype=np.float64)
 
     batch_size = 1024
-    for start_idx in tqdm(range(0, N, batch_size), total=(N + batch_size - 1) // batch_size, desc="Symbolic metrics"):
+    for start_idx in tqdm(
+        range(0, N, batch_size),
+        total=(N + batch_size - 1) // batch_size,
+        desc="Symbolic metrics",
+    ):
         end_idx = min(start_idx + batch_size, N)
         batch_features = features[start_idx:end_idx]
         B = end_idx - start_idx
@@ -160,7 +164,9 @@ def evaluate_symbolic_model(
     # --- aggregate ---
     return {
         "mimic_accuracy": float((predictions == labels).mean()),
-        "macro_f1_vs_teacher": _safe_macro_f1(labels, predictions, num_classes=len(class_names)),
+        "macro_f1_vs_teacher": _safe_macro_f1(
+            labels, predictions, num_classes=len(class_names)
+        ),
         "per_class_agreement_vs_teacher": _per_class_agreement(
             labels, predictions, class_names
         ),
@@ -168,8 +174,12 @@ def evaluate_symbolic_model(
         "median_path_feature_count": float(np.median(subset_sizes)),
         "necessity_confidence_drop": float(necessity_confidence_drop.mean()),
         "necessity_prediction_flip_rate": float(necessity_prediction_flip.mean()),
-        "sufficiency_prediction_preservation": float(sufficiency_prediction_preservation.mean()),
-        "sufficiency_confidence_retention": float(sufficiency_confidence_retention.mean()),
+        "sufficiency_prediction_preservation": float(
+            sufficiency_prediction_preservation.mean()
+        ),
+        "sufficiency_confidence_retention": float(
+            sufficiency_confidence_retention.mean()
+        ),
     }
 
 
@@ -267,10 +277,7 @@ def _feature_perturbation_stability(
 
     base_vector = _normalize_heatmap(base_heatmap).reshape(-1)
     perturbed_vector = _normalize_heatmap(perturbed_heatmap).reshape(-1)
-    if (
-        base_vector.sum().item() == 0.0
-        and perturbed_vector.sum().item() == 0.0
-    ):
+    if base_vector.sum().item() == 0.0 and perturbed_vector.sum().item() == 0.0:
         return 1.0
 
     denominator = base_vector.norm().item() * perturbed_vector.norm().item()
@@ -322,7 +329,11 @@ def evaluate_symbolic_spatial_metrics(
     entropy_scores: list[float] = []
     stability_scores: list[float] = []
 
-    for index in tqdm(range(feature_grids.shape[0]), total=feature_grids.shape[0], desc="Spatial grounding"):
+    for index in tqdm(
+        range(feature_grids.shape[0]),
+        total=feature_grids.shape[0],
+        desc="Spatial grounding",
+    ):
         if not bool(has_matched_gt[index]):
             continue
         if gt_iou is not None and float(gt_iou[index]) <= 0.0:

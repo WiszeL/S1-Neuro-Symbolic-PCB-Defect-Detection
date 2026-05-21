@@ -41,12 +41,10 @@ def _is_contiguous_indices(indices: np.ndarray) -> bool:
     )
 
 
-
-
 def _select_rows(source: np.ndarray, indices: np.ndarray) -> np.ndarray:
     if indices.size == 0:
         return np.empty((0, source.shape[1]), dtype=source.dtype)
-    
+
     # Optimization: if indices are contiguous, we can use a slice which is
     # extremely fast and returns a view if source is a memmap.
     if _is_contiguous_indices(indices):
@@ -56,7 +54,7 @@ def _select_rows(source: np.ndarray, indices: np.ndarray) -> np.ndarray:
     # when selecting thousands of fragmented rows from a memmap.
     if indices.size <= _TAO_CHUNK_SIZE:
         return source[indices]
-        
+
     out = np.empty((indices.size, source.shape[1]), dtype=source.dtype)
     for start in range(0, indices.size, _TAO_CHUNK_SIZE):
         stop = min(start + _TAO_CHUNK_SIZE, indices.size)
@@ -214,12 +212,12 @@ def solve_l1_logistic_reduced_problem(
     #
     # Without this N_solver factor, the regularization is N_solver times
     # too weak relative to the loss, which is why sparsity never kicks in.
-    
+
     # We convert directly to float64 here. This is what LIBLINEAR requires.
     # By doing it now and letting the previous 'features' reference go,
     # we avoid having both float32 and float64 copies in RAM simultaneously.
     features_64 = features.astype(np.float64)
-    del features # Free the float32 subset immediately
+    del features  # Free the float32 subset immediately
     gc.collect()
 
     n_solver = float(features_64.shape[0])
@@ -235,16 +233,16 @@ def solve_l1_logistic_reduced_problem(
         tol=tolerance,
         max_iter=max_iter,
     )
-    
+
     model.fit(features_64, labels, sample_weight=sample_weights)
-    
+
     learned_weights = model.coef_[0].astype(np.float32)
     learned_weights[np.abs(learned_weights) < zero_threshold] = 0.0
     bias = float(model.intercept_[0])
-    
+
     del features_64, model
     gc.collect()
-    
+
     return learned_weights, bias
 
 
@@ -317,7 +315,9 @@ def postprocess_tree(
             if np.any(tree.node_weights[node_index] != 0.0):
                 if verbose:
                     depth = int(np.floor(np.log2(node_index + 1)))
-                    print(f"  Node {node_index} (depth {depth}): pruned — dead branch (0 samples)")
+                    print(
+                        f"  Node {node_index} (depth {depth}): pruned — dead branch (0 samples)"
+                    )
                 _zero_subtree(node_index)
                 pruned_count += 1
             continue
@@ -328,7 +328,9 @@ def postprocess_tree(
                 depth = int(np.floor(np.log2(node_index + 1)))
                 if class_names:
                     leaf_class = class_names[next(iter(reachable_labels))]
-                    print(f"  Node {node_index} (depth {depth}): pruned — pure subtree (all leaves → {leaf_class})")
+                    print(
+                        f"  Node {node_index} (depth {depth}): pruned — pure subtree (all leaves → {leaf_class})"
+                    )
                 else:
                     print(f"  Node {node_index} (depth {depth}): pruned — pure subtree")
             _zero_subtree(node_index)
@@ -434,14 +436,16 @@ def fit_tree_with_tao(
 
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
             solver_indices = node_indices[positive_weight_mask]
-            
+
             # Kairgeldin Eq. 3-4: effective lambda = lambda * h_alpha(|R_i|)
             # where h_alpha(t) = t^alpha for t > 0, and 1 for t = 0.
             # The paper's alpha exponent is applied directly to |R_i|.
-            effective_lambda = float(l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha))
-            
+            effective_lambda = float(
+                l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha)
+            )
+
             # Pass the full features memmap and the subset indices separately.
-            # This allows the solver to stream the data in chunks rather than 
+            # This allows the solver to stream the data in chunks rather than
             # materializing a multi-gigabyte array in RAM.
             weights, bias = solve_l1_logistic_reduced_problem(
                 features,

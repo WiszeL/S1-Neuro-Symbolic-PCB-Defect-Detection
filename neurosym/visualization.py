@@ -18,12 +18,12 @@ def heatmap_to_array(heatmap: torch.Tensor) -> np.ndarray:
     arr_norm = np.clip(arr, 0.0, 1.0)
     if arr_norm.max() > 0:
         arr_norm = arr_norm / arr_norm.max()
-    
+
     rgba = plt.get_cmap("jet")(arr_norm)
-    
+
     # Remove noise entirely, but make the active area VERY opaque and bright
     # arr_norm ** 2.0 strongly suppresses background noise to yield sharp heatmaps.
-    alpha = np.where(arr_norm > 0.15, arr_norm ** 1.0, 0.0)
+    alpha = np.where(arr_norm > 0.15, arr_norm**1.0, 0.0)
     rgba[..., 3] = alpha
     return rgba
 
@@ -66,7 +66,9 @@ def draw_numbered_detections(
 ) -> None:
     axis.imshow(image_to_array(image_tensor))
     # Add a separate black dimmer layer over the image so it doesn't corrupt the heatmap colors
-    dimmer = np.zeros((image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32)
+    dimmer = np.zeros(
+        (image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32
+    )
     dimmer[..., 3] = 0.35  # 40% perfect black dimmer
     axis.imshow(dimmer)
     axis.axis("off")
@@ -126,9 +128,7 @@ def draw_neurosymbolic_explanation(
         selected_index=detection_index,
         display_numbers=[selected_number],
     )
-    zoom_axis_to_box(
-        axis, explanation["detection_box"], tuple(image_tensor.shape[-2:])
-    )
+    zoom_axis_to_box(axis, explanation["detection_box"], tuple(image_tensor.shape[-2:]))
     axis.set_title(
         f"Zoomed detection #{selected_number}: {label_name} {explanation['score']:.2f}"
     )
@@ -137,29 +137,32 @@ def draw_neurosymbolic_explanation(
     node_count = len(explanation["node_explanations"])
     plt.figure(figsize=(13, max(8, 4 * node_count)))
     gs = gridspec.GridSpec(1, 2, width_ratios=[1.5, 1], wspace=-0.18)
-    
+
     # 1. LEFT SIDE: Pruned SODT Tree
     ax_tree = plt.subplot(gs[0])
     ax_tree.axis("off")
     ax_tree.set_title("Pruned SODT Tree", fontsize=16, weight="bold")
-    
+
     active_nodes = {n["node_index"]: n for n in explanation["node_explanations"]}
     tree_depth = symbolic_tree.max_depth
-    num_internal = (2 ** tree_depth) - 1
-    
+    num_internal = (2**tree_depth) - 1
+
     leaf_node = explanation["symbolic_leaf_index"] + num_internal
-    
+
     # Identify structurally pruned internal nodes (weights and bias are zero)
     pruned_nodes = set()
     for idx in range(num_internal):
-        if np.all(symbolic_tree.node_weights[idx] == 0.0) and symbolic_tree.node_bias[idx] == 0.0:
+        if (
+            np.all(symbolic_tree.node_weights[idx] == 0.0)
+            and symbolic_tree.node_bias[idx] == 0.0
+        ):
             pruned_nodes.add(idx)
-            
+
     # Build the structurally visible pruned tree
     visible_nodes = set()
     visible_edges = []
     leaf_override = {}
-    
+
     def build_pruned_tree(node, depth):
         visible_nodes.add(node)
         if node >= num_internal:
@@ -173,25 +176,25 @@ def draw_neurosymbolic_explanation(
             label_idx = symbolic_tree.leaf_labels[leaf_offset]
             leaf_override[node] = class_names[int(label_idx) - 1]
             return
-        
+
         left = node * 2 + 1
         right = node * 2 + 2
         visible_edges.append((node, left, "left"))
         visible_edges.append((node, right, "right"))
         build_pruned_tree(left, depth + 1)
         build_pruned_tree(right, depth + 1)
-        
+
     build_pruned_tree(0, 0)
-    
+
     # --- NEW PRETTY LAYOUT ALGORITHM ---
     # 1. Build parent-child relationships
     children_map = {node: [] for node in visible_nodes}
     for p, c, _ in visible_edges:
         children_map[p].append(c)
-    
+
     coords = {}
     leaf_x_counter = [0]
-    
+
     def assign_coords(node, depth):
         # Sort children to maintain left-to-right order (left child index < right child index)
         children = sorted(children_map[node])
@@ -205,9 +208,9 @@ def draw_neurosymbolic_explanation(
                 assign_coords(c, depth + 1)
                 child_x_sum += coords[c][0]
             coords[node] = (child_x_sum / len(children), -depth * 2.5)
-            
+
     assign_coords(0, 0)
-    
+
     # 2. Center the tree around x=0
     min_x_coord = min(x for x, y in coords.values())
     max_x_coord = max(x for x, y in coords.values())
@@ -215,72 +218,122 @@ def draw_neurosymbolic_explanation(
     for node in coords:
         x, y = coords[node]
         coords[node] = (x - center_offset, y)
-    
+
     # Helper to check if ancestor reaches leaf_node
     def is_ancestor(ancestor, descendent):
         if ancestor == descendent:
             return True
         if ancestor >= num_internal:
             return False
-        return is_ancestor(ancestor * 2 + 1, descendent) or is_ancestor(ancestor * 2 + 2, descendent)
-        
+        return is_ancestor(ancestor * 2 + 1, descendent) or is_ancestor(
+            ancestor * 2 + 2, descendent
+        )
+
     for parent, child, side in visible_edges:
         is_active_parent = parent in active_nodes
         child_active = is_active_parent and is_ancestor(child, leaf_node)
-        
-        color = "#388e3c" if (child_active and side == "left") else ("#d32f2f" if (child_active and side == "right") else "#e0e0e0")
+
+        color = (
+            "#388e3c"
+            if (child_active and side == "left")
+            else ("#d32f2f" if (child_active and side == "right") else "#e0e0e0")
+        )
         lw = 3 if child_active else 1
         zorder = 2 if child_active else 1
-        ax_tree.plot([coords[parent][0], coords[child][0]], [coords[parent][1], coords[child][1]], color=color, lw=lw, zorder=zorder)
-        
+        ax_tree.plot(
+            [coords[parent][0], coords[child][0]],
+            [coords[parent][1], coords[child][1]],
+            color=color,
+            lw=lw,
+            zorder=zorder,
+        )
+
     for node in visible_nodes:
         x, y = coords[node]
         is_leaf = (node >= num_internal) or (node in leaf_override)
-        is_active = (node in active_nodes) or (node == leaf_node) or (node in leaf_override and is_ancestor(node, leaf_node))
-        
+        is_active = (
+            (node in active_nodes)
+            or (node == leaf_node)
+            or (node in leaf_override and is_ancestor(node, leaf_node))
+        )
+
         alpha = 1.0 if is_active else 0.5  # Slightly more opaque for unselected nodes
         fc = "#e1f5fe" if not is_leaf else "#c8e6c9"
         ec = "black" if is_active else "#9e9e9e"  # Slightly darker grey edge
         if not is_active:
             fc = "#f5f5f5"
         lw = 2 if is_active else 1
-        
+
         # --- MAKE UNSELECTED NODES BIGGER ---
         internal_font_active = 11
         internal_font_inactive = 9
         leaf_font_active = 11
         leaf_font_inactive = 9
-        
+
         if is_leaf:
             if node in leaf_override:
                 label = leaf_override[node]
             else:
-                label = f"{label_name}" if node == leaf_node else f"L{node - num_internal}"
-            
-            leaf_active = (node == leaf_node) or (node in leaf_override and is_ancestor(node, leaf_node))
+                label = (
+                    f"{label_name}" if node == leaf_node else f"L{node - num_internal}"
+                )
+
+            leaf_active = (node == leaf_node) or (
+                node in leaf_override and is_ancestor(node, leaf_node)
+            )
             if leaf_active:
                 fc = "#4caf50"
                 ec = "#1b5e20"
             bbox = dict(boxstyle="round,pad=0.3", fc=fc, ec=ec, lw=lw, alpha=alpha)
-            ax_tree.text(x, y, label, ha="center", va="center", fontsize=leaf_font_active if is_active else leaf_font_inactive, weight="bold" if is_active else "normal", bbox=bbox, zorder=3, rotation=90, rotation_mode="anchor")
+            ax_tree.text(
+                x,
+                y,
+                label,
+                ha="center",
+                va="center",
+                fontsize=leaf_font_active if is_active else leaf_font_inactive,
+                weight="bold" if is_active else "normal",
+                bbox=bbox,
+                zorder=3,
+                rotation=90,
+                rotation_mode="anchor",
+            )
         else:
-            label = f"{active_nodes[node]['score']:.2f}" if node in active_nodes else f"N{node}"
+            label = (
+                f"{active_nodes[node]['score']:.2f}"
+                if node in active_nodes
+                else f"N{node}"
+            )
             bbox = dict(boxstyle="circle,pad=0.2", fc=fc, ec=ec, lw=lw, alpha=alpha)
-            ax_tree.text(x, y, label, ha="center", va="center", fontsize=internal_font_active if is_active else internal_font_inactive, weight="bold" if is_active else "normal", bbox=bbox, zorder=3)
-            
+            ax_tree.text(
+                x,
+                y,
+                label,
+                ha="center",
+                va="center",
+                fontsize=internal_font_active if is_active else internal_font_inactive,
+                weight="bold" if is_active else "normal",
+                bbox=bbox,
+                zorder=3,
+            )
+
     # Dynamically scale axis limits so the text never overlaps the edge
     min_final_x = min(x for x, y in coords.values())
     max_final_x = max(x for x, y in coords.values())
     ax_tree.set_xlim(min_final_x - 8, max_final_x + 8)
     ax_tree.set_ylim(-tree_depth * 2.5 - 1.0, 1.0)
-    
+
     # 2. RIGHT SIDE: Vertical Heatmaps
-    gs_right = gridspec.GridSpecFromSubplotSpec(node_count, 1, subplot_spec=gs[1], hspace=0.4)
+    gs_right = gridspec.GridSpecFromSubplotSpec(
+        node_count, 1, subplot_spec=gs[1], hspace=0.4
+    )
     for axis_index, node in enumerate(explanation["node_explanations"]):
         axis = plt.subplot(gs_right[axis_index])
         axis.imshow(image_to_array(image_tensor))
         # Add a separate black dimmer layer over the image so it doesn't corrupt the heatmap colors
-        dimmer = np.zeros((image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32)
+        dimmer = np.zeros(
+            (image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32
+        )
         dimmer[..., 3] = 0.4  # 40% perfect black dimmer
         axis.imshow(dimmer)
         axis.imshow(
@@ -308,6 +361,5 @@ def draw_neurosymbolic_explanation(
             f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}"
         )
         axis.axis("off")
-        
-    plt.show()
 
+    plt.show()
