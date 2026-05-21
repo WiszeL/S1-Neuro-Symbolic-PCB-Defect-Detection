@@ -449,6 +449,7 @@ def prune_symbolic_tree(
     labels: np.ndarray,
     checkpoint_path: str | Path,
     export_path: str | Path | None = None,
+    summary_path: str | Path | None = None,
     random_state: int = 42,
 ) -> dict[str, Any]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
@@ -518,6 +519,22 @@ def prune_symbolic_tree(
     }
     torch.save(artifact, checkpoint_path)
     print("Saving checkpoint... done")
+
+    if summary_path is not None:
+        ensure_dir(Path(summary_path).parent)
+        save_json({
+            "export_path": str(export_path),
+            "output_path": str(checkpoint_path),
+            "metrics": trained_model["metrics"],
+            "history": trained_model["history"],
+            "class_names": bundle.class_names,
+            "feature_shape": bundle.feature_shape,
+            "tree_depth": trained_model["tree_depth"],
+            "l1_lambda": trained_model["l1_lambda"],
+            "sparsity_alpha": trained_model["sparsity_alpha"],
+            "training_config": training_config,
+        }, summary_path)
+        print("Saving metrics... done")
 
     return {
         "export_path": str(export_path),
