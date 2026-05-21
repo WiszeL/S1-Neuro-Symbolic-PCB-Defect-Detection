@@ -76,6 +76,81 @@ def _build_selected_mask(
     return mask
 
 
+def _deletion_insertion_auc(
+    tree: SparseObliqueDecisionTreeClassifier,
+    features: np.ndarray,
+    predictions: np.ndarray,
+    num_samples: int = 1000,
+    steps: int = 10,
+    random_state: int = 42,
+) -> tuple[float, float]:
+    N, D = features.shape
+    if N > num_samples:
+        rng = np.random.default_rng(random_state)
+        indices = rng.choice(N, size=num_samples, replace=False)
+    else:
+        indices = np.arange(N)
+
+    n = len(indices)
+    auc_features = features[indices]
+    auc_preds = predictions[indices]
+
+    sorted_feats_list: list[np.ndarray] = []
+    path_lens: list[int] = []
+    for idx_idx in range(n):
+        feat = auc_features[idx_idx]
+        path_feats = tree.path_feature_indices(feat)
+        m = len(path_feats)
+        path_lens.append(m)
+        if m == 0:
+            sorted_feats_list.append(np.array([], dtype=np.int64))
+            continue
+        path = tree.decision_path(feat)
+        importance = np.zeros(D, dtype=np.float64)
+        for step_node in path:
+            importance += np.abs(tree.node_weights[step_node.node_index])
+        sorted_feats_list.append(path_feats[np.argsort(importance[path_feats])[::-1]])
+
+    deletion_curves = np.ones((n, steps + 1))
+    insertion_curves = np.zeros((n, steps + 1))
+
+    batch_size = 1024
+    for batch_start in range(0, n, batch_size):
+        batch_end = min(batch_start + batch_size, n)
+        B = batch_end - batch_start
+        full_probs = tree.predict_proba(auc_features[batch_start:batch_end])
+        for bi in range(B):
+            gi = batch_start + bi
+            deletion_curves[gi, 0] = full_probs[bi, auc_preds[gi]]
+
+        del_batch = auc_features[batch_start:batch_end].copy()
+        ins_batch = np.zeros_like(del_batch)
+        for s in range(1, steps + 1):
+            for bi in range(B):
+                gi = batch_start + bi
+                m = path_lens[gi]
+                if m == 0:
+                    continue
+                k = int(s / steps * m)
+                sorted_feats = sorted_feats_list[gi]
+                del_batch[bi] = auc_features[gi].copy()
+                del_batch[bi, sorted_feats[:k]] = 0.0
+                ins_batch[bi] = 0.0
+                ins_batch[bi, sorted_feats[:k]] = auc_features[gi, sorted_feats[:k]]
+
+            del_probs = tree.predict_proba(del_batch)
+            ins_probs = tree.predict_proba(ins_batch)
+            for bi in range(B):
+                gi = batch_start + bi
+                deletion_curves[gi, s] = del_probs[bi, auc_preds[gi]]
+                insertion_curves[gi, s] = ins_probs[bi, auc_preds[gi]]
+
+    dx = 1.0 / steps
+    return float(np.trapz(deletion_curves, dx=dx, axis=1).mean()), float(
+        np.trapz(insertion_curves, dx=dx, axis=1).mean()
+    )
+
+
 def evaluate_symbolic_model(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_matrix: np.ndarray,
@@ -157,6 +232,9 @@ def evaluate_symbolic_model(
         sufficiency_confidence_retention[start_idx:end_idx] = batch_suf_ret
 
     # --- aggregate ---
+    deletion_auc, insertion_auc = _deletion_insertion_auc(
+        tree, features, predictions, random_state=42
+    )
     return {
         "mimic_accuracy": float((predictions == labels).mean()),
         "macro_f1_vs_teacher": _safe_macro_f1(
@@ -173,6 +251,8 @@ def evaluate_symbolic_model(
         "sufficiency_confidence_retention": float(
             sufficiency_confidence_retention.mean()
         ),
+        "deletion_auc": deletion_auc,
+        "insertion_auc": insertion_auc,
     }
 
 
