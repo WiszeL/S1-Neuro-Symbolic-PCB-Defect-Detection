@@ -210,7 +210,7 @@ def compute_symbolic_heatmap(
         "combined_local_evidence_map": combined_local_evidence_map,
     }
     selected_mode = mode if mode in maps else "local_instance_evidence_map"
-    path_summary = tree.summarize_path(feature_vector, top_k=6, path=path)
+    path_summary = tree.summarize_path(feature_vector, path=path)
     path_trace = [
         {
             "node_index": int(step.node_index),
@@ -225,19 +225,6 @@ def compute_symbolic_heatmap(
         }
         for step in path
     ]
-    top_features = tree.top_feature_contributions(feature_vector, top_k=12, path=path)
-    top_positive_features = tree.top_feature_contributions(
-        feature_vector,
-        top_k=12,
-        contribution_sign="positive",
-        path=path,
-    )
-    top_negative_features = tree.top_feature_contributions(
-        feature_vector,
-        top_k=12,
-        contribution_sign="negative",
-        path=path,
-    )
     top_local_cells = _top_grid_cells(positive_local_evidence_map, top_k=12)
     top_negative_local_cells = _top_grid_cells(negative_local_evidence_map, top_k=12)
     top_structural_cells = _top_grid_cells(structural_density_map, top_k=12)
@@ -266,10 +253,6 @@ def compute_symbolic_heatmap(
                 ),
             },
         },
-        "node_summaries": path_summary["nodes"],
-        "top_contributing_features": top_features,
-        "top_positive_contributing_features": top_positive_features,
-        "top_negative_contributing_features": top_negative_features,
         "top_local_cells": top_local_cells,
         "top_positive_local_cells": top_local_cells,
         "top_negative_local_cells": top_negative_local_cells,

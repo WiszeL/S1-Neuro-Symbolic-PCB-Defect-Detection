@@ -235,13 +235,20 @@ def evaluate_heldout(
     checkpoint_path: str | Path,
     random_state: int = 42,
 ) -> dict[str, Any]:
+    print(f"Loading heldout evaluation data from {export_path}...", flush=True)
+    t0 = perf_counter()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     
     bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
         export_path,
         random_state=random_state,
     )
+    print(
+        f"Loaded {feature_matrix.shape[0]:,} samples in {_format_duration(perf_counter() - t0)}",
+        flush=True,
+    )
 
+    print("Evaluating on held-out set...", flush=True)
     heldout_model = _evaluate_trained_model_on_bundle(
         trained_model=checkpoint,
         bundle=bundle,
@@ -268,7 +275,7 @@ def train_symbolic_tree(
     *,
     config: SymbolicTrainConfig,
     summary_path: str | Path | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     data_config = config["data"]
     sodt_config = _materialize_sodt_config(config["search"])
 
@@ -370,28 +377,18 @@ def train_symbolic_tree(
     if current_node_bar is not None:
         current_node_bar.close()
 
-    trained_model = _evaluate_symbolic_model(
-        tree,
-        bundle=bundle,
-        feature_matrix=feature_matrix,
-        labels=labels,
-        tree_depth=sodt_config["tree_depth"],
-        l1_lambda=sodt_config["l1_lambda"],
-        sparsity_alpha=sodt_config["sparsity_alpha"],
-        history=history,
-        random_state=sodt_config["random_state"],
-    )
+    metrics = _augment_tree_metrics(tree, {})
 
     artifact = {
-        "tree_state": trained_model["tree_state"],
-        "metrics": trained_model["metrics"],
-        "history": trained_model["history"],
+        "tree_state": tree.to_state_dict(),
+        "metrics": metrics,
+        "history": history,
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
-        "tree_depth": trained_model["tree_depth"],
-        "l1_lambda": trained_model["l1_lambda"],
-        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "tree_depth": int(sodt_config["tree_depth"]),
+        "l1_lambda": float(sodt_config["l1_lambda"]),
+        "sparsity_alpha": float(sodt_config["sparsity_alpha"]),
         "training_config": {
             "tree_depth": sodt_config["tree_depth"],
             "iterations": sodt_config["iterations"],
@@ -413,20 +410,25 @@ def train_symbolic_tree(
     summary = {
         "export_path": str(export_path),
         "output_path": str(output_path),
-        "metrics": trained_model["metrics"],
-        "history": trained_model["history"],
+        "metrics": metrics,
+        "history": history,
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
-        "tree_depth": trained_model["tree_depth"],
-        "l1_lambda": trained_model["l1_lambda"],
-        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "tree_depth": int(sodt_config["tree_depth"]),
+        "l1_lambda": float(sodt_config["l1_lambda"]),
+        "sparsity_alpha": float(sodt_config["sparsity_alpha"]),
         "training_config": artifact["training_config"],
     }
     if summary_path is not None:
         ensure_dir(Path(summary_path).parent)
         save_json(summary, summary_path)
 
-    return summary
+    return summary, {
+        "tree": tree,
+        "bundle": bundle,
+        "feature_matrix": feature_matrix,
+        "labels": labels,
+    }
 
 
 def load_symbolic_tree(
@@ -440,20 +442,18 @@ def load_symbolic_tree(
 
 
 def prune_symbolic_tree(
-    checkpoint_path: str | Path,
-    export_path: str | Path,
     *,
+    tree: SparseObliqueDecisionTreeClassifier,
+    bundle: Any,
+    feature_matrix: np.ndarray,
+    labels: np.ndarray,
+    checkpoint_path: str | Path,
+    export_path: str | Path | None = None,
     random_state: int = 42,
 ) -> dict[str, Any]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    tree = SparseObliqueDecisionTreeClassifier.from_state_dict(
-        checkpoint["tree_state"]
-    )
-
-    bundle, (feature_matrix, labels) = _load_symbolic_training_data(
-        export_path,
-        random_state=random_state,
-    )
+    if export_path is None:
+        export_path = str(checkpoint.get("export_path", ""))
 
     print("=== Pruning Symbolic Tree ===")
     print(

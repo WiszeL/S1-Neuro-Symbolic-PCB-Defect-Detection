@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import torch
 from torch import Tensor
+from tqdm import tqdm
 
 from .sodt import SparseObliqueDecisionTreeClassifier
 from util.geometry import project_gt_box_to_roi_grid
@@ -101,7 +102,7 @@ def evaluate_symbolic_model(
     sufficiency_confidence_retention = np.empty(N, dtype=np.float64)
 
     batch_size = 1024
-    for start_idx in range(0, N, batch_size):
+    for start_idx in tqdm(range(0, N, batch_size), total=(N + batch_size - 1) // batch_size, desc="Symbolic metrics"):
         end_idx = min(start_idx + batch_size, N)
         batch_features = features[start_idx:end_idx]
         B = end_idx - start_idx
@@ -321,7 +322,7 @@ def evaluate_symbolic_spatial_metrics(
     entropy_scores: list[float] = []
     stability_scores: list[float] = []
 
-    for index in range(feature_grids.shape[0]):
+    for index in tqdm(range(feature_grids.shape[0]), total=feature_grids.shape[0], desc="Spatial grounding"):
         if not bool(has_matched_gt[index]):
             continue
         if gt_iou is not None and float(gt_iou[index]) <= 0.0:

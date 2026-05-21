@@ -303,6 +303,7 @@ class SparseObliqueDecisionTreeClassifier:
             "mean_active_original_features_per_node": float(np.mean(per_node_counts))
             if per_node_counts
             else 0.0,
+            "nodes": [],
         }
 
     def node_weight_full(self, node_index: int) -> np.ndarray:
