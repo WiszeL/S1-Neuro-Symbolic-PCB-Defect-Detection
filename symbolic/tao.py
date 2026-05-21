@@ -283,22 +283,18 @@ def postprocess_tree(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
     labels: np.ndarray,
+    class_names: tuple[str, ...] | None = None,
+    verbose: bool = False,
 ) -> int:
-    """Post-process tree: remove dead branches & pure subtrees (Hada Fig. 1).
-
-    A dead branch is an internal node whose reduced set is empty.
-    A pure subtree is one where every reachable leaf predicts the same class;
-    the subtree root can then be zeroed out (effectively pruning it).
-
-    Returns the number of internal nodes that were pruned (zeroed out).
-    """
     reduced_sets = compute_reduced_sets(tree, features)
     update_leaf_predictions(tree, labels, reduced_sets)
+
+    if verbose:
+        print(f"Walking {tree.num_internal_nodes} internal nodes (reverse BFS)...")
 
     pruned_count = 0
 
     def _subtree_leaf_labels(node_index: int) -> set[int]:
-        """Return the set of distinct leaf labels reachable from node_index."""
         if tree.is_leaf_node(node_index):
             leaf_pos = tree.leaf_position(node_index)
             return {int(tree.leaf_labels[leaf_pos])}
@@ -307,7 +303,6 @@ def postprocess_tree(
         return _subtree_leaf_labels(left) | _subtree_leaf_labels(right)
 
     def _zero_subtree(node_index: int) -> None:
-        """Zero out all internal nodes in a subtree (dead branch removal)."""
         if tree.is_leaf_node(node_index):
             return
         tree.node_weights[node_index] = 0.0
@@ -315,21 +310,27 @@ def postprocess_tree(
         _zero_subtree(tree.left_child(node_index))
         _zero_subtree(tree.right_child(node_index))
 
-    # Process in reverse BFS order (deepest first) so that pruning
-    # decisions propagate upward correctly.
     for node_index in range(tree.num_internal_nodes - 1, -1, -1):
         node_rs = reduced_sets.get(node_index, np.zeros((0,), dtype=np.int64))
 
-        # Dead branch: no samples reach this node
         if node_rs.size == 0:
             if np.any(tree.node_weights[node_index] != 0.0):
+                if verbose:
+                    depth = int(np.floor(np.log2(node_index + 1)))
+                    print(f"  Node {node_index} (depth {depth}): pruned — dead branch (0 samples)")
                 _zero_subtree(node_index)
                 pruned_count += 1
             continue
 
-        # Pure subtree: all reachable leaves agree on the same class
         reachable_labels = _subtree_leaf_labels(node_index)
         if len(reachable_labels) == 1:
+            if verbose:
+                depth = int(np.floor(np.log2(node_index + 1)))
+                if class_names:
+                    leaf_class = class_names[next(iter(reachable_labels))]
+                    print(f"  Node {node_index} (depth {depth}): pruned — pure subtree (all leaves → {leaf_class})")
+                else:
+                    print(f"  Node {node_index} (depth {depth}): pruned — pure subtree")
             _zero_subtree(node_index)
             pruned_count += 1
 
@@ -479,18 +480,4 @@ def fit_tree_with_tao(
                 mimic=f"{metrics['mimic_accuracy']:.4f}",
                 nz=metrics["nonzero_weights"],
             )
-
-    # -------------------------------------------------------------------------
-    # Post-process: remove dead branches & pure subtrees (Hada Fig. 1)
-    # -------------------------------------------------------------------------
-    pruned_count = postprocess_tree(tree, features, labels)
-    if pruned_count > 0:
-        final_metrics = evaluate_tree(tree, features, labels)
-        final_metrics["iteration"] = iterations
-        final_metrics["postprocess_pruned_nodes"] = pruned_count
-        if history:
-            history[-1] = final_metrics
-        else:
-            history.append(final_metrics)
-
     return history

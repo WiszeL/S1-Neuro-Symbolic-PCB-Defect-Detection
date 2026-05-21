@@ -13,7 +13,7 @@ from .config import SymbolicTrainConfig
 from .evaluation import evaluate_symbolic_model as evaluate_symbolic_metrics
 from .evaluation import evaluate_symbolic_spatial_metrics
 from .sodt import SparseObliqueDecisionTreeClassifier
-from .tao import fit_tree_with_tao
+from .tao import fit_tree_with_tao, postprocess_tree
 from util.io import ensure_dir, save_json
 
 
@@ -437,3 +437,97 @@ def load_symbolic_tree(
     if state_dict is None:
         raise ValueError("No symbolic tree state found in checkpoint.")
     return SparseObliqueDecisionTreeClassifier.from_state_dict(state_dict)
+
+
+def prune_symbolic_tree(
+    checkpoint_path: str | Path,
+    export_path: str | Path,
+    *,
+    random_state: int = 42,
+) -> dict[str, Any]:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    tree = SparseObliqueDecisionTreeClassifier.from_state_dict(
+        checkpoint["tree_state"]
+    )
+
+    bundle, (feature_matrix, labels) = _load_symbolic_training_data(
+        export_path,
+        random_state=random_state,
+    )
+
+    print("=== Pruning Symbolic Tree ===")
+    print(
+        f"Tree: {feature_matrix.shape[0]:,} RoIs, "
+        f"{tree.num_internal_nodes} internal nodes"
+    )
+
+    t0 = perf_counter()
+    pruned_count = postprocess_tree(
+        tree, feature_matrix, labels,
+        class_names=bundle.class_names,
+        verbose=True,
+    )
+
+    active_nodes = sum(c > 0 for c in tree.nonzero_weight_counts())
+    print(
+        f"Pruning complete — {pruned_count} nodes removed, "
+        f"{active_nodes} remain active ({_format_duration(perf_counter() - t0)})"
+    )
+
+    print()
+    trained_model = _evaluate_symbolic_model(
+        tree,
+        bundle=bundle,
+        feature_matrix=feature_matrix,
+        labels=labels,
+        tree_depth=checkpoint.get("tree_depth", tree.max_depth),
+        l1_lambda=checkpoint.get("l1_lambda", 0.0),
+        sparsity_alpha=checkpoint.get("sparsity_alpha", 0.0),
+        history=list(checkpoint.get("history", [])),
+        random_state=random_state,
+    )
+
+    pruned_metrics = trained_model["metrics"]
+    pruning_entry = {
+        "iteration": len(trained_model["history"]) + 1,
+        "mimic_accuracy": pruned_metrics["mimic_accuracy"],
+        "nonzero_weights": pruned_metrics["nonzero_weights"],
+        "active_internal_nodes": pruned_metrics["active_internal_nodes"],
+        "postprocess_pruned_nodes": pruned_count,
+    }
+    trained_model["history"].append(pruning_entry)
+
+    print(f"mimic accuracy: {pruned_metrics['mimic_accuracy']:.4f}")
+    print(f"nonzero weights: {pruned_metrics['nonzero_weights']}")
+    print(f"active nodes: {pruned_metrics['active_internal_nodes']}")
+
+    training_config = dict(checkpoint.get("training_config", {}))
+    training_config["postprocess_pruned_nodes"] = pruned_count
+
+    artifact = {
+        "tree_state": trained_model["tree_state"],
+        "metrics": trained_model["metrics"],
+        "history": trained_model["history"],
+        "class_names": bundle.class_names,
+        "feature_shape": bundle.feature_shape,
+        "export_path": str(export_path),
+        "tree_depth": trained_model["tree_depth"],
+        "l1_lambda": trained_model["l1_lambda"],
+        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "training_config": training_config,
+    }
+    torch.save(artifact, checkpoint_path)
+    print("Saving checkpoint... done")
+
+    return {
+        "export_path": str(export_path),
+        "output_path": str(checkpoint_path),
+        "metrics": trained_model["metrics"],
+        "history": trained_model["history"],
+        "class_names": bundle.class_names,
+        "feature_shape": bundle.feature_shape,
+        "tree_depth": trained_model["tree_depth"],
+        "l1_lambda": trained_model["l1_lambda"],
+        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "training_config": training_config,
+    }
