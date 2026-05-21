@@ -84,8 +84,6 @@ def evaluate_symbolic_model(
     feature_matrix: np.ndarray,
     teacher_labels: np.ndarray,
     class_names: tuple[str, ...],
-    random_trials: int = 3,
-    random_state: int = 42,
 ) -> dict[str, Any]:
     features = feature_matrix if feature_matrix.dtype == np.float32 else np.asarray(feature_matrix, dtype=np.float32)
     labels = np.asarray(teacher_labels, dtype=np.int64)
@@ -93,8 +91,6 @@ def evaluate_symbolic_model(
         raise ValueError("evaluate_symbolic_model expects a 2D feature matrix.")
 
     N, D = features.shape
-    R = max(int(random_trials), 1)
-    rng = np.random.default_rng(random_state)
 
     # Pre-allocate output arrays for N samples
     predictions = np.empty(N, dtype=np.int64)
@@ -103,10 +99,6 @@ def evaluate_symbolic_model(
     necessity_prediction_flip = np.empty(N, dtype=np.float64)
     sufficiency_prediction_preservation = np.empty(N, dtype=np.float64)
     sufficiency_confidence_retention = np.empty(N, dtype=np.float64)
-    rnd_nec_drop_per_row = np.empty(N, dtype=np.float64)
-    rnd_nec_flip_per_row = np.empty(N, dtype=np.float64)
-    rnd_suf_pres_per_row = np.empty(N, dtype=np.float64)
-    rnd_suf_ret_per_row = np.empty(N, dtype=np.float64)
 
     batch_size = 1024
     for start_idx in range(0, N, batch_size):
@@ -164,91 +156,6 @@ def evaluate_symbolic_model(
         sufficiency_prediction_preservation[start_idx:end_idx] = batch_suf_pres
         sufficiency_confidence_retention[start_idx:end_idx] = batch_suf_ret
 
-        # --- random controls ---
-        active_mask = batch_subset_sizes > 0
-        inactive_mask = ~active_mask
-        active_indices = np.where(active_mask)[0]
-
-        b_rnd_nec_drop = np.zeros(B, dtype=np.float64)
-        b_rnd_nec_flip = np.zeros(B, dtype=np.float64)
-        b_rnd_suf_pres = np.copy(batch_suf_pres)
-        b_rnd_suf_ret = np.copy(batch_suf_ret)
-
-        if active_indices.size > 0:
-            M = active_indices.size * R
-            rnd_nec_features = np.empty((M, D), dtype=np.float32)
-            rnd_suf_features = np.empty((M, D), dtype=np.float32)
-            trial_row_map = np.empty(M, dtype=np.int64)
-
-            k = 0
-            for i in active_indices:
-                ss = int(batch_subset_sizes[i])
-                for _ in range(R):
-                    random_idx = np.sort(
-                        rng.choice(D, size=ss, replace=False).astype(np.int64)
-                    )
-                    rnd_nec_features[k] = batch_features[i]
-                    rnd_nec_features[k, random_idx] = 0.0
-                    rnd_suf_features[k] = 0.0
-                    rnd_suf_features[k, random_idx] = batch_features[i, random_idx]
-                    trial_row_map[k] = i
-                    k += 1
-
-            rnd_nec_probs = tree.predict_proba(rnd_nec_features)
-            rnd_suf_probs = tree.predict_proba(rnd_suf_features)
-
-            rnd_nec_labels = rnd_nec_probs.argmax(axis=1).astype(np.int64)
-            rnd_nec_conf = rnd_nec_probs[
-                np.arange(M, dtype=np.int64), batch_preds[trial_row_map]
-            ]
-            rnd_nec_drop = np.maximum(
-                batch_conf[trial_row_map] - rnd_nec_conf, 0.0
-            ).astype(np.float64)
-            rnd_nec_flip = (rnd_nec_labels != batch_preds[trial_row_map]).astype(
-                np.float64
-            )
-
-            rnd_suf_labels = rnd_suf_probs.argmax(axis=1).astype(np.int64)
-            rnd_suf_conf = rnd_suf_probs[
-                np.arange(M, dtype=np.int64), batch_preds[trial_row_map]
-            ]
-            rnd_suf_pres = (rnd_suf_labels == batch_preds[trial_row_map]).astype(
-                np.float64
-            )
-            rnd_suf_ret = (
-                rnd_suf_conf / np.maximum(batch_conf[trial_row_map], 1e-8)
-            ).astype(np.float64)
-
-            trial_counts = np.bincount(trial_row_map, minlength=B).astype(np.float64)
-            safe_counts = np.maximum(trial_counts, 1.0)
-
-            b_rnd_nec_drop = (
-                np.bincount(trial_row_map, weights=rnd_nec_drop, minlength=B)
-                / safe_counts
-            )
-            b_rnd_nec_flip = (
-                np.bincount(trial_row_map, weights=rnd_nec_flip, minlength=B)
-                / safe_counts
-            )
-            b_rnd_suf_pres = (
-                np.bincount(trial_row_map, weights=rnd_suf_pres, minlength=B)
-                / safe_counts
-            )
-            b_rnd_suf_ret = (
-                np.bincount(trial_row_map, weights=rnd_suf_ret, minlength=B)
-                / safe_counts
-            )
-
-            b_rnd_nec_drop[inactive_mask] = 0.0
-            b_rnd_nec_flip[inactive_mask] = 0.0
-            b_rnd_suf_pres[inactive_mask] = batch_suf_pres[inactive_mask]
-            b_rnd_suf_ret[inactive_mask] = batch_suf_ret[inactive_mask]
-
-        rnd_nec_drop_per_row[start_idx:end_idx] = b_rnd_nec_drop
-        rnd_nec_flip_per_row[start_idx:end_idx] = b_rnd_nec_flip
-        rnd_suf_pres_per_row[start_idx:end_idx] = b_rnd_suf_pres
-        rnd_suf_ret_per_row[start_idx:end_idx] = b_rnd_suf_ret
-
     # --- aggregate ---
     mimic_accuracy = float((predictions == labels).mean())
     macro_f1 = _safe_macro_f1(labels, predictions, num_classes=len(class_names))
@@ -257,10 +164,6 @@ def evaluate_symbolic_model(
     m_nec_flip = float(necessity_prediction_flip.mean())
     m_suf_pres = float(sufficiency_prediction_preservation.mean())
     m_suf_ret = float(sufficiency_confidence_retention.mean())
-    m_rnd_nec_drop = float(rnd_nec_drop_per_row.mean())
-    m_rnd_nec_flip = float(rnd_nec_flip_per_row.mean())
-    m_rnd_suf_pres = float(rnd_suf_pres_per_row.mean())
-    m_rnd_suf_ret = float(rnd_suf_ret_per_row.mean())
 
     return {
         "mimic_accuracy": mimic_accuracy,
@@ -274,14 +177,6 @@ def evaluate_symbolic_model(
         "necessity_prediction_flip_rate": m_nec_flip,
         "sufficiency_prediction_preservation": m_suf_pres,
         "sufficiency_confidence_retention": m_suf_ret,
-        "random_control_necessity_confidence_drop": m_rnd_nec_drop,
-        "random_control_necessity_prediction_flip_rate": m_rnd_nec_flip,
-        "random_control_sufficiency_prediction_preservation": m_rnd_suf_pres,
-        "random_control_sufficiency_confidence_retention": m_rnd_suf_ret,
-        "necessity_advantage_over_random": m_nec_drop - m_rnd_nec_drop,
-        "necessity_flip_advantage_over_random": m_nec_flip - m_rnd_nec_flip,
-        "sufficiency_advantage_over_random": m_suf_pres - m_rnd_suf_pres,
-        "sufficiency_retention_advantage_over_random": m_suf_ret - m_rnd_suf_ret,
     }
 
 

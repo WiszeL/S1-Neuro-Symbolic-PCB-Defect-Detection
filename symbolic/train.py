@@ -161,7 +161,6 @@ def _evaluate_symbolic_model(
         feature_matrix=feature_matrix,
         teacher_labels=labels,
         class_names=bundle.class_names,
-        random_state=random_state,
     )
     spatial_metrics = evaluate_symbolic_spatial_metrics(
         tree,
@@ -205,7 +204,6 @@ def _evaluate_trained_model_on_bundle(
         feature_matrix=feature_matrix,
         teacher_labels=labels,
         class_names=bundle.class_names,
-        random_state=random_state,
     )
     spatial_metrics = evaluate_symbolic_spatial_metrics(
         tree,
