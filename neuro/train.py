@@ -254,9 +254,9 @@ def _confusion_and_per_class(
     labels = torch.unique(torch.cat([filtered["labels"], target["labels"]], dim=0))
 
     conf = torch.zeros(num_classes + 1, num_classes + 1, dtype=torch.int64)
-    cp = torch.zeros(num_classes, dtype=torch.int64)
-    cfp = torch.zeros(num_classes, dtype=torch.int64)
-    cfn = torch.zeros(num_classes, dtype=torch.int64)
+    cp = torch.zeros(num_classes + 1, dtype=torch.int64)
+    cfp = torch.zeros(num_classes + 1, dtype=torch.int64)
+    cfn = torch.zeros(num_classes + 1, dtype=torch.int64)
 
     for label in labels.tolist():
         label = int(label)

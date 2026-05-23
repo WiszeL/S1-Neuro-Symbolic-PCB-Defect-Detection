@@ -1,14 +1,14 @@
 data:
-  neg_ratio: 1
+  neg_ratio: 2
   storage_dtype: float16
 
 search:
   tree_depth: 5
   iterations: 15
-  l1_lambda: 5
-  sparsity_alpha: 1.1
+  l1_lambda: 60
+  sparsity_alpha: .65
   logistic_max_iter: 200
   tolerance: 0.0001
   zero_threshold: 0.00001
-  random_state: 56
+  random_state: 112
 # KlawayarWayarKLicaKlawayar445
