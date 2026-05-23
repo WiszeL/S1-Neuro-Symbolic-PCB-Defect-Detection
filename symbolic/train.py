@@ -478,45 +478,36 @@ def prune_symbolic_tree(
     )
 
     print()
-    trained_model = _evaluate_symbolic_model(
-        tree,
-        bundle=bundle,
-        feature_matrix=feature_matrix,
-        labels=labels,
-        tree_depth=checkpoint.get("tree_depth", tree.max_depth),
-        l1_lambda=checkpoint.get("l1_lambda", 0.0),
-        sparsity_alpha=checkpoint.get("sparsity_alpha", 0.0),
-        history=list(checkpoint.get("history", [])),
-        random_state=random_state,
-    )
-
-    pruned_metrics = trained_model["metrics"]
+    tree_metrics = _augment_tree_metrics(tree, {})
+    history = list(checkpoint.get("history", []))
     pruning_entry = {
-        "iteration": len(trained_model["history"]) + 1,
-        "mimic_accuracy": pruned_metrics["mimic_accuracy"],
-        "nonzero_weights": pruned_metrics["nonzero_weights"],
-        "active_internal_nodes": pruned_metrics["active_internal_nodes"],
+        "iteration": len(history) + 1,
+        "nonzero_weights": tree_metrics["nonzero_weights"],
+        "active_internal_nodes": tree_metrics["active_internal_nodes"],
         "postprocess_pruned_nodes": pruned_count,
     }
-    trained_model["history"].append(pruning_entry)
+    history.append(pruning_entry)
 
-    print(f"mimic accuracy: {pruned_metrics['mimic_accuracy']:.4f}")
-    print(f"nonzero weights: {pruned_metrics['nonzero_weights']}")
-    print(f"active nodes: {pruned_metrics['active_internal_nodes']}")
+    print(f"nonzero weights: {tree_metrics['nonzero_weights']}")
+    print(f"active nodes: {tree_metrics['active_internal_nodes']}")
 
     training_config = dict(checkpoint.get("training_config", {}))
     training_config["postprocess_pruned_nodes"] = pruned_count
 
+    tree_depth = int(checkpoint.get("tree_depth", tree.max_depth))
+    l1_lambda = float(checkpoint.get("l1_lambda", 0.0))
+    sparsity_alpha = float(checkpoint.get("sparsity_alpha", 0.0))
+
     artifact = {
-        "tree_state": trained_model["tree_state"],
-        "metrics": trained_model["metrics"],
-        "history": trained_model["history"],
+        "tree_state": tree.to_state_dict(),
+        "metrics": tree_metrics,
+        "history": history,
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
-        "tree_depth": trained_model["tree_depth"],
-        "l1_lambda": trained_model["l1_lambda"],
-        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "tree_depth": tree_depth,
+        "l1_lambda": l1_lambda,
+        "sparsity_alpha": sparsity_alpha,
         "training_config": training_config,
     }
     torch.save(artifact, checkpoint_path)
@@ -528,13 +519,13 @@ def prune_symbolic_tree(
             {
                 "export_path": str(export_path),
                 "output_path": str(checkpoint_path),
-                "metrics": trained_model["metrics"],
-                "history": trained_model["history"],
+                "metrics": tree_metrics,
+                "history": history,
                 "class_names": bundle.class_names,
                 "feature_shape": bundle.feature_shape,
-                "tree_depth": trained_model["tree_depth"],
-                "l1_lambda": trained_model["l1_lambda"],
-                "sparsity_alpha": trained_model["sparsity_alpha"],
+                "tree_depth": tree_depth,
+                "l1_lambda": l1_lambda,
+                "sparsity_alpha": sparsity_alpha,
                 "training_config": training_config,
             },
             summary_path,
@@ -544,12 +535,12 @@ def prune_symbolic_tree(
     return {
         "export_path": str(export_path),
         "output_path": str(checkpoint_path),
-        "metrics": trained_model["metrics"],
-        "history": trained_model["history"],
+        "metrics": tree_metrics,
+        "history": history,
         "class_names": bundle.class_names,
         "feature_shape": bundle.feature_shape,
-        "tree_depth": trained_model["tree_depth"],
-        "l1_lambda": trained_model["l1_lambda"],
-        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "tree_depth": tree_depth,
+        "l1_lambda": l1_lambda,
+        "sparsity_alpha": sparsity_alpha,
         "training_config": training_config,
     }
