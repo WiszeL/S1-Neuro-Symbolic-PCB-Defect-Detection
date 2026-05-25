@@ -400,7 +400,9 @@ def evaluate_model(
             evaluation_config["precision_score_threshold"]
         ),
         "f1_score": 2 * precision * recall / max(precision + recall, 1e-10),
-        "inference_time_ms": float(np.mean(forward_times)) * 1000 if forward_times else 0.0,
+        "inference_time_ms": float(np.mean(forward_times)) * 1000
+        if forward_times
+        else 0.0,
         "parameter_count": sum(p.numel() for p in model.parameters()),
     }
 
@@ -409,7 +411,9 @@ def evaluate_model(
     all_class_names: list[str] = ["__background__", *class_names]
     for c in range(num_classes):
         name = all_class_names[c]
-        per_class_precision[name] = float(class_tp[c] / max(class_tp[c] + class_fp[c], 1))
+        per_class_precision[name] = float(
+            class_tp[c] / max(class_tp[c] + class_fp[c], 1)
+        )
         per_class_recall[name] = float(class_tp[c] / max(class_tp[c] + class_fn[c], 1))
 
     summary["confusion_matrix"] = conf_matrix.tolist()
