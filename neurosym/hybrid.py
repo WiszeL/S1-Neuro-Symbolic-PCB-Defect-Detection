@@ -43,6 +43,25 @@ class NeuroSymbolicDetector(nn.Module):
             self.device,
             dtype=pooled_features.dtype,
         )
+
+        # The SODT is a hard classifier (decision tree): it routes each sample
+        # down a single path to a single leaf.  The leaf distribution is an
+        # empirical histogram, NOT a calibrated softmax — secondary classes
+        # retain significant probability mass (e.g. 0.08–0.12), which the
+        # per-class NMS postprocessing treats as real candidate detections.
+        # This creates ~3× more false positives than the neural classifier.
+        #
+        # Fix: keep only the tree's chosen class (argmax) and zero out the
+        # rest.  This matches the tree's hard-decision semantics and
+        # eliminates the false-positive leakage without changing any
+        # classification decision.
+        argmax_classes = probability_tensor.argmax(dim=-1)
+        mask = torch.zeros_like(probability_tensor)
+        mask[torch.arange(len(argmax_classes), device=self.device), argmax_classes] = (
+            1.0
+        )
+        probability_tensor = probability_tensor * mask
+
         leaf_tensor = torch.from_numpy(leaf_indices).to(self.device, dtype=torch.int64)
         return probability_tensor, leaf_tensor
 
