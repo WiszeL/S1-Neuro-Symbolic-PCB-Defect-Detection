@@ -12,7 +12,8 @@ from torch import Tensor
 
 from util.device import select_device
 
-from .config import NeuroConfig, NeuroTrainConfig, load_yaml
+from util.config import load_yaml
+from .config import NeuroConfig, NeuroTrainConfig
 from .faster_rcnn import NeuroFasterRCNN
 
 

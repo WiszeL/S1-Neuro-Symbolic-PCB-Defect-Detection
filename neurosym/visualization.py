@@ -115,6 +115,7 @@ def draw_neurosymbolic_explanation(
     class_names: tuple[str, ...],
     symbolic_tree: Any,
     selected_number: int = 1,
+    extra_panel_func: Any = None,
 ) -> None:
     label_name = class_names[explanation["label"] - 1]
 
@@ -135,8 +136,13 @@ def draw_neurosymbolic_explanation(
     plt.show()
 
     node_count = len(explanation["node_explanations"])
-    plt.figure(figsize=(13, max(8, 4 * node_count)))
-    gs = gridspec.GridSpec(1, 2, width_ratios=[1.5, 1], wspace=-0.18)
+    
+    if extra_panel_func is not None:
+        plt.figure(figsize=(18, max(8, 4 * node_count)))
+        gs = gridspec.GridSpec(1, 3, width_ratios=[1.5, 1, 1], wspace=0.1)
+    else:
+        plt.figure(figsize=(13, max(8, 4 * node_count)))
+        gs = gridspec.GridSpec(1, 2, width_ratios=[1.5, 1], wspace=-0.18)
 
     # 1. LEFT SIDE: Pruned SODT Tree
     ax_tree = plt.subplot(gs[0])
@@ -361,5 +367,9 @@ def draw_neurosymbolic_explanation(
             f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}"
         )
         axis.axis("off")
+
+    if extra_panel_func is not None:
+        ax_extra = plt.subplot(gs[2])
+        extra_panel_func(ax_extra)
 
     plt.show()
