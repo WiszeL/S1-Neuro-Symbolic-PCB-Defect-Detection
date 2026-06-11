@@ -5,7 +5,7 @@ data:
 search:
   tree_depth: 6
   iterations: 15
-  l1_lambda: 10
+  l1_lambda: 20
   sparsity_alpha: .95
   logistic_max_iter: 200
   tolerance: 0.0001

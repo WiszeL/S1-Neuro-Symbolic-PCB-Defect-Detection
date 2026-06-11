@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 
-_PREDICTION_CHUNK_SIZE = 512
+_PREDICTION_CHUNK_SIZE = 2048
 
 
 @dataclass(frozen=True)

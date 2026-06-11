@@ -9,7 +9,7 @@ from tqdm import tqdm
 from .sodt import SparseObliqueDecisionTreeClassifier
 
 
-_TAO_CHUNK_SIZE = 512
+_TAO_CHUNK_SIZE = 2048
 
 
 def initialize_tree_weights(
@@ -155,20 +155,28 @@ def solve_l1_logistic_reduced_problem(
     tolerance: float = 1e-4,
     zero_threshold: float = 1e-5,
     random_state: int = 42,
-    max_solver_samples: int = 30_000,
+    max_solver_samples: int = 0,
+    max_solver_memory_gb: float = 1.5,
 ) -> tuple[np.ndarray, float]:
     if labels.size == 0:
         dim = features.shape[1]
         return np.zeros((dim,), dtype=np.float32), 0.0
 
-    # ---- Subsample if the node has too many samples ----
-    # LIBLINEAR needs float64 internally, so 150k × 3k × 8B = 3.6 GB.
-    # Capping at 30k keeps peak solver RAM under ~2 GB.
-    # Logistic regression converges well with 30k samples.
+    # ---- Adaptive subsample cap for LIBLINEAR memory safety ----
+    # LIBLINEAR needs float64 internally. We cap based on available memory
+    # so that the float64 matrix stays under max_solver_memory_gb.
+    # The regularization C is computed from the actual node size (N_i),
+    # so this cap only affects solver sample count, not regularization strength.
     n = labels.size
-    if n > max_solver_samples:
+    if max_solver_samples > 0:
+        cap = max_solver_samples
+    else:
+        # Auto-compute: max samples that fit in max_solver_memory_gb as float64
+        n_features = features.shape[1] if features.ndim == 2 else 1
+        cap = int(max_solver_memory_gb * (1024 ** 3) / (n_features * 8))
+    if n > cap:
         rng = np.random.RandomState(random_state)
-        keep = np.sort(rng.choice(n, size=max_solver_samples, replace=False))
+        keep = np.sort(rng.choice(n, size=cap, replace=False))
         labels = labels[keep]
         sample_weights = sample_weights[keep]
         if indices is not None:
@@ -201,17 +209,9 @@ def solve_l1_logistic_reduced_problem(
     # ---------------------------------------------------------------------
     # Match the paper solver family: L1 logistic regression with LIBLINEAR
     # ---------------------------------------------------------------------
-    # The papers (Hada Eq. 3, Kairgeldin Eq. 4) define the reduced problem as:
-    #     E_i = SUM_{n in R_i} L(y_n, ...) + lambda_eff * ||w_i||_1
-    #
-    # sklearn's LogisticRegression minimizes:
-    #     (1/N_solver) * SUM L(...) + (1/C) * ||w||_1
-    #
-    # To match the paper's SUM-loss (not mean-loss), we need:
-    #     1/C = lambda_eff / N_solver   =>   C = N_solver / lambda_eff
-    #
-    # Without this N_solver factor, the regularization is N_solver times
-    # too weak relative to the loss, which is why sparsity never kicks in.
+    # Kairgeldin p.6: dividing RP by Ni gives avg-loss + lambda' * reg,
+    # where lambda' = lambda * Ni^(alpha-1). The caller passes this as l1_lambda.
+    # sklearn uses 1/C as regularization coefficient, so C = 1 / lambda'.
 
     # We convert directly to float64 here. This is what LIBLINEAR requires.
     # By doing it now and letting the previous 'features' reference go,
@@ -220,10 +220,8 @@ def solve_l1_logistic_reduced_problem(
     del features  # Free the float32 subset immediately
     gc.collect()
 
-    n_solver = float(features_64.shape[0])
     effective_lambda = max(float(l1_lambda), 1e-12)
-    # C = N_solver / lambda_eff to match the paper's sum-loss formulation.
-    effective_C = max(n_solver / effective_lambda, 1e-12)
+    effective_C = max(1.0 / effective_lambda, 1e-12)
     model = LogisticRegression(
         penalty="l1",
         solver="liblinear",
@@ -437,11 +435,10 @@ def fit_tree_with_tao(
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
             solver_indices = node_indices[positive_weight_mask]
 
-            # Kairgeldin Eq. 3-4: effective lambda = lambda * h_alpha(|R_i|)
-            # where h_alpha(t) = t^alpha for t > 0, and 1 for t = 0.
-            # The paper's alpha exponent is applied directly to |R_i|.
+            # Kairgeldin p.6: lambda' = lambda * Ni^(alpha-1)
+            # Dividing RP by Ni gives avg-loss + lambda' * reg
             effective_lambda = float(
-                l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha)
+                l1_lambda * float(max(node_indices.size, 1) ** (sparsity_alpha - 1.0))
             )
 
             # Pass the full features memmap and the subset indices separately.
