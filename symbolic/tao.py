@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import math
 from typing import Any, Callable
 
 import numpy as np
@@ -156,27 +157,20 @@ def solve_l1_logistic_reduced_problem(
     zero_threshold: float = 1e-5,
     random_state: int = 42,
     max_solver_samples: int = 0,
-    max_solver_memory_gb: float = 1.5,
 ) -> tuple[np.ndarray, float]:
     if labels.size == 0:
         dim = features.shape[1]
         return np.zeros((dim,), dtype=np.float32), 0.0
 
-    # ---- Adaptive subsample cap for LIBLINEAR memory safety ----
-    # LIBLINEAR needs float64 internally. We cap based on available memory
-    # so that the float64 matrix stays under max_solver_memory_gb.
+    # ---- Subsample cap for LIBLINEAR memory safety ----
+    # max_solver_samples > 0: cap to that many samples
+    # max_solver_samples == 0: no cap (use all samples)
     # The regularization C is computed from the actual node size (N_i),
     # so this cap only affects solver sample count, not regularization strength.
     n = labels.size
-    if max_solver_samples > 0:
-        cap = max_solver_samples
-    else:
-        # Auto-compute: max samples that fit in max_solver_memory_gb as float64
-        n_features = features.shape[1] if features.ndim == 2 else 1
-        cap = int(max_solver_memory_gb * (1024 ** 3) / (n_features * 8))
-    if n > cap:
+    if max_solver_samples > 0 and n > max_solver_samples:
         rng = np.random.RandomState(random_state)
-        keep = np.sort(rng.choice(n, size=cap, replace=False))
+        keep = np.sort(rng.choice(n, size=max_solver_samples, replace=False))
         labels = labels[keep]
         sample_weights = sample_weights[keep]
         if indices is not None:
@@ -441,6 +435,11 @@ def fit_tree_with_tao(
                 l1_lambda * float(max(node_indices.size, 1) ** (sparsity_alpha - 1.0))
             )
 
+            # Cap LIBLINEAR samples to 30K for depth 0-3 only.
+            # Deeper nodes have fewer samples and don't need capping.
+            node_depth = int(math.log2(node_index + 1)) if node_index >= 0 else 0
+            solver_cap = 30_000 if node_depth <= 3 else 0
+
             # Pass the full features memmap and the subset indices separately.
             # This allows the solver to stream the data in chunks rather than
             # materializing a multi-gigabyte array in RAM.
@@ -454,6 +453,7 @@ def fit_tree_with_tao(
                 tolerance=tolerance,
                 zero_threshold=zero_threshold,
                 random_state=random_state,
+                max_solver_samples=solver_cap,
             )
             tree.node_weights[node_index] = weights
             tree.node_bias[node_index] = bias
