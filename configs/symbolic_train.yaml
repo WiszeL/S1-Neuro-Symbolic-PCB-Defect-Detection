@@ -1,13 +1,13 @@
 data:
-  neg_ratio: 2
-  storage_dtype: float16
+  neg_ratio: 3
+  storage_dtype: float32
 
 search:
   tree_depth: 6
-  iterations: 15
-  l1_lambda: 15
+  iterations: 20
+  l1_lambda: 5
   sparsity_alpha: 1
-  logistic_max_iter: 200
+  logistic_max_iter: 400
   tolerance: 0.0001
   zero_threshold: 0.00001
   random_state: 112

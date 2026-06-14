@@ -21,6 +21,7 @@ class SymbolicArrayBundle:
     gt_iou: Tensor | None
     feature_shape: tuple[int, int, int]
     class_names: tuple[str, ...]
+    teacher_confidence: Tensor | None = None
 
 
 def _numpy_dtype(storage_dtype: str) -> np.dtype[Any]:
@@ -237,6 +238,13 @@ def open_exported_symbolic_array_payload(
         cache_chunk_size=cache_chunk_size,
     )
 
+    # Compute teacher confidence as max softmax probability per RoI.
+    # Used to downweight noisy teacher labels during TAO training.
+    teacher_scores = metadata.get("teacher_scores")
+    teacher_confidence: Tensor | None = None
+    if teacher_scores is not None:
+        teacher_confidence = teacher_scores[keep].max(dim=-1).values
+
     return SymbolicArrayBundle(
         feature_grids=feature_grids,
         feature_vectors=feature_grids.reshape(feature_grids.shape[0], -1),
@@ -247,4 +255,5 @@ def open_exported_symbolic_array_payload(
         gt_iou=_index_optional_tensor(metadata.get("gt_iou"), keep),
         feature_shape=tuple(int(value) for value in payload["feature_shape"]),
         class_names=tuple(payload["class_names"]),
+        teacher_confidence=teacher_confidence,
     )

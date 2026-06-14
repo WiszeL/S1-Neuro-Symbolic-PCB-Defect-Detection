@@ -37,7 +37,12 @@ class NeuroSymbolicDetector(nn.Module):
             .numpy()
             .astype(np.float32)
         )
-        probabilities = self.symbolic_tree.predict_proba(feature_vectors)
+        # Use temperature-calibrated probabilities for NMS scoring.
+        # The tree's stored temperature (default 1.0) rescales leaf
+        # distributions so NMS suppresses false positives properly.
+        # Argmax class decisions are T-invariant -- only score magnitudes
+        # change, never the symbolic classification itself.
+        probabilities = self.symbolic_tree.predict_proba_calibrated(feature_vectors)
         leaf_indices = self.symbolic_tree.predict_leaf_indices(feature_vectors)
         probability_tensor = torch.from_numpy(probabilities).to(
             self.device,

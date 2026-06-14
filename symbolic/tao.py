@@ -346,6 +346,7 @@ def fit_tree_with_tao(
     progress_desc: str | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     node_progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    teacher_confidence: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     features = _ensure_float32_features(features)
     labels = np.asarray(labels, dtype=np.int64)
@@ -417,6 +418,16 @@ def fit_tree_with_tao(
             left_loss = (left_predictions != node_labels).astype(np.float32)
             right_loss = (right_predictions != node_labels).astype(np.float32)
             sample_weights = np.abs(left_loss - right_loss)
+
+            # Scale sample weights by teacher confidence (if provided).
+            # Samples where the teacher was uncertain (low softmax max)
+            # get reduced weight, preventing the tree from learning
+            # noisy/wrong teacher labels.  All samples are retained.
+            if teacher_confidence is not None:
+                sample_weights *= teacher_confidence[node_indices].astype(
+                    np.float32
+                )
+
             positive_weight_mask = sample_weights > 0.0
 
             if not np.any(positive_weight_mask):
@@ -435,10 +446,12 @@ def fit_tree_with_tao(
                 l1_lambda * float(max(node_indices.size, 1) ** (sparsity_alpha - 1.0))
             )
 
-            # Cap LIBLINEAR samples to 30K for depth 0-3 only.
-            # Deeper nodes have fewer samples and don't need capping.
+            # Cap LIBLINEAR samples to 30K for depth 0-2 only.
+            # These shallow nodes route ALL samples and their splits
+            # cascade through the entire tree.  Deeper nodes have fewer
+            # samples naturally and don't need capping.
             node_depth = int(math.log2(node_index + 1)) if node_index >= 0 else 0
-            solver_cap = 30_000 if node_depth <= 3 else 0
+            solver_cap = 30_000 if node_depth <= 2 else 0
 
             # Pass the full features memmap and the subset indices separately.
             # This allows the solver to stream the data in chunks rather than

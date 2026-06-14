@@ -358,6 +358,23 @@ def train_symbolic_tree(
         feature_matrix,
         tree_depth=sodt_config["tree_depth"],
     )
+
+    # Extract teacher confidence for confidence-weighted TAO.
+    # Downweights samples where the teacher's softmax was uncertain,
+    # reducing the impact of noisy teacher labels on the tree.
+    teacher_confidence_np: np.ndarray | None = None
+    if bundle.teacher_confidence is not None:
+        teacher_confidence_np = (
+            bundle.teacher_confidence.detach().cpu().numpy().astype(np.float32)
+        )
+        print(
+            f"Teacher confidence weighting enabled: "
+            f"mean={teacher_confidence_np.mean():.4f}, "
+            f"min={teacher_confidence_np.min():.4f}, "
+            f"max={teacher_confidence_np.max():.4f}",
+            flush=True,
+        )
+
     history = fit_tree_with_tao(
         tree,
         feature_matrix,
@@ -372,10 +389,35 @@ def train_symbolic_tree(
         show_progress=False,
         progress_callback=_on_iteration,
         node_progress_callback=_on_node,
+        teacher_confidence=teacher_confidence_np,
     )
 
     if current_node_bar is not None:
         current_node_bar.close()
+
+    # Calibrate the SODT's leaf distributions via temperature scaling.
+    # This rescales probabilities for detection postprocessing (NMS)
+    # without changing any class decisions (argmax is T-invariant).
+    from neurosym.utils import calibrate_temperature as _calibrate_t
+
+    # Use a subsample for fast calibration on large datasets
+    cal_features = feature_matrix
+    cal_labels = labels
+    if labels.size > 100_000:
+        cal_rng = np.random.default_rng(sodt_config["random_state"])
+        cal_idx = cal_rng.choice(labels.size, size=100_000, replace=False)
+        if hasattr(feature_matrix, 'shape') and hasattr(cal_features, '__getitem__'):
+            cal_features = feature_matrix[cal_idx]
+        cal_labels = labels[cal_idx]
+
+    calibrated_t = _calibrate_t(tree, cal_features, cal_labels)
+    tree.temperature = calibrated_t
+    print(
+        f"Temperature calibration: T={calibrated_t:.4f} "
+        f"(rescales leaf distributions for NMS)",
+        flush=True,
+    )
+    del cal_features, cal_labels
 
     metrics = _augment_tree_metrics(tree, {})
 

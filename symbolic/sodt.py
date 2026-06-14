@@ -28,6 +28,7 @@ class SparseObliqueDecisionTreeClassifier:
         feature_shape: tuple[int, int, int] | None = None,
         class_names: tuple[str, ...] | None = None,
         leaf_smoothing: float = 1.0,
+        temperature: float = 1.0,
     ) -> None:
         if max_depth <= 0:
             raise ValueError("max_depth must be positive.")
@@ -41,6 +42,7 @@ class SparseObliqueDecisionTreeClassifier:
         self.feature_shape = feature_shape
         self.class_names = class_names
         self.leaf_smoothing = float(leaf_smoothing)
+        self.temperature = float(temperature)
         if selected_feature_indices is None:
             self.selected_feature_indices = None
         else:
@@ -150,6 +152,25 @@ class SparseObliqueDecisionTreeClassifier:
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         leaf_indices = self.predict_leaf_indices(features)
         return self.leaf_distributions[leaf_indices]
+
+    def predict_proba_calibrated(
+        self, features: np.ndarray, temperature: float | None = None
+    ) -> np.ndarray:
+        """Return temperature-calibrated leaf probabilities.
+
+        Applies softmax(log(leaf_dist) / T) so that score magnitudes are
+        properly calibrated for detection postprocessing (NMS) while
+        preserving the tree's class decisions (argmax is T-invariant).
+        """
+        T = float(temperature if temperature is not None else self.temperature)
+        raw_probs = self.predict_proba(features)
+        # Clamp to avoid log(0) for smoothed leaves
+        log_probs = np.log(np.clip(raw_probs, 1e-12, 1.0))
+        scaled_logits = log_probs / max(T, 1e-8)
+        # Stable softmax
+        shifted = scaled_logits - scaled_logits.max(axis=1, keepdims=True)
+        exp_shifted = np.exp(shifted)
+        return exp_shifted / exp_shifted.sum(axis=1, keepdims=True)
 
     def predict_log_proba(self, features: np.ndarray) -> np.ndarray:
         probabilities = np.clip(self.predict_proba(features), 1e-8, 1.0)
@@ -338,6 +359,7 @@ class SparseObliqueDecisionTreeClassifier:
             "feature_shape": self.feature_shape,
             "class_names": self.class_names,
             "leaf_smoothing": self.leaf_smoothing,
+            "temperature": self.temperature,
             "node_weights": torch.from_numpy(self.node_weights.copy()),
             "node_bias": torch.from_numpy(self.node_bias.copy()),
             "leaf_labels": torch.from_numpy(self.leaf_labels.copy()),
@@ -371,6 +393,7 @@ class SparseObliqueDecisionTreeClassifier:
             if state_dict["class_names"] is not None
             else None,
             leaf_smoothing=float(state_dict.get("leaf_smoothing", 1.0)),
+            temperature=float(state_dict.get("temperature", 1.0)),
         )
         tree.node_weights = (
             state_dict["node_weights"].detach().cpu().numpy().astype(np.float32)
