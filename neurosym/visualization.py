@@ -119,22 +119,6 @@ def draw_neurosymbolic_explanation(
 ) -> None:
     label_name = class_names[explanation["label"] - 1]
 
-    fig, axis = plt.subplots(figsize=(8, 8))
-    draw_numbered_detections(
-        axis,
-        image_tensor,
-        detection_result,
-        [detection_index],
-        class_names,
-        selected_index=detection_index,
-        display_numbers=[selected_number],
-    )
-    zoom_axis_to_box(axis, explanation["detection_box"], tuple(image_tensor.shape[-2:]))
-    axis.set_title(
-        f"Zoomed detection #{selected_number}: {label_name} {explanation['score']:.2f}"
-    )
-    plt.show()
-
     node_count = len(explanation["node_explanations"])
     
     if extra_panel_func is not None:
@@ -373,3 +357,4 @@ def draw_neurosymbolic_explanation(
         extra_panel_func(ax_extra)
 
     plt.show()
+    plt.close("all")
