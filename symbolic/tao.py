@@ -203,9 +203,10 @@ def solve_l1_logistic_reduced_problem(
     # ---------------------------------------------------------------------
     # Match the paper solver family: L1 logistic regression with LIBLINEAR
     # ---------------------------------------------------------------------
-    # Kairgeldin p.6: dividing RP by Ni gives avg-loss + lambda' * reg,
-    # where lambda' = lambda * Ni^(alpha-1). The caller passes this as l1_lambda.
-    # sklearn uses 1/C as regularization coefficient, so C = 1 / lambda'.
+    # Kairgeldin eq. 4: RP_i = Σ loss + λ·|R_i|^α · ‖w‖₁
+    # LIBLINEAR minimises: ‖w‖₁ + C·Σ loss, so 1/C = λ·|R_i|^α.
+    # The caller pre-computes the effective λ (= λ·N_i^α) and passes it
+    # as l1_lambda.  We set C = 1 / l1_lambda.
 
     # We convert directly to float64 here. This is what LIBLINEAR requires.
     # By doing it now and letting the previous 'features' reference go,
@@ -255,10 +256,28 @@ def evaluate_tree(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
     labels: np.ndarray,
+    l1_lambda: float = 0.0,
+    sparsity_alpha: float = 0.0,
 ) -> dict[str, Any]:
     predictions = tree.predict(features)
     accuracy = float((predictions == labels).mean())
     nonzero_counts = tree.nonzero_weight_counts()
+
+    # Compute the full TAO objective: Σ 0/1-loss + λ Σ_i |R_i|^α ‖w_i‖₁
+    # (Kairgeldin eq. 3).  Used for convergence checking.
+    classification_loss = float((predictions != labels).sum())
+    l1_penalty = 0.0
+    if l1_lambda > 0.0:
+        reduced_sets = compute_reduced_sets(tree, features)
+        for node_index in range(tree.num_internal_nodes):
+            node_rs_size = reduced_sets.get(
+                node_index, np.zeros((0,), dtype=np.int64)
+            ).size
+            node_l1 = float(np.sum(np.abs(tree.node_weights[node_index])))
+            h_alpha = float(max(node_rs_size, 1) ** sparsity_alpha)
+            l1_penalty += l1_lambda * h_alpha * node_l1
+    objective = classification_loss + l1_penalty
+
     return {
         "mimic_accuracy": accuracy,
         "nonzero_weights": sum(nonzero_counts),
@@ -266,6 +285,7 @@ def evaluate_tree(
         if nonzero_counts
         else 0.0,
         "active_internal_nodes": sum(count > 0 for count in nonzero_counts),
+        "objective": objective,
     }
 
 
@@ -341,6 +361,7 @@ def fit_tree_with_tao(
     logistic_max_iter: int = 200,
     tolerance: float = 1e-4,
     zero_threshold: float = 1e-5,
+    convergence_tolerance: float = 1e-6,
     random_state: int = 42,
     show_progress: bool = False,
     progress_desc: str | None = None,
@@ -440,18 +461,18 @@ def fit_tree_with_tao(
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
             solver_indices = node_indices[positive_weight_mask]
 
-            # Kairgeldin p.6: lambda' = lambda * Ni^(alpha-1)
-            # Dividing RP by Ni gives avg-loss + lambda' * reg
+            # Kairgeldin eq. 3-4: RP_i = Σ loss + λ·h_α(|R_i|)·‖w‖₁
+            # where h_α(t) = t^α.  LIBLINEAR uses ‖w‖₁ + C·Σ loss,
+            # so C = 1 / (λ · |R_i|^α).
             effective_lambda = float(
-                l1_lambda * float(max(node_indices.size, 1) ** (sparsity_alpha - 1.0))
+                l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha)
             )
 
-            # Cap LIBLINEAR samples to 30K for depth 0-2 only.
-            # These shallow nodes route ALL samples and their splits
-            # cascade through the entire tree.  Deeper nodes have fewer
-            # samples naturally and don't need capping.
-            node_depth = int(math.log2(node_index + 1)) if node_index >= 0 else 0
-            solver_cap = 30_000 if node_depth <= 2 else 0
+            # Cap LIBLINEAR samples to prevent memory exhaustion.
+            # L1 logistic regression on 30K random samples gives nearly
+            # identical solutions to the full set, and avoids allocating
+            # multi-GB float64 matrices that cause swap death.
+            solver_cap = 30_000
 
             # Pass the full features memmap and the subset indices separately.
             # This allows the solver to stream the data in chunks rather than
@@ -484,7 +505,11 @@ def fit_tree_with_tao(
         reduced_sets = compute_reduced_sets(tree, features)
         update_leaf_predictions(tree, labels, reduced_sets)
 
-        metrics = evaluate_tree(tree, features, labels)
+        metrics = evaluate_tree(
+            tree, features, labels,
+            l1_lambda=l1_lambda,
+            sparsity_alpha=sparsity_alpha,
+        )
         metrics["iteration"] = iteration_index + 1
         history.append(metrics)
         if progress_callback is not None:
@@ -493,5 +518,21 @@ def fit_tree_with_tao(
             progress_bar.set_postfix(
                 mimic=f"{metrics['mimic_accuracy']:.4f}",
                 nz=metrics["nonzero_weights"],
+                obj=f"{metrics['objective']:.1f}",
             )
+
+        # Convergence check (Hada Fig. 1 / Kairgeldin Fig. 5):
+        # stop when the objective function decreases less than a tolerance.
+        if len(history) >= 2:
+            prev_obj = history[-2]["objective"]
+            curr_obj = metrics["objective"]
+            relative_decrease = abs(prev_obj - curr_obj) / max(abs(prev_obj), 1e-12)
+            if relative_decrease < convergence_tolerance:
+                if progress_bar is not None:
+                    progress_bar.set_postfix_str(
+                        f"converged (Δobj={relative_decrease:.2e})"
+                    )
+                    progress_bar.close()
+                break
+
     return history
