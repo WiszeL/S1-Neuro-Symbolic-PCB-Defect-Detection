@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
 
 import numpy as np
 import torch
@@ -19,13 +18,11 @@ class NeuroSymbolicDetector(nn.Module):
         detector: NeuroFasterRCNN,
         symbolic_tree: SparseObliqueDecisionTreeClassifier,
         device: str | None = None,
-        neurosym_config: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.detector = detector
         self.symbolic_tree = symbolic_tree
         self.device = select_device(device)
-        self.neurosym_config = neurosym_config
         if self.symbolic_tree.num_classes != self.detector.num_classes:
             raise ValueError(
                 "The symbolic tree class count must match the detector class count."

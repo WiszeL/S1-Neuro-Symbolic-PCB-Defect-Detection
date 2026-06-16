@@ -291,8 +291,6 @@ def train_symbolic_tree(
         flush=True,
     )
 
-
-
     unique_labels, counts = np.unique(labels, return_counts=True)
     print("\n" + "=" * 45)
     print(f"{'Selected RoI Class Distribution':^45}")
@@ -403,7 +401,6 @@ def train_symbolic_tree(
     # without changing any class decisions (argmax is T-invariant).
     # Guo et al. 2017: temperature MUST be calibrated on held-out data,
     # not training data, to avoid overfitting the calibration.
-
 
     metrics = _augment_tree_metrics(tree, {})
 

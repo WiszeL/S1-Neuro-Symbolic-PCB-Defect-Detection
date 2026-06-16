@@ -151,8 +151,6 @@ class SparseObliqueDecisionTreeClassifier:
         leaf_indices = self.predict_leaf_indices(features)
         return self.leaf_distributions[leaf_indices]
 
-
-
     def predict_log_proba(self, features: np.ndarray) -> np.ndarray:
         probabilities = np.clip(self.predict_proba(features), 1e-8, 1.0)
         return np.log(probabilities)

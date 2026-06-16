@@ -1,14 +1,10 @@
 from __future__ import annotations
-from typing import Any
 
 import torch
 from torch import Tensor
 from torchvision.ops import boxes as box_ops
 
 from neuro.faster_rcnn import NeuroFasterRCNN
-
-
-
 
 
 def postprocess_symbolic_detections(
@@ -19,7 +15,6 @@ def postprocess_symbolic_detections(
     pooled_features: Tensor,
     proposal_probabilities: Tensor,
     proposal_leaf_indices: Tensor,
-    neurosym_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Tensor]]:
     device = proposal_probabilities.device
     num_classes = proposal_probabilities.shape[-1]
@@ -102,11 +97,6 @@ def postprocess_symbolic_detections(
 
         use_soft_nms = detector.soft_nms_enabled
         iou_thresh = detector.soft_nms_iou_thresh
-        if neurosym_config is not None:
-            if "method" in neurosym_config:
-                use_soft_nms = (neurosym_config["method"] == "soft")
-            if "iou_thresh" in neurosym_config:
-                iou_thresh = neurosym_config["iou_thresh"]
 
         if use_soft_nms:
             keep, updated_scores = detector.batched_soft_nms(

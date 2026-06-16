@@ -5,14 +5,9 @@ data:
 search:
   tree_depth: 5
   iterations: 15
-  l1_lambda: 6
+  l1_lambda: 10
   sparsity_alpha: 0.1
   logistic_max_iter: 200
   tolerance: 0.0001
   zero_threshold: 0.00001
   random_state: 112
-
-neurosymbolic_nms:
-  method: hard
-  iou_thresh: 0.5
-# KlawayarWayarKLicaKlawayar445
