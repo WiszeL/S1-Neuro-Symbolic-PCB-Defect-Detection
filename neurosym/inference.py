@@ -43,10 +43,18 @@ def load_neurosymbolic_detector(
     )
     detector.load_state_dict(detector_checkpoint["model_state_dict"])
     symbolic_tree = load_symbolic_tree(symbolic_checkpoint_path)
+    symbolic_checkpoint = torch.load(
+        symbolic_checkpoint_path,
+        map_location=resolved_device,
+        weights_only=False,
+    )
+    neurosym_config = symbolic_checkpoint.get("training_config", {}).get("neurosymbolic_nms")
+
     hybrid_model = NeuroSymbolicDetector(
         detector=detector,
         symbolic_tree=symbolic_tree,
         device=str(resolved_device),
+        neurosym_config=neurosym_config,
     )
     return hybrid_model, detector_checkpoint
 

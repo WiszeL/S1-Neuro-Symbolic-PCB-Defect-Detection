@@ -1,78 +1,14 @@
 from __future__ import annotations
+from typing import Any
 
-import numpy as np
 import torch
 from torch import Tensor
 from torchvision.ops import boxes as box_ops
 
 from neuro.faster_rcnn import NeuroFasterRCNN
-from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 
 
-def calibrate_temperature(
-    tree: SparseObliqueDecisionTreeClassifier,
-    val_features: np.ndarray,
-    val_labels: np.ndarray,
-    num_candidates: int = 50,
-    t_min: float = 0.1,
-    t_max: float = 5.0,
-) -> float:
-    """Find the optimal temperature T for the SODT's leaf distributions.
 
-    Minimises the negative log-likelihood (NLL) of the true labels under
-    the temperature-calibrated leaf probabilities:
-
-        calibrated = softmax(log(leaf_dist) / T)
-        NLL = -mean(log(calibrated[i, label_i]))
-
-    This is a simple 1-D grid search.  The argmax class decision is
-    T-invariant, so temperature only affects score magnitudes used for
-    detection postprocessing (NMS), not classification decisions.
-
-    Args:
-        tree: A trained SODT with populated leaf distributions.
-        val_features: 2-D feature matrix for the validation set.
-        val_labels: 1-D integer labels for the validation set.
-        num_candidates: Number of T values to evaluate in [t_min, t_max].
-        t_min: Lower bound for temperature search.
-        t_max: Upper bound for temperature search.
-
-    Returns:
-        The temperature T that minimises NLL on the validation set.
-    """
-    features = (
-        val_features
-        if val_features.dtype == np.float32
-        else np.asarray(val_features, dtype=np.float32)
-    )
-    labels = np.asarray(val_labels, dtype=np.int64)
-
-    # Pre-compute raw leaf distributions for all validation samples
-    raw_probs = tree.predict_proba(features)
-    log_probs = np.log(np.clip(raw_probs, 1e-12, 1.0))
-
-    candidates = np.linspace(t_min, t_max, num_candidates)
-    best_t = 1.0
-    best_nll = float("inf")
-
-    for T in candidates:
-        scaled_logits = log_probs / float(T)
-        # Stable softmax
-        shifted = scaled_logits - scaled_logits.max(axis=1, keepdims=True)
-        exp_shifted = np.exp(shifted)
-        calibrated = exp_shifted / exp_shifted.sum(axis=1, keepdims=True)
-
-        # NLL: -mean(log(p(correct_class)))
-        nll = -float(
-            np.mean(
-                np.log(np.clip(calibrated[np.arange(len(labels)), labels], 1e-12, 1.0))
-            )
-        )
-        if nll < best_nll:
-            best_nll = nll
-            best_t = float(T)
-
-    return best_t
 
 
 def postprocess_symbolic_detections(
@@ -83,6 +19,7 @@ def postprocess_symbolic_detections(
     pooled_features: Tensor,
     proposal_probabilities: Tensor,
     proposal_leaf_indices: Tensor,
+    neurosym_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Tensor]]:
     device = proposal_probabilities.device
     num_classes = proposal_probabilities.shape[-1]
@@ -163,7 +100,15 @@ def postprocess_symbolic_detections(
         symbolic_probabilities = symbolic_probabilities[keep]
         symbolic_leaf_indices = symbolic_leaf_indices[keep]
 
-        if detector.soft_nms_enabled:
+        use_soft_nms = detector.soft_nms_enabled
+        iou_thresh = detector.soft_nms_iou_thresh
+        if neurosym_config is not None:
+            if "method" in neurosym_config:
+                use_soft_nms = (neurosym_config["method"] == "soft")
+            if "iou_thresh" in neurosym_config:
+                iou_thresh = neurosym_config["iou_thresh"]
+
+        if use_soft_nms:
             keep, updated_scores = detector.batched_soft_nms(
                 boxes,
                 scores,
@@ -181,7 +126,7 @@ def postprocess_symbolic_detections(
                 boxes,
                 scores,
                 labels,
-                detector.soft_nms_iou_thresh,
+                iou_thresh,
             )[: detector.DETECTIONS_PER_IMG]
             boxes = boxes[keep]
             scores = scores[keep]

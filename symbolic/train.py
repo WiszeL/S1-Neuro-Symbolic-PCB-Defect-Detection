@@ -274,6 +274,7 @@ def train_symbolic_tree(
     *,
     config: SymbolicTrainConfig,
     summary_path: str | Path | None = None,
+    calibration_export_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     data_config = config["data"]
     sodt_config = _materialize_sodt_config(config["search"])
@@ -289,6 +290,8 @@ def train_symbolic_tree(
         f"Symbolic training data ready in {_format_duration(perf_counter() - load_start_time)}.",
         flush=True,
     )
+
+
 
     unique_labels, counts = np.unique(labels, return_counts=True)
     print("\n" + "=" * 45)
@@ -398,26 +401,9 @@ def train_symbolic_tree(
     # Calibrate the SODT's leaf distributions via temperature scaling.
     # This rescales probabilities for detection postprocessing (NMS)
     # without changing any class decisions (argmax is T-invariant).
-    from neurosym.utils import calibrate_temperature as _calibrate_t
+    # Guo et al. 2017: temperature MUST be calibrated on held-out data,
+    # not training data, to avoid overfitting the calibration.
 
-    # Use a subsample for fast calibration on large datasets
-    cal_features = feature_matrix
-    cal_labels = labels
-    if labels.size > 100_000:
-        cal_rng = np.random.default_rng(sodt_config["random_state"])
-        cal_idx = cal_rng.choice(labels.size, size=100_000, replace=False)
-        if hasattr(feature_matrix, "shape") and hasattr(cal_features, "__getitem__"):
-            cal_features = feature_matrix[cal_idx]
-        cal_labels = labels[cal_idx]
-
-    calibrated_t = _calibrate_t(tree, cal_features, cal_labels)
-    tree.temperature = calibrated_t
-    print(
-        f"Temperature calibration: T={calibrated_t:.4f} "
-        f"(rescales leaf distributions for NMS)",
-        flush=True,
-    )
-    del cal_features, cal_labels
 
     metrics = _augment_tree_metrics(tree, {})
 

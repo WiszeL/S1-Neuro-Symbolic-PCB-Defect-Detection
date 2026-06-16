@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import torch
 from torch import Tensor, nn
@@ -17,11 +19,13 @@ class NeuroSymbolicDetector(nn.Module):
         detector: NeuroFasterRCNN,
         symbolic_tree: SparseObliqueDecisionTreeClassifier,
         device: str | None = None,
+        neurosym_config: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.detector = detector
         self.symbolic_tree = symbolic_tree
         self.device = select_device(device)
+        self.neurosym_config = neurosym_config
         if self.symbolic_tree.num_classes != self.detector.num_classes:
             raise ValueError(
                 "The symbolic tree class count must match the detector class count."
@@ -37,12 +41,8 @@ class NeuroSymbolicDetector(nn.Module):
             .numpy()
             .astype(np.float32)
         )
-        # Use temperature-calibrated probabilities for NMS scoring.
-        # The tree's stored temperature (default 1.0) rescales leaf
-        # distributions so NMS suppresses false positives properly.
-        # Argmax class decisions are T-invariant -- only score magnitudes
-        # change, never the symbolic classification itself.
-        probabilities = self.symbolic_tree.predict_proba_calibrated(feature_vectors)
+        # Use uncalibrated probabilities as secondary leakage is controlled by the argmax mask.
+        probabilities = self.symbolic_tree.predict_proba(feature_vectors)
         leaf_indices = self.symbolic_tree.predict_leaf_indices(feature_vectors)
         probability_tensor = torch.from_numpy(probabilities).to(
             self.device,
