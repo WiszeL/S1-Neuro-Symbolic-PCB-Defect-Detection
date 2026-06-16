@@ -120,7 +120,7 @@ def draw_neurosymbolic_explanation(
     label_name = class_names[explanation["label"] - 1]
 
     node_count = len(explanation["node_explanations"])
-    
+
     if extra_panel_func is not None:
         plt.figure(figsize=(18, max(8, 4 * node_count)))
         gs = gridspec.GridSpec(1, 3, width_ratios=[1.5, 1, 1], wspace=0.1)

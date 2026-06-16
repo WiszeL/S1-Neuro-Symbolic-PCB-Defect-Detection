@@ -63,9 +63,11 @@ def calibrate_temperature(
         calibrated = exp_shifted / exp_shifted.sum(axis=1, keepdims=True)
 
         # NLL: -mean(log(p(correct_class)))
-        nll = -float(np.mean(np.log(np.clip(
-            calibrated[np.arange(len(labels)), labels], 1e-12, 1.0
-        ))))
+        nll = -float(
+            np.mean(
+                np.log(np.clip(calibrated[np.arange(len(labels)), labels], 1e-12, 1.0))
+            )
+        )
         if nll < best_nll:
             best_nll = nll
             best_t = float(T)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gc
-import math
 from typing import Any, Callable
 
 import numpy as np
@@ -445,9 +444,7 @@ def fit_tree_with_tao(
             # get reduced weight, preventing the tree from learning
             # noisy/wrong teacher labels.  All samples are retained.
             if teacher_confidence is not None:
-                sample_weights *= teacher_confidence[node_indices].astype(
-                    np.float32
-                )
+                sample_weights *= teacher_confidence[node_indices].astype(np.float32)
 
             positive_weight_mask = sample_weights > 0.0
 
@@ -506,7 +503,9 @@ def fit_tree_with_tao(
         update_leaf_predictions(tree, labels, reduced_sets)
 
         metrics = evaluate_tree(
-            tree, features, labels,
+            tree,
+            features,
+            labels,
             l1_lambda=l1_lambda,
             sparsity_alpha=sparsity_alpha,
         )

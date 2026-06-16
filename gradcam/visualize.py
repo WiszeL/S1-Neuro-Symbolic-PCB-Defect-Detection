@@ -19,7 +19,6 @@ from matplotlib.colors import LinearSegmentedColormap
 from PIL import Image
 from torch import Tensor
 
-from neuro.faster_rcnn import NeuroFasterRCNN
 from neuro.inference import load_checkpoint_model
 
 from .gradcam import GradCAM
@@ -27,7 +26,13 @@ from .gradcam import GradCAM
 # A perceptually uniform "fire" colormap for heatmap overlays.
 _FIRE_CMAP = LinearSegmentedColormap.from_list(
     "fire",
-    [(0.0, "#000000"), (0.3, "#8B0000"), (0.6, "#FF4500"), (0.85, "#FFA500"), (1.0, "#FFFF00")],
+    [
+        (0.0, "#000000"),
+        (0.3, "#8B0000"),
+        (0.6, "#FF4500"),
+        (0.85, "#FFA500"),
+        (1.0, "#FFFF00"),
+    ],
 )
 
 
@@ -163,7 +168,11 @@ def plot_gradcam_comparison(
         score = result["score"]
         heatmap = result["heatmap"]
 
-        class_name = class_names[label - 1] if 0 < label <= len(class_names) else f"class {label}"
+        class_name = (
+            class_names[label - 1]
+            if 0 < label <= len(class_names)
+            else f"class {label}"
+        )
         color = palette[(label - 1) % len(palette)]
 
         x1, y1, x2, y2 = box.tolist()
@@ -202,12 +211,15 @@ def plot_gradcam_comparison(
         ax_cam.imshow(crop)
         # Resize heatmap to match the crop.
         heatmap_np = heatmap.detach().cpu().numpy()
-        heatmap_resized = np.array(
-            Image.fromarray((heatmap_np * 255).astype(np.uint8)).resize(
-                (crop.shape[1], crop.shape[0]),
-                Image.BILINEAR,
-            )
-        ).astype(np.float32) / 255.0
+        heatmap_resized = (
+            np.array(
+                Image.fromarray((heatmap_np * 255).astype(np.uint8)).resize(
+                    (crop.shape[1], crop.shape[0]),
+                    Image.BILINEAR,
+                )
+            ).astype(np.float32)
+            / 255.0
+        )
         ax_cam.imshow(heatmap_resized, cmap=_FIRE_CMAP, alpha=0.55, vmin=0, vmax=1)
         ax_cam.set_title("Grad-CAM", fontsize=11, loc="left", fontweight="bold")
         ax_cam.axis("off")
@@ -216,15 +228,20 @@ def plot_gradcam_comparison(
         if has_sodt:
             ax_sodt = axes[row_idx][2]
             sodt_hm = sodt_heatmaps[row_idx].detach().cpu().numpy()
-            sodt_resized = np.array(
-                Image.fromarray((sodt_hm * 255).astype(np.uint8)).resize(
-                    (crop.shape[1], crop.shape[0]),
-                    Image.BILINEAR,
-                )
-            ).astype(np.float32) / 255.0
+            sodt_resized = (
+                np.array(
+                    Image.fromarray((sodt_hm * 255).astype(np.uint8)).resize(
+                        (crop.shape[1], crop.shape[0]),
+                        Image.BILINEAR,
+                    )
+                ).astype(np.float32)
+                / 255.0
+            )
             ax_sodt.imshow(crop)
             ax_sodt.imshow(sodt_resized, cmap=_FIRE_CMAP, alpha=0.55, vmin=0, vmax=1)
-            ax_sodt.set_title("SODT Evidence", fontsize=11, loc="left", fontweight="bold")
+            ax_sodt.set_title(
+                "SODT Evidence", fontsize=11, loc="left", fontweight="bold"
+            )
             ax_sodt.axis("off")
 
     fig.tight_layout()
@@ -306,9 +323,13 @@ def run_gradcam_baseline(
 
         # Plot.
         fig = plot_gradcam_comparison(
-            image_tensor, results, class_names, save_path=(
+            image_tensor,
+            results,
+            class_names,
+            save_path=(
                 Path(save_dir) / f"{Path(img_path).stem}_gradcam.png"
-                if save_dir else None
+                if save_dir
+                else None
             ),
         )
         plt.close(fig)

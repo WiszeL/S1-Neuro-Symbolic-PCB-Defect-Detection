@@ -161,9 +161,7 @@ class GradCAM:
         scaled_boxes[:, [1, 3]] *= scale_y
 
         # Pool features per detection box.
-        pooled = self.model.roi_align(
-            features, [scaled_boxes], images_list.image_sizes
-        )
+        pooled = self.model.roi_align(features, [scaled_boxes], images_list.image_sizes)
         roi_representations = self.model.box_head(pooled)
         class_logits = self.model.box_predictor.classifier(roi_representations)
 
@@ -196,7 +194,7 @@ class GradCAM:
             cam_upsampled = F.interpolate(
                 cam, size=(padded_h, padded_w), mode="bilinear", align_corners=False
             )
-            
+
             # Crop away the padding to perfectly align with the scaled (processed) image.
             cam_unpadded = cam_upsampled[:, :, :processed_h, :processed_w]
 
@@ -212,12 +210,16 @@ class GradCAM:
             roi_cam = cam_unpadded[:, :, y1:y2, x1:x2]
 
             # Resize to the standard RoI output size.
-            roi_cam = F.interpolate(
-                roi_cam,
-                size=output_size,
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0).squeeze(0)
+            roi_cam = (
+                F.interpolate(
+                    roi_cam,
+                    size=output_size,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                .squeeze(0)
+                .squeeze(0)
+            )
 
             # Normalize to [0, 1].
             cam_min = roi_cam.min()

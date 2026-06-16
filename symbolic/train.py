@@ -406,7 +406,7 @@ def train_symbolic_tree(
     if labels.size > 100_000:
         cal_rng = np.random.default_rng(sodt_config["random_state"])
         cal_idx = cal_rng.choice(labels.size, size=100_000, replace=False)
-        if hasattr(feature_matrix, 'shape') and hasattr(cal_features, '__getitem__'):
+        if hasattr(feature_matrix, "shape") and hasattr(cal_features, "__getitem__"):
             cal_features = feature_matrix[cal_idx]
         cal_labels = labels[cal_idx]
 

@@ -3,9 +3,9 @@ data:
   storage_dtype: float16
 
 search:
-  tree_depth: 5
+  tree_depth: 6
   iterations: 15
-  l1_lambda: 10.0
+  l1_lambda: 10
   sparsity_alpha: 0.1
   logistic_max_iter: 200
   tolerance: 0.0001
