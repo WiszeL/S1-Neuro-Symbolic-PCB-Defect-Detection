@@ -207,15 +207,12 @@ def evaluate_gradcam(
 
             keep = det["scores"] >= score_threshold
             det_boxes = det["boxes"][keep].detach().cpu()
-            det_scores = det["scores"][keep].detach().cpu()
             det_labels = det["labels"][keep].detach().cpu()
 
             n_kept = det_boxes.shape[0]
             elapsed = time.perf_counter() - t_img
             if img_idx % 10 == 0 or n_kept == 0:
-                print(
-                    f"  [{img_idx + 1}/{n_images}] dets={n_kept}  ({elapsed:.1f}s)"
-                )
+                print(f"  [{img_idx + 1}/{n_images}] dets={n_kept}  ({elapsed:.1f}s)")
             if n_kept == 0:
                 continue
         except RuntimeError as exc:
@@ -245,9 +242,7 @@ def evaluate_gradcam(
             scaled_boxes[:, [1, 3]] *= scale_y
 
             # RoI Align on detection boxes → pooled features (for faithfulness)
-            pooled = model.roi_align(
-                features, [scaled_boxes], images_list.image_sizes
-            )
+            pooled = model.roi_align(features, [scaled_boxes], images_list.image_sizes)
             roi_repr = model.box_head(pooled)
             class_logits = model.box_predictor.classifier(roi_repr)
 

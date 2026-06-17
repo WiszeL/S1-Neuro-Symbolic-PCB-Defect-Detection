@@ -259,12 +259,16 @@ def evaluate_symbolic_model(
 def _compute_local_instance_heatmap(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_grid: Tensor | np.ndarray,
+    mode: str = "all",
 ) -> Tensor:
     grid = _ensure_writable_tensor(feature_grid)
     feature_vector = grid.reshape(-1).detach().cpu().numpy().astype(np.float32)
     path = tree.decision_path(feature_vector)
     if not path:
         return torch.zeros(grid.shape[-2:], dtype=torch.float32)
+
+    if mode == "leaf_only":
+        path = [path[-1]]
 
     weight_grids = np.stack(
         [tree.node_weight_grid(step.node_index) for step in path], axis=0
@@ -330,6 +334,8 @@ def evaluate_symbolic_spatial_metrics(
     has_matched_gt: Tensor | None,
     gt_iou: Tensor | None,
     random_state: int = 42,
+    heatmap_mode: str = "all",
+    min_proposal_iou: float = 0.0,
 ) -> dict[str, Any]:
     if matched_gt_boxes is None or has_matched_gt is None:
         return _spatial_result(0, _NAN, _NAN)
@@ -346,8 +352,12 @@ def evaluate_symbolic_spatial_metrics(
             continue
         if gt_iou is not None and float(gt_iou[index]) <= 0.0:
             continue
+        if gt_iou is not None and float(gt_iou[index]) < min_proposal_iou:
+            continue
 
-        heatmap = _compute_local_instance_heatmap(tree, feature_grids[index])
+        heatmap = _compute_local_instance_heatmap(
+            tree, feature_grids[index], mode=heatmap_mode
+        )
         normalized_heatmap = _normalize_heatmap(heatmap)
         gt_mask = project_gt_box_to_roi_grid(
             proposal_box=proposal_boxes[index],
