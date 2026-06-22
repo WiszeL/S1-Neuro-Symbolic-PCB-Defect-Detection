@@ -75,10 +75,10 @@ def _select_random_samples(
         top_k = min(num_samples * top_k_multiplier, int(mask.sum().item()))
         top_indices = cls_scores_masked.topk(top_k).indices.numpy()
 
-        chosen = rng.choice(top_indices, size=min(num_samples, len(top_indices)), replace=False)
-        selections.append(
-            [(int(idx), float(cls_scores[idx].item())) for idx in chosen]
+        chosen = rng.choice(
+            top_indices, size=min(num_samples, len(top_indices)), replace=False
         )
+        selections.append([(int(idx), float(cls_scores[idx].item())) for idx in chosen])
     return selections
 
 
@@ -147,9 +147,7 @@ def visualize_spatial_topology(
         y=1.0 - 0.01,
     )
 
-    for row, (cls_name, cls_selections) in enumerate(
-        zip(class_names, selections)
-    ):
+    for row, (cls_name, cls_selections) in enumerate(zip(class_names, selections)):
         for col in range(num_samples):
             ax = axes[row, col]
 
@@ -157,7 +155,7 @@ def visualize_spatial_topology(
                 roi_idx, score = cls_selections[col]
                 spatial_map = features[roi_idx].mean(axis=0)  # (64,7,7) -> (7,7)
 
-                im = ax.imshow(
+                ax.imshow(
                     spatial_map,
                     cmap="magma",
                     interpolation="nearest",

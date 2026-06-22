@@ -247,13 +247,14 @@ def _print_inspection_summary(split_file: str, inspection: InspectionSummary) ->
 def _plot_class_counts(inspection: InspectionSummary) -> None:
     # Class imbalance is the main dataset-level signal worth plotting.
     class_fig, class_ax = plt.subplots(figsize=(10, 4.8))
-    class_ax.bar(
+    bars = class_ax.bar(
         inspection["class_labels"], inspection["class_counts"], color="#2f6f73"
     )
     class_ax.set_title("Annotations per Class", loc="left", fontsize=14, weight="bold")
     class_ax.set_ylabel("Annotations")
     class_ax.tick_params(axis="x", rotation=30)
     class_ax.grid(axis="y", alpha=0.25)
+    class_ax.bar_label(bars, padding=3, fontsize=9)
     class_fig.tight_layout()
     plt.show()
 
