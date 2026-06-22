@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import gc
 from typing import Any, Callable
 
 import numpy as np
@@ -211,8 +210,6 @@ def solve_l1_logistic_reduced_problem(
     # By doing it now and letting the previous 'features' reference go,
     # we avoid having both float32 and float64 copies in RAM simultaneously.
     features_64 = features.astype(np.float64)
-    del features  # Free the float32 subset immediately
-    gc.collect()
 
     effective_lambda = max(float(l1_lambda), 1e-12)
     effective_C = max(1.0 / effective_lambda, 1e-12)
@@ -231,9 +228,6 @@ def solve_l1_logistic_reduced_problem(
     learned_weights = model.coef_[0].astype(np.float32)
     learned_weights[np.abs(learned_weights) < zero_threshold] = 0.0
     bias = float(model.intercept_[0])
-
-    del features_64, model
-    gc.collect()
 
     return learned_weights, bias
 
@@ -488,7 +482,7 @@ def fit_tree_with_tao(
             )
             tree.node_weights[node_index] = weights
             tree.node_bias[node_index] = bias
-            gc.collect()
+
             if node_progress_callback is not None:
                 node_progress_callback(
                     {

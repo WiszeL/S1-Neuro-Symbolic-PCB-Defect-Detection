@@ -5,6 +5,7 @@ from .export import extract_dataset_from_teacher
 from .sodt import SparseObliqueDecisionTreeClassifier
 from .tao import fit_tree_with_tao
 from .train import load_symbolic_tree, train_symbolic_tree
+from .visualization import visualize_spatial_topology
 
 __all__ = [
     "SymbolicTrainConfig",
@@ -16,4 +17,5 @@ __all__ = [
     "load_symbolic_tree",
     "open_exported_symbolic_array_payload",
     "train_symbolic_tree",
+    "visualize_spatial_topology",
 ]
