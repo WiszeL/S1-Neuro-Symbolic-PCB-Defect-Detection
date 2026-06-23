@@ -228,81 +228,83 @@ def evaluate_gradcam(
             img_tensor = image.to(device).unsqueeze(0)
             images_list, _ = model.transform(img_tensor, None)
 
-            with torch.enable_grad():
-                features = model.backbone(images_list.tensors)
+            with torch.inference_mode(False), torch.enable_grad():
+                # Clone input tensor inside normal autograd mode to ensure it's not an inference tensor.
+                input_tensor = images_list.tensors.clone()
+                features = model.backbone(input_tensor)
 
-            # Scale detection boxes from original to transformed coords
-            original_h, original_w = image.shape[-2:]
-            processed_h, processed_w = images_list.image_sizes[0]
-            scale_x = processed_w / original_w
-            scale_y = processed_h / original_h
+                # Scale detection boxes from original to transformed coords
+                original_h, original_w = image.shape[-2:]
+                processed_h, processed_w = images_list.image_sizes[0]
+                scale_x = processed_w / original_w
+                scale_y = processed_h / original_h
 
-            scaled_boxes = det_boxes.clone().float().to(device)
-            scaled_boxes[:, [0, 2]] *= scale_x
-            scaled_boxes[:, [1, 3]] *= scale_y
+                scaled_boxes = det_boxes.clone().float().to(device)
+                scaled_boxes[:, [0, 2]] *= scale_x
+                scaled_boxes[:, [1, 3]] *= scale_y
 
-            # RoI Align on detection boxes → pooled features (for faithfulness)
-            pooled = model.roi_align(features, [scaled_boxes], images_list.image_sizes)
-            roi_repr = model.box_head(pooled)
-            class_logits = model.box_predictor.classifier(roi_repr)
+                # RoI Align on detection boxes → pooled features (for faithfulness)
+                pooled = model.roi_align(features, [scaled_boxes], images_list.image_sizes)
+                roi_repr = model.box_head(pooled)
+                class_logits = model.box_predictor.classifier(roi_repr)
 
-            # ── Grad-CAM backward per detection ───────────────────────────
-            activations = gradcam._activations  # captured by forward hook
-            heatmaps: list[Tensor] = []
-            padded_h, padded_w = images_list.tensors.shape[-2:]
+                # ── Grad-CAM backward per detection ───────────────────────────
+                activations = gradcam._activations  # captured by forward hook
+                heatmaps: list[Tensor] = []
+                padded_h, padded_w = images_list.tensors.shape[-2:]
 
-            for i in range(n_kept):
-                model.zero_grad()
-                target_class = int(det_labels[i])
-                score = class_logits[i, target_class]
-                score.backward(retain_graph=True)
+                for i in range(n_kept):
+                    model.zero_grad()
+                    target_class = int(det_labels[i])
+                    score = class_logits[i, target_class]
+                    score.backward(retain_graph=True)
 
-                gradients = gradcam._gradients
-                if gradients is None or activations is None:
-                    heatmaps.append(torch.ones(_ROI_GRID, device=device))
-                    continue
+                    gradients = gradcam._gradients
+                    if gradients is None or activations is None:
+                        heatmaps.append(torch.ones(_ROI_GRID, device=device))
+                        continue
 
-                weights = gradients.mean(dim=(2, 3), keepdim=True)
-                cam = (weights * activations).sum(dim=1, keepdim=True)
-                cam = F.relu(cam)
+                    weights = gradients.mean(dim=(2, 3), keepdim=True)
+                    cam = (weights * activations).sum(dim=1, keepdim=True)
+                    cam = F.relu(cam)
 
-                cam_up = F.interpolate(
-                    cam,
-                    size=(padded_h, padded_w),
-                    mode="bilinear",
-                    align_corners=False,
-                )
-                cam_crop = cam_up[:, :, :processed_h, :processed_w]
-
-                x1 = max(0, int(scaled_boxes[i, 0]))
-                y1 = max(0, int(scaled_boxes[i, 1]))
-                x2 = min(processed_w, int(scaled_boxes[i, 2]) + 1)
-                y2 = min(processed_h, int(scaled_boxes[i, 3]) + 1)
-
-                if x2 <= x1 or y2 <= y1:
-                    heatmaps.append(torch.ones(_ROI_GRID, device=device))
-                    continue
-
-                roi_cam = cam_crop[:, :, y1:y2, x1:x2]
-                roi_cam = (
-                    F.interpolate(
-                        roi_cam,
-                        size=_ROI_GRID,
+                    cam_up = F.interpolate(
+                        cam,
+                        size=(padded_h, padded_w),
                         mode="bilinear",
                         align_corners=False,
                     )
-                    .squeeze(0)
-                    .squeeze(0)
-                )
+                    cam_crop = cam_up[:, :, :processed_h, :processed_w]
 
-                cam_min = roi_cam.min()
-                cam_max = roi_cam.max()
-                if cam_max - cam_min > 1e-8:
-                    roi_cam = (roi_cam - cam_min) / (cam_max - cam_min)
-                else:
-                    roi_cam = torch.ones_like(roi_cam)
+                    x1 = max(0, int(scaled_boxes[i, 0]))
+                    y1 = max(0, int(scaled_boxes[i, 1]))
+                    x2 = min(processed_w, int(scaled_boxes[i, 2]) + 1)
+                    y2 = min(processed_h, int(scaled_boxes[i, 3]) + 1)
 
-                heatmaps.append(roi_cam.detach().cpu())
+                    if x2 <= x1 or y2 <= y1:
+                        heatmaps.append(torch.ones(_ROI_GRID, device=device))
+                        continue
+
+                    roi_cam = cam_crop[:, :, y1:y2, x1:x2]
+                    roi_cam = (
+                        F.interpolate(
+                            roi_cam,
+                            size=_ROI_GRID,
+                            mode="bilinear",
+                            align_corners=False,
+                        )
+                        .squeeze(0)
+                        .squeeze(0)
+                    )
+
+                    cam_min = roi_cam.min()
+                    cam_max = roi_cam.max()
+                    if cam_max - cam_min > 1e-8:
+                        roi_cam = (roi_cam - cam_min) / (cam_max - cam_min)
+                    else:
+                        roi_cam = torch.ones_like(roi_cam)
+
+                    heatmaps.append(roi_cam.detach().cpu())
 
         except RuntimeError as exc:
             if "out of memory" in str(exc).lower():
