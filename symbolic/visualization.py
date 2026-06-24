@@ -25,6 +25,9 @@ def _load_manifest_and_features(
         export_path, map_location="cpu", weights_only=True
     )
     metadata_path = Path(manifest["metadata_path"])
+    if not metadata_path.exists():
+        storage_dir = Path(manifest.get("storage_dir", metadata_path.parent))
+        metadata_path = storage_dir / metadata_path.name
     metadata: dict[str, Any] = torch.load(
         metadata_path, map_location="cpu", weights_only=True
     )
@@ -140,8 +143,9 @@ def visualize_spatial_topology(
         figsize=(3 * num_samples + 1, 3 * num_classes + 1),
         squeeze=False,
     )
+    num_channels = manifest["feature_shape"][0]
     fig.suptitle(
-        "RoI Align Spatial Topology  (C\u2009=\u200964 \u2192 mean pool \u2192 7\u2009\u00d7\u20097)",
+        f"RoI Align Spatial Topology  (C\u2009=\u2009{num_channels} \u2192 mean pool \u2192 {grid_size}\u2009\u00d7\u2009{grid_size})",
         fontsize=14,
         fontweight="bold",
         y=1.0 - 0.01,
@@ -153,7 +157,7 @@ def visualize_spatial_topology(
 
             if col < len(cls_selections):
                 roi_idx, score = cls_selections[col]
-                spatial_map = features[roi_idx].mean(axis=0)  # (64,7,7) -> (7,7)
+                spatial_map = features[roi_idx].mean(axis=0)  # (C,H,W) -> (H,W)
 
                 ax.imshow(
                     spatial_map,
@@ -168,14 +172,26 @@ def visualize_spatial_topology(
                     ax.axhline(edge - 0.5, color="white", linewidth=0.5)
                     ax.axvline(edge - 0.5, color="white", linewidth=0.5)
 
+                if row == 0:
+                    title_text = f"Sample {col + 1}\nscore={score:.4f}"
+                else:
+                    title_text = f"score={score:.4f}"
+
                 ax.set_title(
-                    f"score={score:.4f}",
+                    title_text,
                     fontsize=8,
                     color="white",
                     backgroundcolor="#333333",
-                    pad=2,
+                    pad=6,
                 )
             else:
+                if row == 0:
+                    ax.set_title(
+                        f"Sample {col + 1}",
+                        fontsize=10,
+                        fontweight="bold",
+                        pad=6,
+                    )
                 ax.text(
                     0.5,
                     0.5,
@@ -197,20 +213,11 @@ def visualize_spatial_topology(
                     fontsize=10,
                     fontweight="bold",
                     rotation=0,
-                    labelpad=80,
+                    labelpad=15,
                     ha="right",
+                    va="center",
                 )
 
-    # Column headers above the first row.
-    for col in range(num_samples):
-        axes[0, col].annotate(
-            f"Sample {col + 1}",
-            xy=(0.5, 1.08),
-            xycoords="axes fraction",
-            ha="center",
-            fontsize=10,
-            fontweight="bold",
-        )
-
     fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.subplots_adjust(wspace=0.15, hspace=0.3)
     return fig
