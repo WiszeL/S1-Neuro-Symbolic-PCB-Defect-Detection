@@ -165,7 +165,9 @@ class GradCAM:
             scaled_boxes[:, [1, 3]] *= scale_y
 
             # Pool features per detection box.
-            pooled = self.model.roi_align(features, [scaled_boxes], images_list.image_sizes)
+            pooled = self.model.roi_align(
+                features, [scaled_boxes], images_list.image_sizes
+            )
             roi_representations = self.model.box_head(pooled)
             class_logits = self.model.box_predictor.classifier(roi_representations)
 
@@ -190,7 +192,9 @@ class GradCAM:
                 # activations: [1, C, H_feat, W_feat]
                 # gradients:   [1, C, H_feat, W_feat]
                 weights = self._gradients.mean(dim=(2, 3), keepdim=True)  # [1, C, 1, 1]
-                cam = (weights * self._activations).sum(dim=1, keepdim=True)  # [1, 1, H, W]
+                cam = (weights * self._activations).sum(
+                    dim=1, keepdim=True
+                )  # [1, 1, H, W]
                 cam = F.relu(cam)  # Only positive contributions.
 
                 # Upsample CAM to padded image size to reverse the backbone stride exactly.

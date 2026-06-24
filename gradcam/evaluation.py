@@ -244,7 +244,9 @@ def evaluate_gradcam(
                 scaled_boxes[:, [1, 3]] *= scale_y
 
                 # RoI Align on detection boxes → pooled features (for faithfulness)
-                pooled = model.roi_align(features, [scaled_boxes], images_list.image_sizes)
+                pooled = model.roi_align(
+                    features, [scaled_boxes], images_list.image_sizes
+                )
                 roi_repr = model.box_head(pooled)
                 class_logits = model.box_predictor.classifier(roi_repr)
 
