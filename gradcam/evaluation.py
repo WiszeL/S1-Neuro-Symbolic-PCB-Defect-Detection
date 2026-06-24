@@ -210,9 +210,6 @@ def evaluate_gradcam(
             det_labels = det["labels"][keep].detach().cpu()
 
             n_kept = det_boxes.shape[0]
-            elapsed = time.perf_counter() - t_img
-            if img_idx % 10 == 0 or n_kept == 0:
-                print(f"  [{img_idx + 1}/{n_images}] dets={n_kept}  ({elapsed:.1f}s)")
             if n_kept == 0:
                 continue
         except RuntimeError as exc:

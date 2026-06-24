@@ -212,6 +212,7 @@ def _evaluate_trained_model_on_bundle(
         has_matched_gt=bundle.has_matched_gt,
         gt_iou=bundle.gt_iou,
         random_state=random_state,
+        heatmap_mode="leaf_only",
     )
 
     metrics = _augment_tree_metrics(

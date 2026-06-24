@@ -334,7 +334,7 @@ def evaluate_symbolic_spatial_metrics(
     has_matched_gt: Tensor | None,
     gt_iou: Tensor | None,
     random_state: int = 42,
-    heatmap_mode: str = "all",
+    heatmap_mode: str = "leaf_only",
     min_proposal_iou: float = 0.0,
 ) -> dict[str, Any]:
     if matched_gt_boxes is None or has_matched_gt is None:
