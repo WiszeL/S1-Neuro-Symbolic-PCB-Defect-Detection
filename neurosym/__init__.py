@@ -18,6 +18,8 @@ from .inference import (
 from .visualization import (
     draw_neurosymbolic_explanation,
     draw_numbered_detections,
+    draw_ground_truth_boxes,
+    lookup_ground_truth,
     heatmap_to_array,
     image_to_array,
     zoom_axis_to_box,
@@ -39,6 +41,8 @@ __all__ = [
     "subset_detection",
     "draw_neurosymbolic_explanation",
     "draw_numbered_detections",
+    "draw_ground_truth_boxes",
+    "lookup_ground_truth",
     "heatmap_to_array",
     "image_to_array",
     "zoom_axis_to_box",

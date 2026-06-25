@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import matplotlib.gridspec as gridspec
@@ -107,6 +108,99 @@ def draw_numbered_detections(
         )
 
 
+def draw_ground_truth_boxes(
+    axis: plt.Axes,
+    image_tensor: torch.Tensor,
+    gt_boxes: torch.Tensor,
+    gt_labels: torch.Tensor,
+    class_names: tuple[str, ...],
+) -> None:
+    """Draw ground truth bounding boxes on the given axes.
+
+    Uses a distinctive green-dashed style so they are clearly
+    distinguishable from model detections.
+    """
+    axis.imshow(image_to_array(image_tensor))
+    # Add a slight dimmer to keep consistency with detection panels
+    dimmer = np.zeros(
+        (image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32
+    )
+    dimmer[..., 3] = 0.15  # Light dimmer for ground truth panel
+    axis.imshow(dimmer)
+    axis.axis("off")
+
+    palette = [
+        "#2a9d8f",
+        "#e76f51",
+        "#264653",
+        "#f4a261",
+        "#6a4c93",
+        "#bc6c25",
+        "#3a86ff",
+        "#d62828",
+    ]
+
+    for i, (box, label) in enumerate(zip(gt_boxes.tolist(), gt_labels.tolist())):
+        x1, y1, x2, y2 = box
+        class_index = int(label) - 1
+        color = palette[class_index % len(palette)]
+        label_name = (
+            class_names[class_index]
+            if 0 <= class_index < len(class_names)
+            else f"class {int(label)}"
+        )
+        axis.add_patch(
+            patches.Rectangle(
+                (x1, y1),
+                x2 - x1,
+                y2 - y1,
+                linewidth=2.0,
+                edgecolor=color,
+                facecolor="none",
+                linestyle="--",
+                clip_on=True,
+            )
+        )
+        axis.text(
+            x1,
+            max(y1 - 5, 0),
+            f"GT: {label_name}",
+            color="white",
+            fontsize=9,
+            weight="bold",
+            clip_on=True,
+            bbox={"facecolor": color, "edgecolor": color, "pad": 2, "alpha": 0.85},
+        )
+
+
+def lookup_ground_truth(
+    dataset: Any,
+    image_name: str,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    """Look up ground truth boxes and labels from a PCBDataset by image filename.
+
+    Parameters
+    ----------
+    dataset : PCBDataset
+        The dataset whose ``.samples`` list will be searched.
+    image_name : str
+        The uploaded image filename (e.g. ``"00041200_test.jpg"``).
+
+    Returns
+    -------
+    tuple[Tensor, Tensor] | None
+        ``(boxes, labels)`` if a match is found, otherwise ``None``.
+    """
+    # Normalise the search key: strip extension, compare stems
+    search_stem = Path(image_name).stem
+
+    for sample in dataset.samples:
+        if sample.image_path.stem == search_stem:
+            return sample.boxes, sample.labels
+
+    return None
+
+
 def draw_neurosymbolic_explanation(
     image_tensor: torch.Tensor,
     detection_result: dict[str, torch.Tensor],
@@ -125,8 +219,8 @@ def draw_neurosymbolic_explanation(
         plt.figure(figsize=(18, max(8, 4 * node_count)))
         gs = gridspec.GridSpec(1, 3, width_ratios=[1.5, 1, 1], wspace=0.1)
     else:
-        plt.figure(figsize=(13, max(8, 4 * node_count)))
-        gs = gridspec.GridSpec(1, 2, width_ratios=[1.5, 1], wspace=-0.18)
+        plt.figure(figsize=(15, max(8, 4 * node_count)))
+        gs = gridspec.GridSpec(1, 2, width_ratios=[1.5, 1], wspace=0.15)
 
     # 1. LEFT SIDE: Pruned SODT Tree
     ax_tree = plt.subplot(gs[0])
