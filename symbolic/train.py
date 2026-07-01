@@ -97,7 +97,6 @@ def _build_symbolic_tree(
         max_depth=tree_depth,
         num_classes=len(bundle.class_names),
         input_dim=feature_matrix.shape[1],
-        original_input_dim=feature_matrix.shape[1],
         feature_shape=bundle.feature_shape,
         class_names=bundle.class_names,
     )
@@ -159,10 +158,11 @@ def _evaluate_trained_model_on_bundle(
             **spatial_metrics,
         },
     )
+    training_config = trained_model.get("training_config", {})
     return {
-        "tree_depth": trained_model["tree_depth"],
-        "l1_lambda": trained_model["l1_lambda"],
-        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "tree_depth": tree.max_depth,
+        "l1_lambda": float(training_config.get("l1_lambda", 0.0)),
+        "sparsity_alpha": float(training_config.get("sparsity_alpha", 0.0)),
         "metrics": metrics,
     }
 
@@ -334,22 +334,21 @@ def train_symbolic_tree(
 
     metrics = _augment_tree_metrics(tree, {})
 
+    # tree_state already carries feature_shape/class_names/max_depth, and
+    # training_config already carries l1_lambda/sparsity_alpha/tree_depth, so
+    # the checkpoint doesn't repeat them at the top level. summary.json below
+    # keeps them front-and-center since it's meant to be read without loading
+    # the tensor payload.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": metrics,
         "history": history,
-        "class_names": bundle.class_names,
-        "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
-        "tree_depth": int(sodt_config["tree_depth"]),
-        "l1_lambda": float(sodt_config["l1_lambda"]),
-        "sparsity_alpha": float(sodt_config["sparsity_alpha"]),
         "training_config": {
             **sodt_config,
             "neg_ratio": data_config.get("neg_ratio"),
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",
-            "config_sections": dict(config),
         },
     }
     ensure_dir(Path(output_path).parent)
@@ -442,20 +441,18 @@ def prune_symbolic_tree(
     training_config = dict(checkpoint.get("training_config", {}))
     training_config["postprocess_pruned_nodes"] = pruned_count
 
-    tree_depth = int(checkpoint.get("tree_depth", tree.max_depth))
-    l1_lambda = float(checkpoint.get("l1_lambda", 0.0))
-    sparsity_alpha = float(checkpoint.get("sparsity_alpha", 0.0))
+    tree_depth = tree.max_depth
+    l1_lambda = float(training_config.get("l1_lambda", 0.0))
+    sparsity_alpha = float(training_config.get("sparsity_alpha", 0.0))
 
+    # See train_symbolic_tree: tree_state/training_config already carry
+    # feature_shape/class_names/tree_depth/l1_lambda/sparsity_alpha, so the
+    # checkpoint doesn't repeat them at the top level.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": tree_metrics,
         "history": history,
-        "class_names": bundle.class_names,
-        "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
-        "tree_depth": tree_depth,
-        "l1_lambda": l1_lambda,
-        "sparsity_alpha": sparsity_alpha,
         "training_config": training_config,
     }
     torch.save(artifact, checkpoint_path)

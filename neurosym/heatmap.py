@@ -100,7 +100,7 @@ def compute_node_local_evidence_maps(
                     np.count_nonzero(positive_evidence > 0.0)
                 ),
                 "active_original_feature_count": int(
-                    tree.node_feature_indices(step.node_index, original_space=True).size
+                    tree.node_feature_indices(step.node_index).size
                 ),
                 "node_heatmap": node_heatmap,
                 "raw_node_heatmap": positive_evidence,
@@ -218,7 +218,7 @@ def compute_symbolic_heatmap(
                 tree.node_feature_indices(step.node_index).size
             ),
             "active_original_feature_count": int(
-                tree.node_feature_indices(step.node_index, original_space=True).size
+                tree.node_feature_indices(step.node_index).size
             ),
         }
         for step in path

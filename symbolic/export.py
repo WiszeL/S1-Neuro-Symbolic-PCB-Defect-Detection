@@ -16,10 +16,8 @@ _METADATA_TENSOR_FIELDS = [
     "teacher_labels",
     "teacher_scores",
     "proposal_boxes",
-    "transformed_proposal_boxes",
     "matched_gt_boxes",
     "has_matched_gt",
-    "gt_labels",
     "gt_iou",
 ]
 
@@ -118,9 +116,6 @@ def _build_symbolic_record(
         "image_path": str(dataset.samples[sample_index].image_path),
         "num_rois": num_rois,
         "proposal_boxes": proposal_boxes.detach().cpu(),
-        "transformed_proposal_boxes": teacher_output["transformed_proposal_boxes"]
-        .detach()
-        .cpu(),
         "pooled_features": teacher_output["pooled_features"]
         .detach()
         .to(dtype=torch_dtype)
@@ -132,7 +127,6 @@ def _build_symbolic_record(
         .cpu(),
         "matched_gt_boxes": matched_ground_truth["matched_gt_boxes"].detach().cpu(),
         "has_matched_gt": matched_ground_truth["has_matched_gt"].detach().cpu(),
-        "gt_labels": matched_ground_truth["matched_gt_labels"].detach().cpu(),
         "gt_iou": matched_ground_truth["matched_gt_iou"]
         .detach()
         .to(dtype=torch_dtype)
@@ -155,12 +149,8 @@ def _append_symbolic_metadata(
     metadata_parts["teacher_labels"].append(record["teacher_labels"])
     metadata_parts["teacher_scores"].append(record["teacher_scores"])
     metadata_parts["proposal_boxes"].append(record["proposal_boxes"])
-    metadata_parts["transformed_proposal_boxes"].append(
-        record["transformed_proposal_boxes"]
-    )
     metadata_parts["matched_gt_boxes"].append(record["matched_gt_boxes"])
     metadata_parts["has_matched_gt"].append(record["has_matched_gt"])
-    metadata_parts["gt_labels"].append(record["gt_labels"])
     metadata_parts["gt_iou"].append(record["gt_iou"])
     num_rois = record["teacher_labels"].shape[0]
     metadata_parts["image_paths"].extend([str(record["image_path"])] * num_rois)
