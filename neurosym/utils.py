@@ -96,7 +96,6 @@ def postprocess_symbolic_detections(
         symbolic_leaf_indices = symbolic_leaf_indices[keep]
 
         use_soft_nms = detector.soft_nms_enabled
-        iou_thresh = detector.soft_nms_iou_thresh
 
         if use_soft_nms:
             keep, updated_scores = detector.batched_soft_nms(
@@ -116,7 +115,7 @@ def postprocess_symbolic_detections(
                 boxes,
                 scores,
                 labels,
-                iou_thresh,
+                detector.soft_nms_iou_thresh,
             )[: detector.DETECTIONS_PER_IMG]
             boxes = boxes[keep]
             scores = scores[keep]

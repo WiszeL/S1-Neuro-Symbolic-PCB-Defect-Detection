@@ -16,42 +16,29 @@ def project_gt_box_to_roi_grid(
     proposal_width = max(float(proposal[2] - proposal[0]), 1e-6)
     proposal_height = max(float(proposal[3] - proposal[1]), 1e-6)
 
-    px1 = float(
-        torch.clamp(
-            ((gt_box[0] - proposal[0]) / proposal_width) * grid_width,
-            min=0.0,
-            max=grid_width,
-        )
+    px1 = torch.clamp(
+        ((gt_box[0] - proposal[0]) / proposal_width) * grid_width,
+        min=0.0,
+        max=grid_width,
     )
-    py1 = float(
-        torch.clamp(
-            ((gt_box[1] - proposal[1]) / proposal_height) * grid_height,
-            min=0.0,
-            max=grid_height,
-        )
+    py1 = torch.clamp(
+        ((gt_box[1] - proposal[1]) / proposal_height) * grid_height,
+        min=0.0,
+        max=grid_height,
     )
-    px2 = float(
-        torch.clamp(
-            ((gt_box[2] - proposal[0]) / proposal_width) * grid_width,
-            min=0.0,
-            max=grid_width,
-        )
+    px2 = torch.clamp(
+        ((gt_box[2] - proposal[0]) / proposal_width) * grid_width,
+        min=0.0,
+        max=grid_width,
     )
-    py2 = float(
-        torch.clamp(
-            ((gt_box[3] - proposal[1]) / proposal_height) * grid_height,
-            min=0.0,
-            max=grid_height,
-        )
+    py2 = torch.clamp(
+        ((gt_box[3] - proposal[1]) / proposal_height) * grid_height,
+        min=0.0,
+        max=grid_height,
     )
 
     if px2 <= px1 or py2 <= py1:
         return torch.zeros((grid_height, grid_width), dtype=torch.bool)
-
-    px1 = torch.as_tensor(px1)
-    py1 = torch.as_tensor(py1)
-    px2 = torch.as_tensor(px2)
-    py2 = torch.as_tensor(py2)
 
     cols = torch.arange(grid_width, dtype=torch.float32)
     rows = torch.arange(grid_height, dtype=torch.float32)

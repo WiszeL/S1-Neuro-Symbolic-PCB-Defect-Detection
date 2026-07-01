@@ -12,20 +12,22 @@ from util.features import ensure_float32
 _TAO_CHUNK_SIZE = 2048
 
 
+_INIT_WEIGHT_SCALE = 1e-3
+
+
 def initialize_tree_weights(
     tree: SparseObliqueDecisionTreeClassifier,
     random_state: int = 42,
-    scale: float = 1e-3,
 ) -> None:
     generator = np.random.default_rng(random_state)
     tree.node_weights = generator.normal(
         loc=0.0,
-        scale=scale,
+        scale=_INIT_WEIGHT_SCALE,
         size=tree.node_weights.shape,
     ).astype(np.float32)
     tree.node_bias = generator.normal(
         loc=0.0,
-        scale=scale,
+        scale=_INIT_WEIGHT_SCALE,
         size=tree.node_bias.shape,
     ).astype(np.float32)
 
@@ -239,6 +241,7 @@ def evaluate_tree(
     labels: np.ndarray,
     l1_lambda: float = 0.0,
     sparsity_alpha: float = 0.0,
+    reduced_sets: dict[int, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     predictions = tree.predict(features)
     accuracy = float((predictions == labels).mean())
@@ -249,7 +252,8 @@ def evaluate_tree(
     classification_loss = float((predictions != labels).sum())
     l1_penalty = 0.0
     if l1_lambda > 0.0:
-        reduced_sets = compute_reduced_sets(tree, features)
+        if reduced_sets is None:
+            reduced_sets = compute_reduced_sets(tree, features)
         for node_index in range(tree.num_internal_nodes):
             node_rs_size = reduced_sets.get(
                 node_index, np.zeros((0,), dtype=np.int64)
@@ -490,6 +494,7 @@ def fit_tree_with_tao(
             labels,
             l1_lambda=l1_lambda,
             sparsity_alpha=sparsity_alpha,
+            reduced_sets=reduced_sets,
         )
         metrics["iteration"] = iteration_index + 1
         history.append(metrics)

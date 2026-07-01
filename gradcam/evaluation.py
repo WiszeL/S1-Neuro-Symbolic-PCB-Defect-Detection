@@ -162,7 +162,6 @@ def evaluate_gradcam(
     all_det_boxes: list[Tensor] = []
     all_matched_gt: list[Tensor] = []
     all_has_gt: list[Tensor] = []
-    all_gt_iou: list[Tensor] = []
     per_image_times: list[float] = []
 
     n_images = len(images)
@@ -289,14 +288,13 @@ def evaluate_gradcam(
 
         # Match detection boxes to GT.
         gt_boxes = target["boxes"]
-        matched_gt, has_gt, gt_iou = _match_proposals_to_gt(det_boxes, gt_boxes)
+        matched_gt, has_gt, _ = _match_proposals_to_gt(det_boxes, gt_boxes)
 
         all_pooled.append(pooled.detach().cpu())
         all_heatmaps.extend(heatmaps)
         all_det_boxes.append(det_boxes)
         all_matched_gt.append(matched_gt)
         all_has_gt.append(has_gt)
-        all_gt_iou.append(gt_iou)
         per_image_times.append(time.perf_counter() - t_img)
 
         # Free GPU memory between images.
@@ -322,7 +320,6 @@ def evaluate_gradcam(
     det_boxes_all = torch.cat(all_det_boxes, dim=0)
     matched_gt_all = torch.cat(all_matched_gt, dim=0)
     has_gt_all = torch.cat(all_has_gt, dim=0)
-    gt_iou_all = torch.cat(all_gt_iou, dim=0)
     N = pooled_all.shape[0]
 
     # Full (unmasked) neural classifier predictions.
@@ -417,8 +414,6 @@ def evaluate_gradcam(
 
     for i in range(N):
         if not bool(has_gt_all[i]):
-            continue
-        if float(gt_iou_all[i]) <= 0.0:
             continue
 
         heatmap = all_heatmaps[i]

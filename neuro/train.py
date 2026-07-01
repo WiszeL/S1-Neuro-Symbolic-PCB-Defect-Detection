@@ -266,14 +266,12 @@ def _confusion_and_per_class(
         tgt_boxes = target["boxes"][tgt_idx]
 
         if pred_boxes.numel() == 0:
-            for _ in range(tgt_boxes.shape[0]):
-                conf[label, 0] += 1
+            conf[label, 0] += tgt_boxes.shape[0]
             cfn[label] = tgt_boxes.shape[0]
             continue
 
         if tgt_boxes.numel() == 0:
-            for _ in range(pred_boxes.shape[0]):
-                conf[0, label] += 1
+            conf[0, label] += pred_boxes.shape[0]
             cfp[label] = pred_boxes.shape[0]
             continue
 
@@ -330,9 +328,6 @@ def evaluate_model(
     class_fp = torch.zeros(num_classes, dtype=torch.int64)
     class_fn = torch.zeros(num_classes, dtype=torch.int64)
 
-    total_true_positives = 0
-    total_false_positives = 0
-    total_false_negatives = 0
     forward_times: list[float] = []
 
     for images, targets in tqdm(data_loader, desc="Evaluate detector", leave=False):
@@ -356,16 +351,6 @@ def evaluate_model(
             predictions_for_metric.append(prediction)
             targets_for_metric.append(ground_truth)
 
-            tp, fp, fn = count_detection_matches(
-                prediction,
-                ground_truth,
-                iou_threshold=evaluation_config["precision_iou"],
-                score_threshold=evaluation_config["precision_score_threshold"],
-            )
-            total_true_positives += tp
-            total_false_positives += fp
-            total_false_negatives += fn
-
             pc = _confusion_and_per_class(
                 prediction,
                 ground_truth,
@@ -383,6 +368,9 @@ def evaluate_model(
 
     coco_output = coco_metric.compute()
     paper_output = paper_metric.compute()
+    total_true_positives = int(class_tp.sum())
+    total_false_positives = int(class_fp.sum())
+    total_false_negatives = int(class_fn.sum())
     precision = total_true_positives / max(
         total_true_positives + total_false_positives, 1
     )

@@ -200,23 +200,27 @@ class SFPSPyramid(nn.Module):
 
             return weights[:, 0] * semantic_feature + weights[:, 1] * spatial_feature
 
-    def __init__(self, out_channels: int = 64, attention_reduction: int = 16) -> None:
+    # Fixed to match BoxHead.POOLED_CHANNELS, which assumes 64-channel
+    # pooled RoI features; the two must change together.
+    OUT_CHANNELS = 64
+
+    def __init__(self, attention_reduction: int = 16) -> None:
         super().__init__()
-        self.out_channels = out_channels
+        self.out_channels = self.OUT_CHANNELS
 
-        self.c5_to_p5 = self.MConv(2048, out_channels)
-        self.c2_to_p1 = self.MConv(256, out_channels)
+        self.c5_to_p5 = self.MConv(2048, self.OUT_CHANNELS)
+        self.c2_to_p1 = self.MConv(256, self.OUT_CHANNELS)
 
-        self.c5_to_p4 = self.CPBlock(2048, out_channels)
-        self.c4_to_p3 = self.CPBlock(1024, out_channels)
-        self.c3_to_p2 = self.CPBlock(512, out_channels)
+        self.c5_to_p4 = self.CPBlock(2048, self.OUT_CHANNELS)
+        self.c4_to_p3 = self.CPBlock(1024, self.OUT_CHANNELS)
+        self.c3_to_p2 = self.CPBlock(512, self.OUT_CHANNELS)
 
         self.p3_attention = self.SFAttention(
-            out_channels,
+            self.OUT_CHANNELS,
             reduction=attention_reduction,
         )
         self.p2_attention = self.SFAttention(
-            out_channels,
+            self.OUT_CHANNELS,
             reduction=attention_reduction,
         )
 
@@ -266,7 +270,6 @@ class BackboneWithNeck(nn.Module):
         self,
         pretrained: bool = True,
         freeze_batch_norm: bool = True,
-        out_channels: int = 64,
         attention_reduction: int = 16,
     ) -> None:
         super().__init__()
@@ -274,10 +277,7 @@ class BackboneWithNeck(nn.Module):
             pretrained=pretrained,
             freeze_batch_norm=freeze_batch_norm,
         )
-        self.neck = SFPSPyramid(
-            out_channels=out_channels,
-            attention_reduction=attention_reduction,
-        )
+        self.neck = SFPSPyramid(attention_reduction=attention_reduction)
         self.out_channels = self.neck.out_channels
 
     def forward(self, images: Tensor) -> FeatureMap:
@@ -297,22 +297,17 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
     the regression loss while keeping the standard RPN proposal flow.
     """
 
-    class Config:
-        """RPN settings for the p2-p6 pyramid.
-
-        The project YAML provides anchor sizes, ratios, and IoU thresholds.
-        This nested config keeps only the RPN defaults that are not in YAML:
-        sampler size, proposal counts, NMS threshold, and score threshold.
-        """
-
-        batch_size_per_image: int = 256
-        positive_fraction: float = 0.5
-        pre_nms_top_n_train: int = 2000
-        pre_nms_top_n_test: int = 1000
-        post_nms_top_n_train: int = 2000
-        post_nms_top_n_test: int = 1000
-        nms_thresh: float = 0.7
-        score_thresh: float = 0.0
+    # RPN defaults not covered by the project YAML (which provides anchor
+    # sizes, ratios, and IoU thresholds): sampler size, proposal counts,
+    # NMS threshold, and score threshold.
+    BATCH_SIZE_PER_IMAGE = 256
+    POSITIVE_FRACTION = 0.5
+    PRE_NMS_TOP_N_TRAIN = 2000
+    PRE_NMS_TOP_N_TEST = 1000
+    POST_NMS_TOP_N_TRAIN = 2000
+    POST_NMS_TOP_N_TEST = 1000
+    NMS_THRESH = 0.7
+    SCORE_THRESH = 0.0
 
     @staticmethod
     def build_anchor_generator(neuro_config: NeuroConfig) -> AnchorGenerator:
@@ -327,7 +322,6 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
     def build(
         backbone_out_channels: int,
         neuro_config: NeuroConfig,
-        config: type[Config] = Config,
     ) -> "L1RegionProposalNetwork":
         """Build the complete RPN module for the SF-PSPyramid features."""
 
@@ -342,18 +336,18 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
             head=rpn_head,
             fg_iou_thresh=neuro_config["proposal"]["positive_iou"],
             bg_iou_thresh=neuro_config["proposal"]["negative_iou"],
-            batch_size_per_image=config.batch_size_per_image,
-            positive_fraction=config.positive_fraction,
+            batch_size_per_image=L1RegionProposalNetwork.BATCH_SIZE_PER_IMAGE,
+            positive_fraction=L1RegionProposalNetwork.POSITIVE_FRACTION,
             pre_nms_top_n={
-                "training": config.pre_nms_top_n_train,
-                "testing": config.pre_nms_top_n_test,
+                "training": L1RegionProposalNetwork.PRE_NMS_TOP_N_TRAIN,
+                "testing": L1RegionProposalNetwork.PRE_NMS_TOP_N_TEST,
             },
             post_nms_top_n={
-                "training": config.post_nms_top_n_train,
-                "testing": config.post_nms_top_n_test,
+                "training": L1RegionProposalNetwork.POST_NMS_TOP_N_TRAIN,
+                "testing": L1RegionProposalNetwork.POST_NMS_TOP_N_TEST,
             },
-            nms_thresh=config.nms_thresh,
-            score_thresh=config.score_thresh,
+            nms_thresh=L1RegionProposalNetwork.NMS_THRESH,
+            score_thresh=L1RegionProposalNetwork.SCORE_THRESH,
         )
 
     def compute_loss(
@@ -399,19 +393,12 @@ class RoIAlign(nn.Module):
     - flattened output: vector z = F(x, proposal) for SODT/TAO
     """
 
-    class Config:
-        """RoI Align settings used by Faster R-CNN with p2-p6 pyramid maps."""
-
-        featmap_names: list[str] = ["p2", "p3", "p4", "p5", "p6"]
-        output_size: int = 7
-        sampling_ratio: int = 2
-
-    def __init__(self, config: type[Config] = Config) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.pool = MultiScaleRoIAlign(
-            featmap_names=config.featmap_names,
-            output_size=config.output_size,
-            sampling_ratio=config.sampling_ratio,
+            featmap_names=["p2", "p3", "p4", "p5", "p6"],
+            output_size=7,
+            sampling_ratio=2,
         )
 
     def forward(
@@ -420,7 +407,7 @@ class RoIAlign(nn.Module):
         proposal_boxes: list[Tensor],
         image_shapes: list[tuple[int, int]],
     ) -> Tensor:
-        """Return true RoI Align pooled features: [total_rois, 256, 7, 7]."""
+        """Return true RoI Align pooled features: [total_rois, 64, 7, 7]."""
 
         return self.pool(features, proposal_boxes, image_shapes)
 
@@ -456,19 +443,18 @@ class BoxHead(nn.Module):
     classification and bounding-box regression.
     """
 
-    class Config:
-        """Default dimensions for Faster R-CNN's two-FC box head."""
+    # pooled_channels must match SFPSPyramid.OUT_CHANNELS (64): BoxHead consumes
+    # RoI-Align-pooled 64-channel, 7x7 feature grids from the backbone neck.
+    POOLED_CHANNELS = 64
+    POOLED_SIZE = 7
+    REPRESENTATION_SIZE = 1024
 
-        pooled_channels: int = 64
-        pooled_size: int = 7
-        representation_size: int = 1024
-
-    def __init__(self, config: type[Config] = Config) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        input_size = config.pooled_channels * config.pooled_size * config.pooled_size
-        self.fc6 = nn.Linear(input_size, config.representation_size)
-        self.fc7 = nn.Linear(config.representation_size, config.representation_size)
-        self.representation_size = config.representation_size
+        input_size = self.POOLED_CHANNELS * self.POOLED_SIZE * self.POOLED_SIZE
+        self.fc6 = nn.Linear(input_size, self.REPRESENTATION_SIZE)
+        self.fc7 = nn.Linear(self.REPRESENTATION_SIZE, self.REPRESENTATION_SIZE)
+        self.representation_size = self.REPRESENTATION_SIZE
 
     def forward(self, pooled_features: Tensor) -> Tensor:
         """Return shared RoI representations: [total_rois, 1024]."""
@@ -851,6 +837,8 @@ class NeuroFasterRCNN(nn.Module):
                 scores = updated_scores
                 labels = labels[keep]
             else:
+                # Hard NMS fallback reuses soft_nms.iou_thresh from the config
+                # as its IoU threshold; there is no separate hard-NMS knob.
                 keep = box_ops.batched_nms(
                     boxes,
                     scores,
