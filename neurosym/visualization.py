@@ -9,9 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-
-def image_to_array(image_tensor: torch.Tensor) -> np.ndarray:
-    return image_tensor.detach().cpu().permute(1, 2, 0).clamp(0.0, 1.0).numpy()
+from util.visualization import image_to_array
 
 
 def heatmap_to_array(heatmap: torch.Tensor) -> np.ndarray:

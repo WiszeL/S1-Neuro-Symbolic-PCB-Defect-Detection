@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from util.features import ensure_float32
 
 _PREDICTION_CHUNK_SIZE = 2048
 
@@ -90,12 +91,9 @@ class SparseObliqueDecisionTreeClassifier:
     # ---------------------------------------------------------------------
 
     def _prepare_features(self, features: np.ndarray) -> np.ndarray:
-        # Preserve memmap arrays when dtype already matches to avoid
-        # materialising the entire dataset (~3 GB) into RAM.
-        if features.dtype == np.float32:
-            prepared = features
-        else:
-            prepared = np.asarray(features, dtype=np.float32)
+        # ensure_float32 preserves memmap arrays when dtype already matches,
+        # avoiding materialising the entire dataset (~3 GB) into RAM.
+        prepared = ensure_float32(features)
         if prepared.ndim == 1:
             prepared = prepared.reshape(1, -1)
 

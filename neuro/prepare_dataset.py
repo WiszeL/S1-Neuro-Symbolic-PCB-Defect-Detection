@@ -28,6 +28,17 @@ PCBItem = tuple[Tensor, PCBTarget]
 PCBPreprocess = Callable[[Image.Image, PCBTarget], tuple[Tensor, PCBTarget]]
 InspectionSummary = dict[str, Any]
 
+PREVIEW_PALETTE = [
+    "#d62828",
+    "#0077b6",
+    "#2a9d8f",
+    "#f4a261",
+    "#6a4c93",
+    "#5f6f52",
+    "#bc6c25",
+    "#3a86ff",
+]
+
 
 @dataclass(frozen=True)
 class PCBRecord:
@@ -123,6 +134,17 @@ def _build_dataset_manifest(
     return samples
 
 
+def build_pcb_target(index: int, boxes: Tensor, labels: Tensor) -> PCBTarget:
+    area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    return {
+        "boxes": boxes,
+        "labels": labels,
+        "image_id": torch.tensor(index, dtype=torch.int64),
+        "area": area,
+        "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64),
+    }
+
+
 class PCBDataset(Dataset[PCBItem]):
     def __init__(
         self,
@@ -136,27 +158,22 @@ class PCBDataset(Dataset[PCBItem]):
             image_size=tuple(train_config["dataset"]["size"]),
         )
         self.class_names = tuple(train_config["dataset"]["class_names"])
+        self.preprocess: PCBPreprocess | None = None
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index: int) -> PCBItem:
+        if self.preprocess is None:
+            raise RuntimeError(
+                "PCBDataset.preprocess is not set; call add_preprocess() first."
+            )
         sample = self.samples[index]
 
         # Load Image
         image = Image.open(sample.image_path).convert("RGB")
 
-        # Build Target
-        area = (sample.boxes[:, 2] - sample.boxes[:, 0]) * (
-            sample.boxes[:, 3] - sample.boxes[:, 1]
-        )
-        target = {
-            "boxes": sample.boxes,
-            "labels": sample.labels,
-            "image_id": torch.tensor(index, dtype=torch.int64),
-            "area": area,
-            "iscrowd": torch.zeros((sample.boxes.shape[0],), dtype=torch.int64),
-        }
+        target = build_pcb_target(index, sample.boxes, sample.labels)
 
         return self.preprocess(image, target)
 
@@ -334,17 +351,6 @@ def _plot_random_samples(
         weight="bold",
     )
 
-    palette = [
-        "#d62828",
-        "#0077b6",
-        "#2a9d8f",
-        "#f4a261",
-        "#6a4c93",
-        "#5f6f52",
-        "#bc6c25",
-        "#3a86ff",
-    ]
-
     for plot_index, sample in enumerate(samples):
         row = plot_index // plot_columns
         column = plot_index % plot_columns
@@ -352,7 +358,7 @@ def _plot_random_samples(
             axes[row][column],
             sample,
             class_names,
-            palette,
+            PREVIEW_PALETTE,
         )
 
     for empty_index in range(n, sample_rows * plot_columns):

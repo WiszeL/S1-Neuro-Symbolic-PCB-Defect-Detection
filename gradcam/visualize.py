@@ -20,6 +20,7 @@ from PIL import Image
 from torch import Tensor
 
 from neuro.inference import load_checkpoint_model
+from util.visualization import image_to_array
 
 from .gradcam import GradCAM
 
@@ -122,7 +123,7 @@ def plot_gradcam_comparison(
         If provided, save the figure to this path.
     """
     if isinstance(image, Tensor):
-        image_np = image.detach().cpu().permute(1, 2, 0).clamp(0.0, 1.0).numpy()
+        image_np = image_to_array(image)
     else:
         image_np = np.array(image).astype(np.float32) / 255.0
 

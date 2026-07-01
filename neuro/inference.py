@@ -13,6 +13,7 @@ from torch import Tensor
 from util.device import select_device
 
 from util.config import load_yaml
+from util.visualization import image_to_array
 from .config import NeuroConfig, NeuroTrainConfig
 from .faster_rcnn import NeuroFasterRCNN
 
@@ -69,7 +70,7 @@ def visualize_prediction(
     if isinstance(image, Image.Image):
         image_array = np.array(image)
     else:
-        image_array = image.detach().cpu().permute(1, 2, 0).clamp(0.0, 1.0).numpy()
+        image_array = image_to_array(image)
 
     ax.imshow(image_array, cmap="gray" if image_array.shape[-1] == 1 else None)
     ax.axis("off")

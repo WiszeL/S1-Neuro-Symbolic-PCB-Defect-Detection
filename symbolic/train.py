@@ -72,24 +72,7 @@ def _materialize_sodt_config(search_config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _load_symbolic_training_data(
-    export_path: str | Path,
-    random_state: int,
-    neg_ratio: float | None = None,
-) -> tuple[Any, Any]:
-    bundle = open_exported_symbolic_array_payload(
-        torch.load(export_path, map_location="cpu", weights_only=True),
-        random_state=random_state,
-        feature_dtype="float32",
-        neg_ratio=neg_ratio,
-    )
-
-    feature_matrix = bundle.feature_vectors
-    labels = bundle.teacher_labels.detach().cpu().numpy()
-    return bundle, (feature_matrix, labels)
-
-
-def _load_symbolic_evaluation_data(
+def _load_symbolic_data(
     export_path: str | Path,
     random_state: int = 42,
     neg_ratio: float | None = None,
@@ -193,7 +176,7 @@ def evaluate_heldout(
     t0 = perf_counter()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
-    bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
+    bundle, feature_matrix, labels = _load_symbolic_data(
         export_path,
         random_state=random_state,
     )
@@ -234,7 +217,7 @@ def train_symbolic_tree(
 
     load_start_time = perf_counter()
     print(f"Loading symbolic training export from {export_path}...", flush=True)
-    bundle, (feature_matrix, labels) = _load_symbolic_training_data(
+    bundle, feature_matrix, labels = _load_symbolic_data(
         export_path,
         random_state=sodt_config["random_state"],
         neg_ratio=data_config.get("neg_ratio"),
@@ -362,14 +345,7 @@ def train_symbolic_tree(
         "l1_lambda": float(sodt_config["l1_lambda"]),
         "sparsity_alpha": float(sodt_config["sparsity_alpha"]),
         "training_config": {
-            "tree_depth": sodt_config["tree_depth"],
-            "iterations": sodt_config["iterations"],
-            "l1_lambda": sodt_config["l1_lambda"],
-            "sparsity_alpha": sodt_config["sparsity_alpha"],
-            "logistic_max_iter": sodt_config["logistic_max_iter"],
-            "tolerance": sodt_config["tolerance"],
-            "zero_threshold": sodt_config["zero_threshold"],
-            "random_state": sodt_config["random_state"],
+            **sodt_config,
             "neg_ratio": data_config.get("neg_ratio"),
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",
