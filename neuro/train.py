@@ -241,6 +241,61 @@ def count_detection_matches(
     return true_positives, false_positives, false_negatives
 
 
+def _global_confusion_matrix(
+    prediction: dict[str, Tensor],
+    target: dict[str, Tensor],
+    iou_threshold: float,
+    score_threshold: float,
+    num_classes: int,
+) -> Tensor:
+    """Row = ground-truth class, column = predicted class (0 = background).
+
+    Unlike per-label matching, this matches every kept prediction against
+    every ground-truth box regardless of class, so a wrong-class match lands
+    off-diagonal instead of being counted as an independent FP + FN.
+    """
+    mask = prediction["scores"] >= score_threshold
+    pred_boxes = prediction["boxes"][mask]
+    pred_labels = prediction["labels"][mask]
+    pred_scores = prediction["scores"][mask]
+    tgt_boxes = target["boxes"]
+    tgt_labels = target["labels"]
+
+    conf = torch.zeros(num_classes + 1, num_classes + 1, dtype=torch.int64)
+
+    if pred_boxes.numel() == 0:
+        for label in tgt_labels.tolist():
+            conf[int(label), 0] += 1
+        return conf
+
+    if tgt_boxes.numel() == 0:
+        for label in pred_labels.tolist():
+            conf[0, int(label)] += 1
+        return conf
+
+    order = torch.argsort(pred_scores, descending=True)
+    pred_boxes = pred_boxes[order]
+    pred_labels = pred_labels[order]
+
+    ious = box_iou(pred_boxes, tgt_boxes)
+    matched_targets: set[int] = set()
+
+    for row in range(pred_boxes.shape[0]):
+        best_iou, best_target = ious[row].max(dim=0)
+        pred_label = int(pred_labels[row])
+        if best_iou.item() >= iou_threshold and int(best_target) not in matched_targets:
+            matched_targets.add(int(best_target))
+            conf[int(tgt_labels[int(best_target)]), pred_label] += 1
+        else:
+            conf[0, pred_label] += 1
+
+    for target_index in range(tgt_boxes.shape[0]):
+        if target_index not in matched_targets:
+            conf[int(tgt_labels[target_index]), 0] += 1
+
+    return conf
+
+
 def _confusion_and_per_class(
     prediction: dict[str, Tensor],
     target: dict[str, Tensor],
@@ -253,7 +308,6 @@ def _confusion_and_per_class(
 
     labels = torch.unique(torch.cat([filtered["labels"], target["labels"]], dim=0))
 
-    conf = torch.zeros(num_classes + 1, num_classes + 1, dtype=torch.int64)
     cp = torch.zeros(num_classes + 1, dtype=torch.int64)
     cfp = torch.zeros(num_classes + 1, dtype=torch.int64)
     cfn = torch.zeros(num_classes + 1, dtype=torch.int64)
@@ -266,12 +320,10 @@ def _confusion_and_per_class(
         tgt_boxes = target["boxes"][tgt_idx]
 
         if pred_boxes.numel() == 0:
-            conf[label, 0] += tgt_boxes.shape[0]
             cfn[label] = tgt_boxes.shape[0]
             continue
 
         if tgt_boxes.numel() == 0:
-            conf[0, label] += pred_boxes.shape[0]
             cfp[label] = pred_boxes.shape[0]
             continue
 
@@ -285,16 +337,16 @@ def _confusion_and_per_class(
             best_iou, best_tgt = ious[r].max(dim=0)
             if best_iou.item() >= iou_threshold and best_tgt.item() not in matched:
                 matched.add(best_tgt.item())
-                conf[label, label] += 1
                 cp[label] += 1
             else:
-                conf[0, label] += 1
                 cfp[label] += 1
 
         fn = tgt_boxes.shape[0] - len(matched)
-        conf[label, 0] += fn
         cfn[label] = fn
 
+    conf = _global_confusion_matrix(
+        prediction, target, iou_threshold, score_threshold, num_classes
+    )
     return {"confusion": conf, "class_tp": cp, "class_fp": cfp, "class_fn": cfn}
 
 

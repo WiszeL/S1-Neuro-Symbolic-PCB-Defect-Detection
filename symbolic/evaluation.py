@@ -121,9 +121,11 @@ def _deletion_insertion_auc(
         batch_end = min(batch_start + batch_size, n)
         B = batch_end - batch_start
         full_probs = tree.predict_proba(auc_features[batch_start:batch_end])
+        empty_probs = tree.predict_proba(np.zeros((B, D), dtype=np.float32))
         for bi in range(B):
             gi = batch_start + bi
             deletion_curves[gi, 0] = full_probs[bi, auc_preds[gi]]
+            insertion_curves[gi, 0] = empty_probs[bi, auc_preds[gi]]
 
         del_batch = auc_features[batch_start:batch_end].copy()
         ins_batch = np.zeros_like(del_batch)
