@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any, Callable
 
 import numpy as np
@@ -373,6 +374,8 @@ def fit_tree_with_tao(
         iteration_range = progress_bar
 
     for iteration_index in iteration_range:
+        iteration_start = perf_counter()
+
         # ---------------------------------------------------------------------
         # Refresh the leaf predictions under the current routing
         # ---------------------------------------------------------------------
@@ -497,6 +500,7 @@ def fit_tree_with_tao(
             reduced_sets=reduced_sets,
         )
         metrics["iteration"] = iteration_index + 1
+        metrics["duration_seconds"] = perf_counter() - iteration_start
         history.append(metrics)
         if progress_callback is not None:
             progress_callback(metrics)
