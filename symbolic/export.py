@@ -126,10 +126,6 @@ def _build_symbolic_record(
         .to(dtype=torch_dtype)
         .cpu(),
         "teacher_labels": teacher_output["teacher_labels"].detach().cpu(),
-        "teacher_logits": teacher_output["teacher_logits"]
-        .detach()
-        .to(dtype=torch_dtype)
-        .cpu(),
         "teacher_scores": teacher_output["teacher_scores"]
         .detach()
         .to(dtype=torch_dtype)

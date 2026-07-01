@@ -984,16 +984,6 @@ class NeuroFasterRCNN(nn.Module):
         return records
 
     @torch.inference_mode()
-    def extract_roi_features(
-        self,
-        images: list[Tensor],
-        targets: list[PCBTarget] | None = None,
-    ) -> list[dict[str, Tensor]]:
-        """Export proposal boxes and RoI Align features for SODT training."""
-
-        return self._extract_proposal_feature_records(images, targets)
-
-    @torch.inference_mode()
     def extract_teacher_roi_samples(
         self,
         images: list[Tensor],

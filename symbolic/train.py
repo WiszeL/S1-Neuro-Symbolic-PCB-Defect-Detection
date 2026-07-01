@@ -144,56 +144,11 @@ def _augment_tree_metrics(
     return augmented
 
 
-def _evaluate_symbolic_model(
-    tree: SparseObliqueDecisionTreeClassifier,
-    bundle: Any,
-    feature_matrix: Any,
-    labels: Any,
-    tree_depth: int,
-    l1_lambda: float,
-    sparsity_alpha: float,
-    history: list[dict[str, Any]],
-    random_state: int,
-) -> dict[str, Any]:
-    symbolic_metrics = evaluate_symbolic_metrics(
-        tree,
-        feature_matrix=feature_matrix,
-        teacher_labels=labels,
-        class_names=bundle.class_names,
-    )
-    spatial_metrics = evaluate_symbolic_spatial_metrics(
-        tree,
-        feature_grids=bundle.feature_grids,
-        proposal_boxes=bundle.proposal_boxes,
-        matched_gt_boxes=bundle.matched_gt_boxes,
-        has_matched_gt=bundle.has_matched_gt,
-        gt_iou=bundle.gt_iou,
-        random_state=random_state,
-    )
-
-    metrics = _augment_tree_metrics(
-        tree,
-        {
-            **symbolic_metrics,
-            **spatial_metrics,
-        },
-    )
-    return {
-        "tree_depth": int(tree_depth),
-        "l1_lambda": float(l1_lambda),
-        "sparsity_alpha": float(sparsity_alpha),
-        "metrics": metrics,
-        "history": history,
-        "tree_state": tree.to_state_dict(),
-    }
-
-
 def _evaluate_trained_model_on_bundle(
     trained_model: dict[str, Any],
     bundle: Any,
     feature_matrix: Any,
     labels: Any,
-    random_state: int,
 ) -> dict[str, Any]:
     tree = SparseObliqueDecisionTreeClassifier.from_state_dict(
         trained_model["tree_state"]
@@ -211,7 +166,6 @@ def _evaluate_trained_model_on_bundle(
         matched_gt_boxes=bundle.matched_gt_boxes,
         has_matched_gt=bundle.has_matched_gt,
         gt_iou=bundle.gt_iou,
-        random_state=random_state,
         heatmap_mode="leaf_only",
     )
 
@@ -254,7 +208,6 @@ def evaluate_heldout(
         bundle=bundle,
         feature_matrix=feature_matrix,
         labels=labels,
-        random_state=random_state,
     )
 
     return {
@@ -275,7 +228,6 @@ def train_symbolic_tree(
     *,
     config: SymbolicTrainConfig,
     summary_path: str | Path | None = None,
-    calibration_export_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     data_config = config["data"]
     sodt_config = _materialize_sodt_config(config["search"])
@@ -396,12 +348,6 @@ def train_symbolic_tree(
 
     if current_node_bar is not None:
         current_node_bar.close()
-
-    # Calibrate the SODT's leaf distributions via temperature scaling.
-    # This rescales probabilities for detection postprocessing (NMS)
-    # without changing any class decisions (argmax is T-invariant).
-    # Guo et al. 2017: temperature MUST be calibrated on held-out data,
-    # not training data, to avoid overfitting the calibration.
 
     metrics = _augment_tree_metrics(tree, {})
 

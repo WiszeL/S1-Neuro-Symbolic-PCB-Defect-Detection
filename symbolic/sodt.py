@@ -151,10 +151,6 @@ class SparseObliqueDecisionTreeClassifier:
         leaf_indices = self.predict_leaf_indices(features)
         return self.leaf_distributions[leaf_indices]
 
-    def predict_log_proba(self, features: np.ndarray) -> np.ndarray:
-        probabilities = np.clip(self.predict_proba(features), 1e-8, 1.0)
-        return np.log(probabilities)
-
     def predict_from_node(self, features: np.ndarray, node_index: int) -> np.ndarray:
         features = self._prepare_features(features)
         predictions = np.empty((features.shape[0],), dtype=np.int64)
@@ -258,30 +254,6 @@ class SparseObliqueDecisionTreeClassifier:
             return np.zeros((0,), dtype=np.int64)
         return np.unique(np.concatenate(non_empty, axis=0)).astype(np.int64)
 
-    def path_contribution_vector(
-        self,
-        feature: np.ndarray,
-        original_space: bool = False,
-        path: list[PathStep] | None = None,
-    ) -> np.ndarray:
-        prepared_feature = self._prepare_features(feature)[0]
-        if path is None:
-            path = self.decision_path(prepared_feature)
-        if not path:
-            output_dim = self.original_input_dim if original_space else self.input_dim
-            return np.zeros((output_dim,), dtype=np.float32)
-
-        contribution_vector = np.zeros((self.input_dim,), dtype=np.float32)
-        for step in path:
-            direction = 1.0 if step.went_left else -1.0
-            contribution_vector += (
-                direction * self.node_weights[step.node_index] * prepared_feature
-            )
-
-        if not original_space:
-            return contribution_vector
-        return self._to_original_feature_vector(contribution_vector)
-
     def summarize_path(
         self,
         feature: np.ndarray,
@@ -303,7 +275,6 @@ class SparseObliqueDecisionTreeClassifier:
             "mean_active_original_features_per_node": float(np.mean(per_node_counts))
             if per_node_counts
             else 0.0,
-            "nodes": [],
         }
 
     def node_weight_full(self, node_index: int) -> np.ndarray:
