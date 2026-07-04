@@ -78,9 +78,9 @@ def explain_hybrid_detection(
         node_explanations.append(
             {
                 **node,
-                "projected_node_heatmap_on_detection_box": project_heatmap_to_image(
+                "projected_node_heatmap_on_proposal_box": project_heatmap_to_image(
                     node_heatmap,
-                    box=detection_box,
+                    box=proposal_box,
                     image_shape=image_shape,
                 ),
             }

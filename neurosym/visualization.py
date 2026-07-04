@@ -419,7 +419,7 @@ def draw_neurosymbolic_explanation(
         dimmer[..., 3] = 0.4  # 40% perfect black dimmer
         axis.imshow(dimmer)
         axis.imshow(
-            heatmap_to_array(node["projected_node_heatmap_on_detection_box"]),
+            heatmap_to_array(node["projected_node_heatmap_on_proposal_box"]),
             cmap="jet",
             vmin=0.0,
             vmax=1.0,
