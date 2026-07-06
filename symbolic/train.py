@@ -72,6 +72,23 @@ def _materialize_sodt_config(search_config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _class_weights_array(
+    class_weights: dict[str, float],
+    class_names: tuple[str, ...],
+) -> np.ndarray:
+    """Map a {class_name: weight} config dict to a per-class-index array."""
+    unknown = set(class_weights) - set(class_names)
+    if unknown:
+        raise ValueError(
+            f"class_weights references unknown classes: {sorted(unknown)}. "
+            f"Known classes: {list(class_names)}."
+        )
+    return np.array(
+        [float(class_weights.get(name, 1.0)) for name in class_names],
+        dtype=np.float32,
+    )
+
+
 def _load_symbolic_data(
     export_path: str | Path,
     random_state: int = 42,
@@ -312,6 +329,22 @@ def train_symbolic_tree(
             flush=True,
         )
 
+    class_weights_config = config["search"].get("class_weights")
+    class_weights_np: np.ndarray | None = None
+    if class_weights_config:
+        class_weights_np = _class_weights_array(
+            class_weights_config, bundle.class_names
+        )
+        print(
+            "Class weighting enabled: "
+            + ", ".join(
+                f"{name}={weight:g}"
+                for name, weight in zip(bundle.class_names, class_weights_np)
+                if weight != 1.0
+            ),
+            flush=True,
+        )
+
     history = fit_tree_with_tao(
         tree,
         feature_matrix,
@@ -327,6 +360,7 @@ def train_symbolic_tree(
         progress_callback=_on_iteration,
         node_progress_callback=_on_node,
         teacher_confidence=teacher_confidence_np,
+        class_weights=class_weights_np,
     )
 
     if current_node_bar is not None:
@@ -347,6 +381,9 @@ def train_symbolic_tree(
         "training_config": {
             **sodt_config,
             "neg_ratio": data_config.get("neg_ratio"),
+            "class_weights": dict(class_weights_config)
+            if class_weights_config
+            else None,
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",
         },
@@ -398,10 +435,17 @@ def prune_symbolic_tree(
     export_path: str | Path | None = None,
     summary_path: str | Path | None = None,
     random_state: int = 42,
+    class_weights: np.ndarray | None = None,
 ) -> dict[str, Any]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if export_path is None:
         export_path = str(checkpoint.get("export_path", ""))
+    if class_weights is None:
+        # Reuse the weights the tree was trained with so the post-prune leaf
+        # relabel doesn't silently revert weighted leaf decisions.
+        stored_weights = checkpoint.get("training_config", {}).get("class_weights")
+        if stored_weights is not None:
+            class_weights = _class_weights_array(stored_weights, bundle.class_names)
 
     print("=== Pruning Symbolic Tree ===")
     print(
@@ -416,6 +460,7 @@ def prune_symbolic_tree(
         labels,
         class_names=bundle.class_names,
         verbose=True,
+        class_weights=class_weights,
     )
 
     active_nodes = sum(c > 0 for c in tree.nonzero_weight_counts())

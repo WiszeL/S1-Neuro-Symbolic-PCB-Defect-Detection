@@ -132,6 +132,7 @@ def update_leaf_predictions(
     tree: SparseObliqueDecisionTreeClassifier,
     labels: np.ndarray,
     reduced_sets: dict[int, np.ndarray],
+    class_weights: np.ndarray | None = None,
 ) -> None:
     for leaf_offset in range(tree.num_leaves):
         node_index = tree.num_internal_nodes + leaf_offset
@@ -142,6 +143,11 @@ def update_leaf_predictions(
         counts = np.bincount(labels[node_indices], minlength=tree.num_classes).astype(
             np.float32
         )
+        # Per-class weights scale counts uniformly within each class, so
+        # weighting after binning is exact. Weighted counts feed both the
+        # leaf label and the distribution so argmax semantics stay consistent.
+        if class_weights is not None:
+            counts = counts * class_weights.astype(np.float32)
         tree.leaf_labels[leaf_offset] = int(counts.argmax())
         tree.leaf_distributions[leaf_offset] = (counts + tree.leaf_smoothing) / (
             counts.sum() + (tree.leaf_smoothing * tree.num_classes)
@@ -281,9 +287,10 @@ def postprocess_tree(
     labels: np.ndarray,
     class_names: tuple[str, ...] | None = None,
     verbose: bool = False,
+    class_weights: np.ndarray | None = None,
 ) -> int:
     reduced_sets = compute_reduced_sets(tree, features)
-    update_leaf_predictions(tree, labels, reduced_sets)
+    update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
     if verbose:
         print(f"Walking {tree.num_internal_nodes} internal nodes (reverse BFS)...")
@@ -354,6 +361,7 @@ def fit_tree_with_tao(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     node_progress_callback: Callable[[dict[str, Any]], None] | None = None,
     teacher_confidence: np.ndarray | None = None,
+    class_weights: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     features = ensure_float32(features)
     labels = np.asarray(labels, dtype=np.int64)
@@ -380,7 +388,7 @@ def fit_tree_with_tao(
         # Refresh the leaf predictions under the current routing
         # ---------------------------------------------------------------------
         reduced_sets = compute_reduced_sets(tree, features)
-        update_leaf_predictions(tree, labels, reduced_sets)
+        update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
         # ---------------------------------------------------------------------
         # Solve each internal-node reduced problem in reverse breadth-first order
@@ -434,6 +442,12 @@ def fit_tree_with_tao(
             # noisy/wrong teacher labels.  All samples are retained.
             if teacher_confidence is not None:
                 sample_weights *= teacher_confidence[node_indices].astype(np.float32)
+
+            # Per-class weights make misrouting the weighted classes costlier
+            # in the node's reduced problem (e.g. upweight minority defect
+            # classes so boundaries lean away from background).
+            if class_weights is not None:
+                sample_weights *= class_weights[node_labels].astype(np.float32)
 
             positive_weight_mask = sample_weights > 0.0
 
@@ -489,7 +503,7 @@ def fit_tree_with_tao(
                 )
 
         reduced_sets = compute_reduced_sets(tree, features)
-        update_leaf_predictions(tree, labels, reduced_sets)
+        update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
         metrics = evaluate_tree(
             tree,

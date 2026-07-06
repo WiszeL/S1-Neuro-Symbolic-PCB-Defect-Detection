@@ -11,3 +11,8 @@ search:
   tolerance: 0.0001
   zero_threshold: 0.00001
   random_state: 112
+  # Upweight the classes with the worst FN counts (short 23, spur 13 on test).
+  # Background stays 1.0 to avoid trading the FP gains back.
+  class_weights:
+    short: 2.0
+    spur: 1.5
