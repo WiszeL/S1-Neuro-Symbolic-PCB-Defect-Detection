@@ -22,7 +22,7 @@ def heatmap_to_array(heatmap: torch.Tensor) -> np.ndarray:
 
     # Remove noise entirely, but make the active area VERY opaque and bright
     # arr_norm ** 2.0 strongly suppresses background noise to yield sharp heatmaps.
-    alpha = np.where(arr_norm > 0.15, arr_norm**2.0, 0.0)
+    alpha = np.where(arr_norm > 0.15, arr_norm, 0.0)
     rgba[..., 3] = alpha
     return rgba
 
