@@ -16,3 +16,6 @@ search:
   class_weights:
     short: 2.0
     spur: 1.5
+  # Fallback: weight TAO samples by teacher softmax confidence. Off — class
+  # weighting + routing-margin scoring carry the result without it.
+  use_teacher_weighting: true

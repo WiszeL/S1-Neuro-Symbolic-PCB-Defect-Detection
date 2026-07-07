@@ -313,11 +313,13 @@ def train_symbolic_tree(
         tree_depth=sodt_config["tree_depth"],
     )
 
-    # Extract teacher confidence for confidence-weighted TAO.
-    # Downweights samples where the teacher's softmax was uncertain,
-    # reducing the impact of noisy teacher labels on the tree.
+    # Optional confidence-weighted TAO: downweights samples where the
+    # teacher's softmax was uncertain. Off by default — the ablation showed
+    # class weighting + routing-margin scoring carry the result; kept as a
+    # fallback switch.
+    use_teacher_weighting = bool(config["search"].get("use_teacher_weighting", False))
     teacher_confidence_np: np.ndarray | None = None
-    if bundle.teacher_confidence is not None:
+    if use_teacher_weighting and bundle.teacher_confidence is not None:
         teacher_confidence_np = (
             bundle.teacher_confidence.detach().cpu().numpy().astype(np.float32)
         )
@@ -381,6 +383,7 @@ def train_symbolic_tree(
         "training_config": {
             **sodt_config,
             "neg_ratio": data_config.get("neg_ratio"),
+            "use_teacher_weighting": use_teacher_weighting,
             "class_weights": dict(class_weights_config)
             if class_weights_config
             else None,

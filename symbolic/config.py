@@ -18,6 +18,7 @@ class SymbolicSearchConfig(TypedDict):
     zero_threshold: float
     random_state: int
     class_weights: NotRequired[dict[str, float] | None]
+    use_teacher_weighting: NotRequired[bool]
 
 
 class SymbolicTrainConfig(TypedDict):
