@@ -18,10 +18,14 @@ class NeuroSymbolicDetector(nn.Module):
         detector: NeuroFasterRCNN,
         symbolic_tree: SparseObliqueDecisionTreeClassifier,
         device: str | None = None,
+        use_routing_margin: bool = True,
+        routing_margin_temperature: float = 1.0,
     ) -> None:
         super().__init__()
         self.detector = detector
         self.symbolic_tree = symbolic_tree
+        self.use_routing_margin = use_routing_margin
+        self.routing_margin_temperature = routing_margin_temperature
         self.device = select_device(device)
         if self.symbolic_tree.num_classes != self.detector.num_classes:
             raise ValueError(
@@ -39,8 +43,17 @@ class NeuroSymbolicDetector(nn.Module):
             .astype(np.float32)
         )
         # Use uncalibrated probabilities as secondary leakage is controlled by the argmax mask.
-        probabilities = self.symbolic_tree.predict_proba(feature_vectors)
-        leaf_indices = self.symbolic_tree.predict_leaf_indices(feature_vectors)
+        if self.use_routing_margin:
+            leaf_indices, routing_confidence = (
+                self.symbolic_tree.predict_leaf_indices_and_routing_confidence(
+                    feature_vectors,
+                    temperature=self.routing_margin_temperature,
+                )
+            )
+        else:
+            leaf_indices = self.symbolic_tree.predict_leaf_indices(feature_vectors)
+            routing_confidence = None
+        probabilities = self.symbolic_tree.leaf_distributions[leaf_indices]
         probability_tensor = torch.from_numpy(probabilities).to(
             self.device,
             dtype=pooled_features.dtype,
@@ -63,6 +76,17 @@ class NeuroSymbolicDetector(nn.Module):
             1.0
         )
         probability_tensor = probability_tensor * mask
+
+        # Leaf distributions are piecewise-constant (one value per leaf), so
+        # every detection routed to the same leaf ties in score.  Ties collapse
+        # the AP ranking and leave Soft-NMS unable to order overlapping boxes.
+        # Modulate the leaf score by the routing-margin confidence (product of
+        # sigmoid(|node score|) along the path): purely tree-derived, monotone
+        # within a leaf, and it changes no routing/label/explanation.
+        if routing_confidence is not None:
+            probability_tensor = probability_tensor * torch.from_numpy(
+                routing_confidence
+            ).to(self.device, dtype=probability_tensor.dtype).unsqueeze(-1)
 
         leaf_tensor = torch.from_numpy(leaf_indices).to(self.device, dtype=torch.int64)
         return probability_tensor, leaf_tensor

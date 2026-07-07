@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from util.features import ensure_float32
 
 _PREDICTION_CHUNK_SIZE = 2048
 
@@ -23,8 +24,6 @@ class SparseObliqueDecisionTreeClassifier:
         max_depth: int,
         num_classes: int,
         input_dim: int,
-        original_input_dim: int | None = None,
-        selected_feature_indices: np.ndarray | None = None,
         feature_shape: tuple[int, int, int] | None = None,
         class_names: tuple[str, ...] | None = None,
         leaf_smoothing: float = 1.0,
@@ -35,23 +34,9 @@ class SparseObliqueDecisionTreeClassifier:
         self.max_depth = max_depth
         self.num_classes = num_classes
         self.input_dim = input_dim
-        self.original_input_dim = int(
-            original_input_dim if original_input_dim is not None else input_dim
-        )
         self.feature_shape = feature_shape
         self.class_names = class_names
         self.leaf_smoothing = float(leaf_smoothing)
-        if selected_feature_indices is None:
-            self.selected_feature_indices = None
-        else:
-            selected_indices = np.asarray(
-                selected_feature_indices, dtype=np.int64
-            ).reshape(-1)
-            if selected_indices.shape[0] != input_dim:
-                raise ValueError(
-                    "selected_feature_indices must have one entry per retained symbolic feature."
-                )
-            self.selected_feature_indices = selected_indices
 
         self.num_internal_nodes = (2**max_depth) - 1
         self.num_leaves = 2**max_depth
@@ -90,26 +75,17 @@ class SparseObliqueDecisionTreeClassifier:
     # ---------------------------------------------------------------------
 
     def _prepare_features(self, features: np.ndarray) -> np.ndarray:
-        # Preserve memmap arrays when dtype already matches to avoid
-        # materialising the entire dataset (~3 GB) into RAM.
-        if features.dtype == np.float32:
-            prepared = features
-        else:
-            prepared = np.asarray(features, dtype=np.float32)
+        # ensure_float32 preserves memmap arrays when dtype already matches,
+        # avoiding materialising the entire dataset (~3 GB) into RAM.
+        prepared = ensure_float32(features)
         if prepared.ndim == 1:
             prepared = prepared.reshape(1, -1)
 
         if prepared.shape[1] == self.input_dim:
             return prepared
-        if (
-            prepared.shape[1] == self.original_input_dim
-            and self.selected_feature_indices is not None
-        ):
-            return prepared[:, self.selected_feature_indices]
         raise ValueError(
             "Feature dimensionality does not match the tree input. "
-            f"Expected {self.input_dim} retained features or {self.original_input_dim} original features, "
-            f"got {prepared.shape[1]}."
+            f"Expected {self.input_dim}, got {prepared.shape[1]}."
         )
 
     def _score_features_by_node_indices(
@@ -143,6 +119,53 @@ class SparseObliqueDecisionTreeClassifier:
 
         return leaf_indices
 
+    def predict_leaf_indices_and_routing_confidence(
+        self,
+        features: np.ndarray,
+        temperature: float = 1.0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Traverse the tree, returning leaf indices plus a routing confidence.
+
+        The confidence is the product of sigmoid(|node score| / temperature)
+        over the *active* nodes (nonzero weights) on each sample's path — the
+        margin to each decision hyperplane. Pruned nodes always score exactly
+        zero and would apply a uniform 0.5 factor to every sample, so they are
+        excluded. Routing decisions are identical to predict_leaf_indices.
+        """
+        if temperature <= 0.0:
+            raise ValueError("temperature must be positive.")
+
+        features = self._prepare_features(features)
+        leaf_indices = np.empty((features.shape[0],), dtype=np.int64)
+        routing_confidence = np.empty((features.shape[0],), dtype=np.float32)
+        active_nodes = np.any(self.node_weights != 0.0, axis=1)
+
+        for start in range(0, features.shape[0], _PREDICTION_CHUNK_SIZE):
+            stop = min(start + _PREDICTION_CHUNK_SIZE, features.shape[0])
+            chunk_features = features[start:stop]
+            node_indices = np.zeros((chunk_features.shape[0],), dtype=np.int64)
+            confidence = np.ones((chunk_features.shape[0],), dtype=np.float64)
+
+            for _ in range(self.max_depth):
+                scores = self._score_features_by_node_indices(
+                    chunk_features, node_indices
+                )
+                margin_confidence = 1.0 / (
+                    1.0 + np.exp(-np.abs(scores) / temperature)
+                )
+                confidence *= np.where(
+                    active_nodes[node_indices], margin_confidence, 1.0
+                )
+                go_left = scores >= 0.0
+                node_indices = np.where(
+                    go_left, (2 * node_indices) + 1, (2 * node_indices) + 2
+                )
+
+            leaf_indices[start:stop] = node_indices - self.num_internal_nodes
+            routing_confidence[start:stop] = confidence.astype(np.float32)
+
+        return leaf_indices, routing_confidence
+
     def predict(self, features: np.ndarray) -> np.ndarray:
         leaf_indices = self.predict_leaf_indices(features)
         return self.leaf_labels[leaf_indices]
@@ -150,10 +173,6 @@ class SparseObliqueDecisionTreeClassifier:
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         leaf_indices = self.predict_leaf_indices(features)
         return self.leaf_distributions[leaf_indices]
-
-    def predict_log_proba(self, features: np.ndarray) -> np.ndarray:
-        probabilities = np.clip(self.predict_proba(features), 1e-8, 1.0)
-        return np.log(probabilities)
 
     def predict_from_node(self, features: np.ndarray, node_index: int) -> np.ndarray:
         features = self._prepare_features(features)
@@ -215,72 +234,19 @@ class SparseObliqueDecisionTreeClassifier:
     # Introspection and persistence
     # ---------------------------------------------------------------------
 
-    def _to_original_feature_vector(self, retained_vector: np.ndarray) -> np.ndarray:
-        retained = np.asarray(retained_vector, dtype=np.float32).reshape(-1)
-        if retained.shape[0] == self.original_input_dim:
-            return retained.copy()
-        if retained.shape[0] != self.input_dim:
-            raise ValueError(
-                "Feature vector dimensionality does not match the tree input or original feature space."
-            )
-        if self.selected_feature_indices is None:
-            return retained.copy()
+    def node_feature_indices(self, node_index: int) -> np.ndarray:
+        return np.flatnonzero(self.node_weights[node_index]).astype(np.int64)
 
-        original = np.zeros((self.original_input_dim,), dtype=np.float32)
-        original[self.selected_feature_indices] = retained
-        return original
-
-    def node_feature_indices(
-        self,
-        node_index: int,
-        original_space: bool = False,
-    ) -> np.ndarray:
-        indices = np.flatnonzero(self.node_weights[node_index]).astype(np.int64)
-        if not original_space or self.selected_feature_indices is None:
-            return indices
-        return self.selected_feature_indices[indices]
-
-    def path_feature_indices(
-        self,
-        feature: np.ndarray,
-        original_space: bool = False,
-    ) -> np.ndarray:
+    def path_feature_indices(self, feature: np.ndarray) -> np.ndarray:
         path = self.decision_path(feature)
         if not path:
             return np.zeros((0,), dtype=np.int64)
 
-        per_node = [
-            self.node_feature_indices(step.node_index, original_space=original_space)
-            for step in path
-        ]
+        per_node = [self.node_feature_indices(step.node_index) for step in path]
         non_empty = [indices for indices in per_node if indices.size > 0]
         if not non_empty:
             return np.zeros((0,), dtype=np.int64)
         return np.unique(np.concatenate(non_empty, axis=0)).astype(np.int64)
-
-    def path_contribution_vector(
-        self,
-        feature: np.ndarray,
-        original_space: bool = False,
-        path: list[PathStep] | None = None,
-    ) -> np.ndarray:
-        prepared_feature = self._prepare_features(feature)[0]
-        if path is None:
-            path = self.decision_path(prepared_feature)
-        if not path:
-            output_dim = self.original_input_dim if original_space else self.input_dim
-            return np.zeros((output_dim,), dtype=np.float32)
-
-        contribution_vector = np.zeros((self.input_dim,), dtype=np.float32)
-        for step in path:
-            direction = 1.0 if step.went_left else -1.0
-            contribution_vector += (
-                direction * self.node_weights[step.node_index] * prepared_feature
-            )
-
-        if not original_space:
-            return contribution_vector
-        return self._to_original_feature_vector(contribution_vector)
 
     def summarize_path(
         self,
@@ -290,36 +256,24 @@ class SparseObliqueDecisionTreeClassifier:
         prepared_feature = self._prepare_features(feature)[0]
         if path is None:
             path = self.decision_path(prepared_feature)
-        active_original_indices = self.path_feature_indices(
-            prepared_feature, original_space=True
-        )
+        active_indices = self.path_feature_indices(prepared_feature)
         per_node_counts = [
-            int(self.node_feature_indices(step.node_index, original_space=True).size)
-            for step in path
+            int(self.node_feature_indices(step.node_index).size) for step in path
         ]
         return {
             "path_length": len(path),
-            "active_path_original_feature_count": active_original_indices.size,
+            "active_path_original_feature_count": active_indices.size,
             "mean_active_original_features_per_node": float(np.mean(per_node_counts))
             if per_node_counts
             else 0.0,
-            "nodes": [],
         }
-
-    def node_weight_full(self, node_index: int) -> np.ndarray:
-        if self.selected_feature_indices is None:
-            return self.node_weights[node_index].copy()
-
-        full_weights = np.zeros((self.original_input_dim,), dtype=np.float32)
-        full_weights[self.selected_feature_indices] = self.node_weights[node_index]
-        return full_weights
 
     def node_weight_grid(self, node_index: int) -> np.ndarray:
         if self.feature_shape is None:
             raise ValueError(
                 "feature_shape is required to reshape node weights into a spatial grid."
             )
-        return self.node_weight_full(node_index).reshape(self.feature_shape)
+        return self.node_weights[node_index].copy().reshape(self.feature_shape)
 
     def nonzero_weight_counts(self) -> list[int]:
         return np.count_nonzero(self.node_weights, axis=1).tolist()
@@ -329,12 +283,6 @@ class SparseObliqueDecisionTreeClassifier:
             "max_depth": self.max_depth,
             "num_classes": self.num_classes,
             "input_dim": self.input_dim,
-            "original_input_dim": self.original_input_dim,
-            "selected_feature_indices": (
-                torch.from_numpy(self.selected_feature_indices.copy())
-                if self.selected_feature_indices is not None
-                else None
-            ),
             "feature_shape": self.feature_shape,
             "class_names": self.class_names,
             "leaf_smoothing": self.leaf_smoothing,
@@ -352,18 +300,6 @@ class SparseObliqueDecisionTreeClassifier:
             max_depth=int(state_dict["max_depth"]),
             num_classes=int(state_dict["num_classes"]),
             input_dim=int(state_dict["input_dim"]),
-            original_input_dim=int(
-                state_dict.get("original_input_dim", state_dict["input_dim"])
-            ),
-            selected_feature_indices=(
-                state_dict["selected_feature_indices"]
-                .detach()
-                .cpu()
-                .numpy()
-                .astype(np.int64)
-                if state_dict.get("selected_feature_indices") is not None
-                else None
-            ),
             feature_shape=tuple(state_dict["feature_shape"])
             if state_dict["feature_shape"] is not None
             else None,

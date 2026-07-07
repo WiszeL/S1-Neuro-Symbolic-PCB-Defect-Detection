@@ -100,7 +100,7 @@ def compute_node_local_evidence_maps(
                     np.count_nonzero(positive_evidence > 0.0)
                 ),
                 "active_original_feature_count": int(
-                    tree.node_feature_indices(step.node_index, original_space=True).size
+                    tree.node_feature_indices(step.node_index).size
                 ),
                 "node_heatmap": node_heatmap,
                 "raw_node_heatmap": positive_evidence,
@@ -132,7 +132,6 @@ def compute_symbolic_heatmap(
             "leaf_index": tree.leaf_index_for_feature(feature_vector),
             "global_or_structural_density_map": zero_heatmap,
             "local_instance_evidence_map": zero_heatmap,
-            "positive_local_evidence_map": zero_heatmap,
             "negative_local_evidence_map": zero_heatmap,
             "signed_local_evidence_map": zero_heatmap,
             "combined_local_evidence_map": zero_heatmap,
@@ -204,7 +203,6 @@ def compute_symbolic_heatmap(
     maps = {
         "global_or_structural_density_map": structural_density_map,
         "local_instance_evidence_map": positive_local_evidence_map,
-        "positive_local_evidence_map": positive_local_evidence_map,
         "negative_local_evidence_map": negative_local_evidence_map,
         "signed_local_evidence_map": signed_local_evidence_map,
         "combined_local_evidence_map": combined_local_evidence_map,
@@ -220,7 +218,7 @@ def compute_symbolic_heatmap(
                 tree.node_feature_indices(step.node_index).size
             ),
             "active_original_feature_count": int(
-                tree.node_feature_indices(step.node_index, original_space=True).size
+                tree.node_feature_indices(step.node_index).size
             ),
         }
         for step in path
@@ -254,7 +252,6 @@ def compute_symbolic_heatmap(
             },
         },
         "top_local_cells": top_local_cells,
-        "top_positive_local_cells": top_local_cells,
         "top_negative_local_cells": top_negative_local_cells,
         "top_structural_cells": top_structural_cells,
         "top_structural_channels": top_structural_channels,
@@ -318,40 +315,3 @@ def project_heatmap_to_image(
     if (cx2 > cx1) and (cy2 > cy1):
         canvas[cy1:cy2, cx1:cx2] = resized[ry1:ry2, rx1:rx2]
     return canvas
-
-
-def aggregate_projected_heatmaps(
-    projected_heatmaps: list[Tensor | np.ndarray],
-    scores: list[float] | None = None,
-    reduction: str = "max",
-    normalize: bool = True,
-) -> Tensor:
-    if not projected_heatmaps:
-        raise ValueError("At least one projected heatmap is required for aggregation.")
-
-    tensors: list[Tensor] = []
-    for index, heatmap in enumerate(projected_heatmaps):
-        if isinstance(heatmap, np.ndarray):
-            heatmap_tensor = torch.from_numpy(heatmap).float()
-        else:
-            heatmap_tensor = heatmap.detach().cpu().float()
-
-        if scores is not None:
-            heatmap_tensor = heatmap_tensor * float(scores[index])
-
-        tensors.append(heatmap_tensor)
-
-    stacked = torch.stack(tensors, dim=0)
-    if reduction == "sum":
-        aggregated = stacked.sum(dim=0)
-    elif reduction == "mean":
-        aggregated = stacked.mean(dim=0)
-    else:
-        aggregated = stacked.max(dim=0).values
-
-    if normalize:
-        max_value = aggregated.abs().max().item()
-        if max_value > 0.0:
-            aggregated = aggregated / max_value
-
-    return aggregated

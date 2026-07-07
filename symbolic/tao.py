@@ -1,30 +1,34 @@
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any, Callable
 
 import numpy as np
 from tqdm import tqdm
 
 from .sodt import SparseObliqueDecisionTreeClassifier
+from util.features import ensure_float32
 
 
 _TAO_CHUNK_SIZE = 2048
 
 
+_INIT_WEIGHT_SCALE = 1e-3
+
+
 def initialize_tree_weights(
     tree: SparseObliqueDecisionTreeClassifier,
     random_state: int = 42,
-    scale: float = 1e-3,
 ) -> None:
     generator = np.random.default_rng(random_state)
     tree.node_weights = generator.normal(
         loc=0.0,
-        scale=scale,
+        scale=_INIT_WEIGHT_SCALE,
         size=tree.node_weights.shape,
     ).astype(np.float32)
     tree.node_bias = generator.normal(
         loc=0.0,
-        scale=scale,
+        scale=_INIT_WEIGHT_SCALE,
         size=tree.node_bias.shape,
     ).astype(np.float32)
 
@@ -128,6 +132,7 @@ def update_leaf_predictions(
     tree: SparseObliqueDecisionTreeClassifier,
     labels: np.ndarray,
     reduced_sets: dict[int, np.ndarray],
+    class_weights: np.ndarray | None = None,
 ) -> None:
     for leaf_offset in range(tree.num_leaves):
         node_index = tree.num_internal_nodes + leaf_offset
@@ -138,6 +143,11 @@ def update_leaf_predictions(
         counts = np.bincount(labels[node_indices], minlength=tree.num_classes).astype(
             np.float32
         )
+        # Per-class weights scale counts uniformly within each class, so
+        # weighting after binning is exact. Weighted counts feed both the
+        # leaf label and the distribution so argmax semantics stay consistent.
+        if class_weights is not None:
+            counts = counts * class_weights.astype(np.float32)
         tree.leaf_labels[leaf_offset] = int(counts.argmax())
         tree.leaf_distributions[leaf_offset] = (counts + tree.leaf_smoothing) / (
             counts.sum() + (tree.leaf_smoothing * tree.num_classes)
@@ -232,25 +242,13 @@ def solve_l1_logistic_reduced_problem(
     return learned_weights, bias
 
 
-def _ensure_float32_features(features: np.ndarray) -> np.ndarray:
-    """Ensure features are float32, preserving memmap when possible.
-
-    Unlike ``np.asarray(features, dtype=np.float32)`` which always copies a
-    memmap into a regular ndarray, this helper returns the original object
-    when the dtype already matches.  This keeps the data disk-backed and
-    avoids materialising several GB of RoI features into RAM.
-    """
-    if features.dtype == np.float32:
-        return features
-    return np.asarray(features, dtype=np.float32)
-
-
 def evaluate_tree(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
     labels: np.ndarray,
     l1_lambda: float = 0.0,
     sparsity_alpha: float = 0.0,
+    reduced_sets: dict[int, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     predictions = tree.predict(features)
     accuracy = float((predictions == labels).mean())
@@ -261,7 +259,8 @@ def evaluate_tree(
     classification_loss = float((predictions != labels).sum())
     l1_penalty = 0.0
     if l1_lambda > 0.0:
-        reduced_sets = compute_reduced_sets(tree, features)
+        if reduced_sets is None:
+            reduced_sets = compute_reduced_sets(tree, features)
         for node_index in range(tree.num_internal_nodes):
             node_rs_size = reduced_sets.get(
                 node_index, np.zeros((0,), dtype=np.int64)
@@ -288,9 +287,10 @@ def postprocess_tree(
     labels: np.ndarray,
     class_names: tuple[str, ...] | None = None,
     verbose: bool = False,
+    class_weights: np.ndarray | None = None,
 ) -> int:
     reduced_sets = compute_reduced_sets(tree, features)
-    update_leaf_predictions(tree, labels, reduced_sets)
+    update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
     if verbose:
         print(f"Walking {tree.num_internal_nodes} internal nodes (reverse BFS)...")
@@ -361,8 +361,9 @@ def fit_tree_with_tao(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     node_progress_callback: Callable[[dict[str, Any]], None] | None = None,
     teacher_confidence: np.ndarray | None = None,
+    class_weights: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
-    features = _ensure_float32_features(features)
+    features = ensure_float32(features)
     labels = np.asarray(labels, dtype=np.int64)
 
     if features.ndim != 2:
@@ -381,11 +382,13 @@ def fit_tree_with_tao(
         iteration_range = progress_bar
 
     for iteration_index in iteration_range:
+        iteration_start = perf_counter()
+
         # ---------------------------------------------------------------------
         # Refresh the leaf predictions under the current routing
         # ---------------------------------------------------------------------
         reduced_sets = compute_reduced_sets(tree, features)
-        update_leaf_predictions(tree, labels, reduced_sets)
+        update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
         # ---------------------------------------------------------------------
         # Solve each internal-node reduced problem in reverse breadth-first order
@@ -439,6 +442,12 @@ def fit_tree_with_tao(
             # noisy/wrong teacher labels.  All samples are retained.
             if teacher_confidence is not None:
                 sample_weights *= teacher_confidence[node_indices].astype(np.float32)
+
+            # Per-class weights make misrouting the weighted classes costlier
+            # in the node's reduced problem (e.g. upweight minority defect
+            # classes so boundaries lean away from background).
+            if class_weights is not None:
+                sample_weights *= class_weights[node_labels].astype(np.float32)
 
             positive_weight_mask = sample_weights > 0.0
 
@@ -494,7 +503,7 @@ def fit_tree_with_tao(
                 )
 
         reduced_sets = compute_reduced_sets(tree, features)
-        update_leaf_predictions(tree, labels, reduced_sets)
+        update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
         metrics = evaluate_tree(
             tree,
@@ -502,8 +511,10 @@ def fit_tree_with_tao(
             labels,
             l1_lambda=l1_lambda,
             sparsity_alpha=sparsity_alpha,
+            reduced_sets=reduced_sets,
         )
         metrics["iteration"] = iteration_index + 1
+        metrics["duration_seconds"] = perf_counter() - iteration_start
         history.append(metrics)
         if progress_callback is not None:
             progress_callback(metrics)

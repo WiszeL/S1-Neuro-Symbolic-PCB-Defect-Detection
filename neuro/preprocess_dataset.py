@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import Callable
 
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
@@ -13,23 +12,15 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.transforms import v2
 
 from .config import NeuroTrainConfig
-from .prepare_dataset import PCBDataset, PCBTarget
+from .prepare_dataset import (
+    PCBDataset,
+    PCBPreprocess,
+    PCBTarget,
+    PREVIEW_PALETTE,
+    build_pcb_target,
+)
 
-PCBPreprocess = Callable[
-    [Image.Image, PCBTarget],
-    tuple[Tensor, PCBTarget],
-]
 Palette = list[str]
-PREVIEW_PALETTE = [
-    "#d62828",
-    "#0077b6",
-    "#2a9d8f",
-    "#f4a261",
-    "#6a4c93",
-    "#5f6f52",
-    "#bc6c25",
-    "#3a86ff",
-]
 
 
 def train_preprocess(horizontal_flip_prob: float = 0.5) -> PCBPreprocess:
@@ -165,16 +156,7 @@ def visualize_preprocessing(
 
     for row, record in enumerate(records):
         image = Image.open(Path(record.image_path)).convert("RGB")
-        area = (record.boxes[:, 2] - record.boxes[:, 0]) * (
-            record.boxes[:, 3] - record.boxes[:, 1]
-        )
-        target: PCBTarget = {
-            "boxes": record.boxes,
-            "labels": record.labels,
-            "image_id": torch.tensor(row, dtype=torch.int64),
-            "area": area,
-            "iscrowd": torch.zeros((record.boxes.shape[0],), dtype=torch.int64),
-        }
+        target = build_pcb_target(row, record.boxes, record.labels)
 
         _draw_target(
             axes[row][0],

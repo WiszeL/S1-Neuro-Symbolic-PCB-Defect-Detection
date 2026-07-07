@@ -12,11 +12,9 @@ from symbolic.train import load_symbolic_tree
 from util.device import select_device
 
 from .heatmap import (
-    aggregate_projected_heatmaps,
     compute_symbolic_heatmap,
     compute_node_local_evidence_maps,
     project_heatmap_to_image,
-    resize_heatmap_to_box,
 )
 from .hybrid import NeuroSymbolicDetector
 
@@ -80,61 +78,14 @@ def explain_hybrid_detection(
         node_explanations.append(
             {
                 **node,
-                "proposal_box_heatmap": resize_heatmap_to_box(
+                "projected_node_heatmap_on_proposal_box": project_heatmap_to_image(
                     node_heatmap,
                     box=proposal_box,
-                ),
-                "projected_node_heatmap": project_heatmap_to_image(
-                    node_heatmap,
-                    box=proposal_box,
-                    image_shape=image_shape,
-                ),
-                "detection_box_heatmap": resize_heatmap_to_box(
-                    node_heatmap,
-                    box=detection_box,
-                ),
-                "projected_node_heatmap_on_detection_box": project_heatmap_to_image(
-                    node_heatmap,
-                    box=detection_box,
                     image_shape=image_shape,
                 ),
             }
         )
 
-    heatmap_keys = [
-        "global_or_structural_density_map",
-        "local_instance_evidence_map",
-        "positive_local_evidence_map",
-        "negative_local_evidence_map",
-        "signed_local_evidence_map",
-        "combined_local_evidence_map",
-    ]
-    projected_maps = {
-        key: project_heatmap_to_image(
-            explanation[key],
-            box=proposal_box,
-            image_shape=image_shape,
-        )
-        for key in heatmap_keys
-    }
-    box_maps = {
-        key: resize_heatmap_to_box(
-            explanation[key],
-            box=proposal_box,
-        )
-        for key in heatmap_keys
-    }
-
-    explanation["projected_heatmap"] = (
-        projected_maps[mode]
-        if mode in projected_maps
-        else projected_maps["local_instance_evidence_map"]
-    )
-    explanation["detection_box_heatmap"] = (
-        box_maps[mode] if mode in box_maps else box_maps["local_instance_evidence_map"]
-    )
-    explanation["projected_maps"] = projected_maps
-    explanation["proposal_box_maps"] = box_maps
     explanation["node_explanations"] = node_explanations
     explanation["proposal_box"] = proposal_box.detach().cpu()
     explanation["detection_box"] = detection_box.detach().cpu()
@@ -147,26 +98,7 @@ def explain_hybrid_detection(
     explanation["symbolic_probabilities"] = detection["symbolic_probabilities"][
         detection_index
     ]
-    explanation["symbolic_label_confidence"] = float(
-        detection["symbolic_probabilities"][detection_index][explanation["label"]]
-    )
     explanation["explanation_mode"] = mode
-    explanation["explanation_modes"] = {
-        "local_instance_evidence_map": "Per-instance symbolic evidence map for this RoI.",
-        "global_or_structural_density_map": "Path-level structural density map from symbolic weights.",
-    }
-    explanation["intrinsic_reasoning_summary"] = {
-        "leaf_index": int(explanation["leaf_index"]),
-        "path_length": int(explanation["reasoning_summary"]["path_length"]),
-        "active_path_original_feature_count": int(
-            explanation["reasoning_summary"]["active_path_original_feature_count"]
-        ),
-        "mean_active_original_features_per_node": float(
-            explanation["reasoning_summary"]["mean_active_original_features_per_node"]
-        ),
-        "proposal_box": explanation["proposal_box"].tolist(),
-        "detection_box": explanation["detection_box"].tolist(),
-    }
     return explanation
 
 
@@ -183,41 +115,6 @@ def select_detection_indices(
     if max_detections is not None:
         selected_indices = selected_indices[: max(max_detections, 0)]
     return selected_indices
-
-
-def subset_detection(
-    detection: dict[str, Tensor],
-    detection_indices: list[int],
-) -> dict[str, Tensor]:
-    if not detection_indices:
-        empty_detection: dict[str, Tensor] = {}
-        for key, value in detection.items():
-            if (
-                isinstance(value, Tensor)
-                and value.ndim > 0
-                and value.shape[0] == detection["boxes"].shape[0]
-            ):
-                empty_detection[key] = value[:0]
-            else:
-                empty_detection[key] = value
-        return empty_detection
-
-    subset: dict[str, Tensor] = {}
-    for key, value in detection.items():
-        if (
-            isinstance(value, Tensor)
-            and value.ndim > 0
-            and value.shape[0] == detection["boxes"].shape[0]
-        ):
-            index_tensor = torch.as_tensor(
-                detection_indices,
-                dtype=torch.long,
-                device=value.device,
-            )
-            subset[key] = value.index_select(0, index_tensor)
-        else:
-            subset[key] = value
-    return subset
 
 
 def explain_hybrid_detections(
@@ -247,28 +144,3 @@ def explain_hybrid_detections(
         )
         for index in selected_indices
     ]
-
-
-def aggregate_detection_heatmaps(
-    explanations: list[dict[str, Any]],
-    map_key: str = "projected_heatmap",
-    reduction: str = "max",
-    score_weighted: bool = True,
-    normalize: bool = True,
-) -> Tensor:
-    if not explanations:
-        raise ValueError(
-            "At least one explanation is required for heatmap aggregation."
-        )
-
-    scores = (
-        [explanation["score"] for explanation in explanations]
-        if score_weighted
-        else None
-    )
-    return aggregate_projected_heatmaps(
-        [explanation[map_key] for explanation in explanations],
-        scores=scores,
-        reduction=reduction,
-        normalize=normalize,
-    )

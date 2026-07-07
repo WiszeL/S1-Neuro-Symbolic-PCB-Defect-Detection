@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class SymbolicDataConfig(TypedDict):
@@ -17,6 +17,8 @@ class SymbolicSearchConfig(TypedDict):
     tolerance: float
     zero_threshold: float
     random_state: int
+    class_weights: NotRequired[dict[str, float] | None]
+    use_teacher_weighting: NotRequired[bool]
 
 
 class SymbolicTrainConfig(TypedDict):

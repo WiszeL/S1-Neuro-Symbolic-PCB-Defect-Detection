@@ -72,24 +72,24 @@ def _materialize_sodt_config(search_config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _load_symbolic_training_data(
-    export_path: str | Path,
-    random_state: int,
-    neg_ratio: float | None = None,
-) -> tuple[Any, Any]:
-    bundle = open_exported_symbolic_array_payload(
-        torch.load(export_path, map_location="cpu", weights_only=True),
-        random_state=random_state,
-        feature_dtype="float32",
-        neg_ratio=neg_ratio,
+def _class_weights_array(
+    class_weights: dict[str, float],
+    class_names: tuple[str, ...],
+) -> np.ndarray:
+    """Map a {class_name: weight} config dict to a per-class-index array."""
+    unknown = set(class_weights) - set(class_names)
+    if unknown:
+        raise ValueError(
+            f"class_weights references unknown classes: {sorted(unknown)}. "
+            f"Known classes: {list(class_names)}."
+        )
+    return np.array(
+        [float(class_weights.get(name, 1.0)) for name in class_names],
+        dtype=np.float32,
     )
 
-    feature_matrix = bundle.feature_vectors
-    labels = bundle.teacher_labels.detach().cpu().numpy()
-    return bundle, (feature_matrix, labels)
 
-
-def _load_symbolic_evaluation_data(
+def _load_symbolic_data(
     export_path: str | Path,
     random_state: int = 42,
     neg_ratio: float | None = None,
@@ -114,7 +114,6 @@ def _build_symbolic_tree(
         max_depth=tree_depth,
         num_classes=len(bundle.class_names),
         input_dim=feature_matrix.shape[1],
-        original_input_dim=feature_matrix.shape[1],
         feature_shape=bundle.feature_shape,
         class_names=bundle.class_names,
     )
@@ -144,56 +143,11 @@ def _augment_tree_metrics(
     return augmented
 
 
-def _evaluate_symbolic_model(
-    tree: SparseObliqueDecisionTreeClassifier,
-    bundle: Any,
-    feature_matrix: Any,
-    labels: Any,
-    tree_depth: int,
-    l1_lambda: float,
-    sparsity_alpha: float,
-    history: list[dict[str, Any]],
-    random_state: int,
-) -> dict[str, Any]:
-    symbolic_metrics = evaluate_symbolic_metrics(
-        tree,
-        feature_matrix=feature_matrix,
-        teacher_labels=labels,
-        class_names=bundle.class_names,
-    )
-    spatial_metrics = evaluate_symbolic_spatial_metrics(
-        tree,
-        feature_grids=bundle.feature_grids,
-        proposal_boxes=bundle.proposal_boxes,
-        matched_gt_boxes=bundle.matched_gt_boxes,
-        has_matched_gt=bundle.has_matched_gt,
-        gt_iou=bundle.gt_iou,
-        random_state=random_state,
-    )
-
-    metrics = _augment_tree_metrics(
-        tree,
-        {
-            **symbolic_metrics,
-            **spatial_metrics,
-        },
-    )
-    return {
-        "tree_depth": int(tree_depth),
-        "l1_lambda": float(l1_lambda),
-        "sparsity_alpha": float(sparsity_alpha),
-        "metrics": metrics,
-        "history": history,
-        "tree_state": tree.to_state_dict(),
-    }
-
-
 def _evaluate_trained_model_on_bundle(
     trained_model: dict[str, Any],
     bundle: Any,
     feature_matrix: Any,
     labels: Any,
-    random_state: int,
 ) -> dict[str, Any]:
     tree = SparseObliqueDecisionTreeClassifier.from_state_dict(
         trained_model["tree_state"]
@@ -211,7 +165,6 @@ def _evaluate_trained_model_on_bundle(
         matched_gt_boxes=bundle.matched_gt_boxes,
         has_matched_gt=bundle.has_matched_gt,
         gt_iou=bundle.gt_iou,
-        random_state=random_state,
         heatmap_mode="leaf_only",
     )
 
@@ -222,10 +175,11 @@ def _evaluate_trained_model_on_bundle(
             **spatial_metrics,
         },
     )
+    training_config = trained_model.get("training_config", {})
     return {
-        "tree_depth": trained_model["tree_depth"],
-        "l1_lambda": trained_model["l1_lambda"],
-        "sparsity_alpha": trained_model["sparsity_alpha"],
+        "tree_depth": tree.max_depth,
+        "l1_lambda": float(training_config.get("l1_lambda", 0.0)),
+        "sparsity_alpha": float(training_config.get("sparsity_alpha", 0.0)),
         "metrics": metrics,
     }
 
@@ -239,7 +193,7 @@ def evaluate_heldout(
     t0 = perf_counter()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
-    bundle, feature_matrix, labels = _load_symbolic_evaluation_data(
+    bundle, feature_matrix, labels = _load_symbolic_data(
         export_path,
         random_state=random_state,
     )
@@ -254,7 +208,6 @@ def evaluate_heldout(
         bundle=bundle,
         feature_matrix=feature_matrix,
         labels=labels,
-        random_state=random_state,
     )
 
     return {
@@ -275,14 +228,13 @@ def train_symbolic_tree(
     *,
     config: SymbolicTrainConfig,
     summary_path: str | Path | None = None,
-    calibration_export_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     data_config = config["data"]
     sodt_config = _materialize_sodt_config(config["search"])
 
     load_start_time = perf_counter()
     print(f"Loading symbolic training export from {export_path}...", flush=True)
-    bundle, (feature_matrix, labels) = _load_symbolic_training_data(
+    bundle, feature_matrix, labels = _load_symbolic_data(
         export_path,
         random_state=sodt_config["random_state"],
         neg_ratio=data_config.get("neg_ratio"),
@@ -361,11 +313,13 @@ def train_symbolic_tree(
         tree_depth=sodt_config["tree_depth"],
     )
 
-    # Extract teacher confidence for confidence-weighted TAO.
-    # Downweights samples where the teacher's softmax was uncertain,
-    # reducing the impact of noisy teacher labels on the tree.
+    # Optional confidence-weighted TAO: downweights samples where the
+    # teacher's softmax was uncertain. Off by default — the ablation showed
+    # class weighting + routing-margin scoring carry the result; kept as a
+    # fallback switch.
+    use_teacher_weighting = bool(config["search"].get("use_teacher_weighting", False))
     teacher_confidence_np: np.ndarray | None = None
-    if bundle.teacher_confidence is not None:
+    if use_teacher_weighting and bundle.teacher_confidence is not None:
         teacher_confidence_np = (
             bundle.teacher_confidence.detach().cpu().numpy().astype(np.float32)
         )
@@ -374,6 +328,22 @@ def train_symbolic_tree(
             f"mean={teacher_confidence_np.mean():.4f}, "
             f"min={teacher_confidence_np.min():.4f}, "
             f"max={teacher_confidence_np.max():.4f}",
+            flush=True,
+        )
+
+    class_weights_config = config["search"].get("class_weights")
+    class_weights_np: np.ndarray | None = None
+    if class_weights_config:
+        class_weights_np = _class_weights_array(
+            class_weights_config, bundle.class_names
+        )
+        print(
+            "Class weighting enabled: "
+            + ", ".join(
+                f"{name}={weight:g}"
+                for name, weight in zip(bundle.class_names, class_weights_np)
+                if weight != 1.0
+            ),
             flush=True,
         )
 
@@ -392,42 +362,33 @@ def train_symbolic_tree(
         progress_callback=_on_iteration,
         node_progress_callback=_on_node,
         teacher_confidence=teacher_confidence_np,
+        class_weights=class_weights_np,
     )
 
     if current_node_bar is not None:
         current_node_bar.close()
 
-    # Calibrate the SODT's leaf distributions via temperature scaling.
-    # This rescales probabilities for detection postprocessing (NMS)
-    # without changing any class decisions (argmax is T-invariant).
-    # Guo et al. 2017: temperature MUST be calibrated on held-out data,
-    # not training data, to avoid overfitting the calibration.
-
     metrics = _augment_tree_metrics(tree, {})
 
+    # tree_state already carries feature_shape/class_names/max_depth, and
+    # training_config already carries l1_lambda/sparsity_alpha/tree_depth, so
+    # the checkpoint doesn't repeat them at the top level. summary.json below
+    # keeps them front-and-center since it's meant to be read without loading
+    # the tensor payload.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": metrics,
         "history": history,
-        "class_names": bundle.class_names,
-        "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
-        "tree_depth": int(sodt_config["tree_depth"]),
-        "l1_lambda": float(sodt_config["l1_lambda"]),
-        "sparsity_alpha": float(sodt_config["sparsity_alpha"]),
         "training_config": {
-            "tree_depth": sodt_config["tree_depth"],
-            "iterations": sodt_config["iterations"],
-            "l1_lambda": sodt_config["l1_lambda"],
-            "sparsity_alpha": sodt_config["sparsity_alpha"],
-            "logistic_max_iter": sodt_config["logistic_max_iter"],
-            "tolerance": sodt_config["tolerance"],
-            "zero_threshold": sodt_config["zero_threshold"],
-            "random_state": sodt_config["random_state"],
+            **sodt_config,
             "neg_ratio": data_config.get("neg_ratio"),
+            "use_teacher_weighting": use_teacher_weighting,
+            "class_weights": dict(class_weights_config)
+            if class_weights_config
+            else None,
             "symbolic_input": "raw_roi_align_pooled_grid",
             "sparsity_source": "l1_regularization_and_tree_structure",
-            "config_sections": dict(config),
         },
     }
     ensure_dir(Path(output_path).parent)
@@ -477,10 +438,17 @@ def prune_symbolic_tree(
     export_path: str | Path | None = None,
     summary_path: str | Path | None = None,
     random_state: int = 42,
+    class_weights: np.ndarray | None = None,
 ) -> dict[str, Any]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if export_path is None:
         export_path = str(checkpoint.get("export_path", ""))
+    if class_weights is None:
+        # Reuse the weights the tree was trained with so the post-prune leaf
+        # relabel doesn't silently revert weighted leaf decisions.
+        stored_weights = checkpoint.get("training_config", {}).get("class_weights")
+        if stored_weights is not None:
+            class_weights = _class_weights_array(stored_weights, bundle.class_names)
 
     print("=== Pruning Symbolic Tree ===")
     print(
@@ -495,6 +463,7 @@ def prune_symbolic_tree(
         labels,
         class_names=bundle.class_names,
         verbose=True,
+        class_weights=class_weights,
     )
 
     active_nodes = sum(c > 0 for c in tree.nonzero_weight_counts())
@@ -520,20 +489,18 @@ def prune_symbolic_tree(
     training_config = dict(checkpoint.get("training_config", {}))
     training_config["postprocess_pruned_nodes"] = pruned_count
 
-    tree_depth = int(checkpoint.get("tree_depth", tree.max_depth))
-    l1_lambda = float(checkpoint.get("l1_lambda", 0.0))
-    sparsity_alpha = float(checkpoint.get("sparsity_alpha", 0.0))
+    tree_depth = tree.max_depth
+    l1_lambda = float(training_config.get("l1_lambda", 0.0))
+    sparsity_alpha = float(training_config.get("sparsity_alpha", 0.0))
 
+    # See train_symbolic_tree: tree_state/training_config already carry
+    # feature_shape/class_names/tree_depth/l1_lambda/sparsity_alpha, so the
+    # checkpoint doesn't repeat them at the top level.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": tree_metrics,
         "history": history,
-        "class_names": bundle.class_names,
-        "feature_shape": bundle.feature_shape,
         "export_path": str(export_path),
-        "tree_depth": tree_depth,
-        "l1_lambda": l1_lambda,
-        "sparsity_alpha": sparsity_alpha,
         "training_config": training_config,
     }
     torch.save(artifact, checkpoint_path)

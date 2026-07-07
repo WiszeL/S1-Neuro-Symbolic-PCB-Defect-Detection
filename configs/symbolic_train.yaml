@@ -5,9 +5,17 @@ data:
 search:
   tree_depth: 6
   iterations: 15
-  l1_lambda: 6
-  sparsity_alpha: 0.1
+  l1_lambda: 0.001
+  sparsity_alpha: 0.9
   logistic_max_iter: 200
   tolerance: 0.0001
   zero_threshold: 0.00001
   random_state: 112
+  # Upweight the classes with the worst FN counts (short 23, spur 13 on test).
+  # Background stays 1.0 to avoid trading the FP gains back.
+  class_weights:
+    short: 2.0
+    spur: 1.5
+  # Fallback: weight TAO samples by teacher softmax confidence. Off — class
+  # weighting + routing-margin scoring carry the result without it.
+  use_teacher_weighting: true

@@ -8,7 +8,9 @@ from torch import Tensor
 from tqdm import tqdm
 
 from .sodt import SparseObliqueDecisionTreeClassifier
+from util.features import ensure_float32
 from util.geometry import project_gt_box_to_roi_grid
+from util.heatmap_metrics import normalize_heatmap, pointing_score, topk_region_overlap
 
 _NAN = float("nan")
 
@@ -119,9 +121,11 @@ def _deletion_insertion_auc(
         batch_end = min(batch_start + batch_size, n)
         B = batch_end - batch_start
         full_probs = tree.predict_proba(auc_features[batch_start:batch_end])
+        empty_probs = tree.predict_proba(np.zeros((B, D), dtype=np.float32))
         for bi in range(B):
             gi = batch_start + bi
             deletion_curves[gi, 0] = full_probs[bi, auc_preds[gi]]
+            insertion_curves[gi, 0] = empty_probs[bi, auc_preds[gi]]
 
         del_batch = auc_features[batch_start:batch_end].copy()
         ins_batch = np.zeros_like(del_batch)
@@ -157,11 +161,7 @@ def evaluate_symbolic_model(
     teacher_labels: np.ndarray,
     class_names: tuple[str, ...],
 ) -> dict[str, Any]:
-    features = (
-        feature_matrix
-        if feature_matrix.dtype == np.float32
-        else np.asarray(feature_matrix, dtype=np.float32)
-    )
+    features = ensure_float32(feature_matrix)
     labels = np.asarray(teacher_labels, dtype=np.int64)
     if features.ndim != 2:
         raise ValueError("evaluate_symbolic_model expects a 2D feature matrix.")
@@ -284,36 +284,6 @@ def _compute_local_instance_heatmap(
     return torch.from_numpy(positive_map)
 
 
-def _topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
-    target_cells = max(gt_mask.sum().item(), 1)
-    flattened = heatmap.reshape(-1)
-    topk_indices = torch.topk(flattened, k=min(target_cells, flattened.numel())).indices
-    predicted_mask = torch.zeros_like(flattened, dtype=torch.bool)
-    predicted_mask[topk_indices] = True
-    predicted_mask = predicted_mask.reshape_as(gt_mask)
-    intersection = torch.logical_and(predicted_mask, gt_mask).sum().item()
-    union = torch.logical_or(predicted_mask, gt_mask).sum().item()
-    if union == 0:
-        return 0.0
-    return float(intersection / union)
-
-
-def _normalize_heatmap(heatmap: Tensor | np.ndarray) -> Tensor:
-    tensor = torch.as_tensor(heatmap, dtype=torch.float32)
-    tensor = torch.clamp(tensor, min=0.0)
-    total = tensor.sum().item()
-    if total <= 0.0:
-        return torch.zeros_like(tensor)
-    return tensor / total
-
-
-def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
-    peak_index = torch.argmax(heatmap.reshape(-1)).item()
-    row_index = peak_index // heatmap.shape[1]
-    col_index = peak_index % heatmap.shape[1]
-    return float(gt_mask[row_index, col_index].item())
-
-
 def _spatial_result(
     count: int,
     overlap: float,
@@ -333,7 +303,6 @@ def evaluate_symbolic_spatial_metrics(
     matched_gt_boxes: Tensor | None,
     has_matched_gt: Tensor | None,
     gt_iou: Tensor | None,
-    random_state: int = 42,
     heatmap_mode: str = "leaf_only",
     min_proposal_iou: float = 0.0,
 ) -> dict[str, Any]:
@@ -350,15 +319,13 @@ def evaluate_symbolic_spatial_metrics(
     ):
         if not bool(has_matched_gt[index]):
             continue
-        if gt_iou is not None and float(gt_iou[index]) <= 0.0:
-            continue
         if gt_iou is not None and float(gt_iou[index]) < min_proposal_iou:
             continue
 
         heatmap = _compute_local_instance_heatmap(
             tree, feature_grids[index], mode=heatmap_mode
         )
-        normalized_heatmap = _normalize_heatmap(heatmap)
+        normalized_heatmap = normalize_heatmap(heatmap)
         gt_mask = project_gt_box_to_roi_grid(
             proposal_box=proposal_boxes[index],
             matched_gt_box=matched_gt_boxes[index],
@@ -367,8 +334,8 @@ def evaluate_symbolic_spatial_metrics(
         if gt_mask.sum().item() == 0:
             continue
 
-        overlap_scores.append(_topk_region_overlap(normalized_heatmap, gt_mask))
-        pointing_scores.append(_pointing_score(normalized_heatmap, gt_mask))
+        overlap_scores.append(topk_region_overlap(normalized_heatmap, gt_mask))
+        pointing_scores.append(pointing_score(normalized_heatmap, gt_mask))
 
     if not overlap_scores:
         return _spatial_result(0, _NAN, _NAN)

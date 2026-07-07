@@ -20,6 +20,7 @@ from PIL import Image
 from torch import Tensor
 
 from neuro.inference import load_checkpoint_model
+from util.visualization import image_to_array
 
 from .gradcam import GradCAM
 
@@ -122,7 +123,7 @@ def plot_gradcam_comparison(
         If provided, save the figure to this path.
     """
     if isinstance(image, Tensor):
-        image_np = image.detach().cpu().permute(1, 2, 0).clamp(0.0, 1.0).numpy()
+        image_np = image_to_array(image)
     else:
         image_np = np.array(image).astype(np.float32) / 255.0
 
@@ -220,7 +221,7 @@ def plot_gradcam_comparison(
             ).astype(np.float32)
             / 255.0
         )
-        ax_cam.imshow(heatmap_resized, cmap=_FIRE_CMAP, alpha=0.55, vmin=0, vmax=1)
+        ax_cam.imshow(heatmap_resized, cmap=_FIRE_CMAP, alpha=0.65, vmin=0, vmax=1)
         ax_cam.set_title("Grad-CAM", fontsize=11, loc="left", fontweight="bold")
         ax_cam.axis("off")
 
@@ -238,7 +239,7 @@ def plot_gradcam_comparison(
                 / 255.0
             )
             ax_sodt.imshow(crop)
-            ax_sodt.imshow(sodt_resized, cmap=_FIRE_CMAP, alpha=0.55, vmin=0, vmax=1)
+            ax_sodt.imshow(sodt_resized, cmap=_FIRE_CMAP, alpha=0.65, vmin=0, vmax=1)
             ax_sodt.set_title(
                 "SODT Evidence", fontsize=11, loc="left", fontweight="bold"
             )

@@ -9,9 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-
-def image_to_array(image_tensor: torch.Tensor) -> np.ndarray:
-    return image_tensor.detach().cpu().permute(1, 2, 0).clamp(0.0, 1.0).numpy()
+from util.visualization import image_to_array
 
 
 def heatmap_to_array(heatmap: torch.Tensor) -> np.ndarray:
@@ -24,7 +22,7 @@ def heatmap_to_array(heatmap: torch.Tensor) -> np.ndarray:
 
     # Remove noise entirely, but make the active area VERY opaque and bright
     # arr_norm ** 2.0 strongly suppresses background noise to yield sharp heatmaps.
-    alpha = np.where(arr_norm > 0.15, arr_norm**1.0, 0.0)
+    alpha = np.where(arr_norm > 0.15, arr_norm, 0.0)
     rgba[..., 3] = alpha
     return rgba
 
@@ -421,7 +419,7 @@ def draw_neurosymbolic_explanation(
         dimmer[..., 3] = 0.4  # 40% perfect black dimmer
         axis.imshow(dimmer)
         axis.imshow(
-            heatmap_to_array(node["projected_node_heatmap_on_detection_box"]),
+            heatmap_to_array(node["projected_node_heatmap_on_proposal_box"]),
             cmap="jet",
             vmin=0.0,
             vmax=1.0,

@@ -37,6 +37,7 @@ from tqdm import tqdm
 
 from neuro.faster_rcnn import NeuroFasterRCNN
 from util.geometry import project_gt_box_to_roi_grid
+from util.heatmap_metrics import normalize_heatmap, pointing_score, topk_region_overlap
 
 from .gradcam import GradCAM
 
@@ -86,35 +87,6 @@ def _match_proposals_to_gt(
         has_match[:, None], matched_boxes, torch.zeros_like(matched_boxes)
     )
     return matched_boxes, has_match, matched_iou
-
-
-def _normalize_heatmap(heatmap: Tensor) -> Tensor:
-    """Normalize a heatmap to a probability distribution."""
-    tensor = torch.clamp(heatmap.float(), min=0.0)
-    total = tensor.sum().item()
-    if total <= 0.0:
-        return torch.zeros_like(tensor)
-    return tensor / total
-
-
-def _pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
-    peak = torch.argmax(heatmap.reshape(-1)).item()
-    row = peak // heatmap.shape[1]
-    col = peak % heatmap.shape[1]
-    return float(gt_mask[row, col].item())
-
-
-def _topk_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
-    target_cells = max(int(gt_mask.sum().item()), 1)
-    flat = heatmap.reshape(-1)
-    k = min(target_cells, flat.numel())
-    topk_idx = torch.topk(flat, k=k).indices
-    pred_mask = torch.zeros_like(flat, dtype=torch.bool)
-    pred_mask[topk_idx] = True
-    pred_mask = pred_mask.reshape_as(gt_mask)
-    intersection = torch.logical_and(pred_mask, gt_mask).sum().item()
-    union = torch.logical_or(pred_mask, gt_mask).sum().item()
-    return float(intersection / union) if union > 0 else 0.0
 
 
 def _importance_ranking(heatmap: Tensor) -> Tensor:
@@ -190,7 +162,6 @@ def evaluate_gradcam(
     all_det_boxes: list[Tensor] = []
     all_matched_gt: list[Tensor] = []
     all_has_gt: list[Tensor] = []
-    all_gt_iou: list[Tensor] = []
     per_image_times: list[float] = []
 
     n_images = len(images)
@@ -317,14 +288,13 @@ def evaluate_gradcam(
 
         # Match detection boxes to GT.
         gt_boxes = target["boxes"]
-        matched_gt, has_gt, gt_iou = _match_proposals_to_gt(det_boxes, gt_boxes)
+        matched_gt, has_gt, _ = _match_proposals_to_gt(det_boxes, gt_boxes)
 
         all_pooled.append(pooled.detach().cpu())
         all_heatmaps.extend(heatmaps)
         all_det_boxes.append(det_boxes)
         all_matched_gt.append(matched_gt)
         all_has_gt.append(has_gt)
-        all_gt_iou.append(gt_iou)
         per_image_times.append(time.perf_counter() - t_img)
 
         # Free GPU memory between images.
@@ -350,7 +320,6 @@ def evaluate_gradcam(
     det_boxes_all = torch.cat(all_det_boxes, dim=0)
     matched_gt_all = torch.cat(all_matched_gt, dim=0)
     has_gt_all = torch.cat(all_has_gt, dim=0)
-    gt_iou_all = torch.cat(all_gt_iou, dim=0)
     N = pooled_all.shape[0]
 
     # Full (unmasked) neural classifier predictions.
@@ -446,11 +415,9 @@ def evaluate_gradcam(
     for i in range(N):
         if not bool(has_gt_all[i]):
             continue
-        if float(gt_iou_all[i]) <= 0.0:
-            continue
 
         heatmap = all_heatmaps[i]
-        norm_hm = _normalize_heatmap(heatmap)
+        norm_hm = normalize_heatmap(heatmap)
         gt_mask = project_gt_box_to_roi_grid(
             proposal_box=det_boxes_all[i],
             matched_gt_box=matched_gt_all[i],
@@ -459,8 +426,8 @@ def evaluate_gradcam(
         if gt_mask.sum().item() == 0:
             continue
 
-        overlap_scores.append(_topk_overlap(norm_hm, gt_mask))
-        pointing_scores.append(_pointing_score(norm_hm, gt_mask))
+        overlap_scores.append(topk_region_overlap(norm_hm, gt_mask))
+        pointing_scores.append(pointing_score(norm_hm, gt_mask))
 
     spatial_overlap = float(np.mean(overlap_scores)) if overlap_scores else _NAN
     spatial_pointing = float(np.mean(pointing_scores)) if pointing_scores else _NAN

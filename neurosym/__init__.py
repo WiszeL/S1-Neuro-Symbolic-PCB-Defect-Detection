@@ -1,5 +1,4 @@
 from .heatmap import (
-    aggregate_projected_heatmaps,
     compute_node_local_evidence_maps,
     compute_symbolic_heatmap,
     project_heatmap_to_image,
@@ -7,13 +6,11 @@ from .heatmap import (
 )
 from .hybrid import NeuroSymbolicDetector
 from .inference import (
-    aggregate_detection_heatmaps,
     explain_hybrid_detection,
     explain_hybrid_detections,
     load_neurosymbolic_detector,
     run_neurosymbolic_inference,
     select_detection_indices,
-    subset_detection,
 )
 from .visualization import (
     draw_neurosymbolic_explanation,
@@ -27,8 +24,6 @@ from .visualization import (
 
 __all__ = [
     "NeuroSymbolicDetector",
-    "aggregate_detection_heatmaps",
-    "aggregate_projected_heatmaps",
     "compute_node_local_evidence_maps",
     "compute_symbolic_heatmap",
     "explain_hybrid_detection",
@@ -38,7 +33,6 @@ __all__ = [
     "resize_heatmap_to_box",
     "run_neurosymbolic_inference",
     "select_detection_indices",
-    "subset_detection",
     "draw_neurosymbolic_explanation",
     "draw_numbered_detections",
     "draw_ground_truth_boxes",
