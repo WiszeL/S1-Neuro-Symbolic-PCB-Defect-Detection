@@ -122,18 +122,15 @@ class SparseObliqueDecisionTreeClassifier:
     def predict_leaf_indices_and_routing_confidence(
         self,
         features: np.ndarray,
-        temperature: float = 1.0,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Traverse the tree, returning leaf indices plus a routing confidence.
 
-        The confidence is the product of sigmoid(|node score| / temperature)
-        over the *active* nodes (nonzero weights) on each sample's path — the
-        margin to each decision hyperplane. Pruned nodes always score exactly
-        zero and would apply a uniform 0.5 factor to every sample, so they are
+        The confidence is the product of sigmoid(|node score|) over the
+        *active* nodes (nonzero weights) on each sample's path — the margin
+        to each decision hyperplane. Pruned nodes always score exactly zero
+        and would apply a uniform 0.5 factor to every sample, so they are
         excluded. Routing decisions are identical to predict_leaf_indices.
         """
-        if temperature <= 0.0:
-            raise ValueError("temperature must be positive.")
 
         features = self._prepare_features(features)
         leaf_indices = np.empty((features.shape[0],), dtype=np.int64)
@@ -150,9 +147,7 @@ class SparseObliqueDecisionTreeClassifier:
                 scores = self._score_features_by_node_indices(
                     chunk_features, node_indices
                 )
-                margin_confidence = 1.0 / (
-                    1.0 + np.exp(-np.abs(scores) / temperature)
-                )
+                margin_confidence = 1.0 / (1.0 + np.exp(-np.abs(scores)))
                 confidence *= np.where(
                     active_nodes[node_indices], margin_confidence, 1.0
                 )
