@@ -28,7 +28,7 @@ input (raw C×7×7 RoI Align grid), or its explanations.
 
 ## 2. The causal chain of fixes
 
-The four mechanisms, in the order they act in the pipeline:
+The three mechanisms, in the order they act in the pipeline:
 
 1. **Teacher-confidence weighting (TAO training).** Each RoI's contribution to the node-level
    L1-logistic reduced problems is scaled by the teacher's max softmax. RoIs where the teacher
@@ -41,8 +41,6 @@ The four mechanisms, in the order they act in the pipeline:
    the false-positive gains back). Result: `short` diagonal 453 → 457 (now beating the
    teacher's own 456) with no FP regression.
 3. **Routing-margin scoring (inference).** The key fix — see §3.
-4. **Temperature `T` (inference).** A scale inside the margin formula controlling how sharply
-   margins separate confident from borderline detections; `T = 1` was retained.
 
 ## 3. Routing-margin scoring — why it was *the* fix
 
@@ -69,26 +67,24 @@ Two downstream systems silently assume scores are a meaningful *ordering*, and b
 
 ### 3.2 The fix
 
-$$\text{score}(x) \;=\; p_{\text{leaf}}(c) \times \prod_{i \,\in\, \text{path}(x),\; w_i \neq 0} \sigma\!\left(\frac{\lvert w_i^\top x + b_i \rvert}{T}\right)$$
+$$\text{score}(x) \;=\; p_{\text{leaf}}(c) \times \prod_{i \,\in\, \text{path}(x),\; w_i \neq 0} \sigma\!\left(\lvert w_i^\top x + b_i \rvert\right)$$
 
 where the product runs over the *active* internal nodes on the RoI's root-to-leaf path
 (pruned all-zero nodes are skipped — their score is identically 0 and would only apply a
-uniform ×0.5 shrink), $p_{\text{leaf}}(c)$ is the leaf purity for the predicted class, and
-$T$ is a temperature.
+uniform ×0.5 shrink), and $p_{\text{leaf}}(c)$ is the leaf purity for the predicted class.
 
 Intuition, term by term:
 
 - $w_i^\top x + b_i$ is the signed distance of the RoI's feature vector to node $i$'s oblique
   hyperplane. Its *sign* decides left/right — that is the routing, and it is untouched.
   Its *magnitude* is the classical margin: how far the sample sits from the decision boundary.
-- $\sigma(|\cdot|/T) \in [0.5, 1)$ converts each margin into a per-node routing reliability:
+- $\sigma(|\cdot|) \in [0.5, 1)$ converts each margin into a per-node routing reliability:
   a sample far from the hyperplane (margin 5–13, typical for clean defects) contributes
   $\approx 1$; a sample skimming the boundary (margin $\approx 0$, typical for ambiguous
   boundary proposals) contributes $\approx 0.5$.
 - The product over the path is the natural conjunction: a prediction is only as trustworthy
   as its *least* confident routing decision. One near-tie anywhere on the path drags the
   score down; a path of confident splits keeps the leaf purity nearly intact.
-- $T$ rescales what counts as a "large" margin. $T = 1$ matched the observed margin scale.
 
 Why this is the *right* kind of fix for the thesis, not a hack:
 
