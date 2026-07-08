@@ -19,13 +19,11 @@ class NeuroSymbolicDetector(nn.Module):
         symbolic_tree: SparseObliqueDecisionTreeClassifier,
         device: str | None = None,
         use_routing_margin: bool = True,
-        routing_margin_temperature: float = 1.0,
     ) -> None:
         super().__init__()
         self.detector = detector
         self.symbolic_tree = symbolic_tree
         self.use_routing_margin = use_routing_margin
-        self.routing_margin_temperature = routing_margin_temperature
         self.device = select_device(device)
         if self.symbolic_tree.num_classes != self.detector.num_classes:
             raise ValueError(
@@ -47,7 +45,6 @@ class NeuroSymbolicDetector(nn.Module):
             leaf_indices, routing_confidence = (
                 self.symbolic_tree.predict_leaf_indices_and_routing_confidence(
                     feature_vectors,
-                    temperature=self.routing_margin_temperature,
                 )
             )
         else:
