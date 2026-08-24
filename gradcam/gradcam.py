@@ -19,8 +19,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -49,7 +47,6 @@ class GradCAM:
         self,
         model: NeuroFasterRCNN,
         device: str | torch.device = "cpu",
-        target_layer: Optional[str] = None,
     ) -> None:
         """Initialize Grad-CAM for the given Faster R-CNN model.
 
@@ -59,20 +56,15 @@ class GradCAM:
             The trained NeuroFasterRCNN detector. Must be in eval mode.
         device:
             Device to run computations on.
-        target_layer:
-            Which ResNet layer to hook for activation maps. Defaults to
-            ``"layer4"`` (the ``c5`` stage), which has the richest semantic
-            information before the neck.
         """
         self.model = model
         self.device = torch.device(device)
         self.model.to(self.device)
         self.model.eval()
 
-        # Resolve target layer — default to the last conv block of ResNet-50.
-        if target_layer is None:
-            target_layer = "layer4"
-        self._target_layer = self._resolve_layer(target_layer)
+        # Hooks into the last conv block of ResNet-50 (the c5 stage), which
+        # has the richest semantic information before the neck.
+        self._target_layer = self._resolve_layer("layer4")
 
         # Storage for hook outputs.
         self._activations: Tensor | None = None

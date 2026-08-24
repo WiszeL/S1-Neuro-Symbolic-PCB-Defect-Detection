@@ -3,7 +3,6 @@
 Provides functions to:
 1. Run Grad-CAM on Faster R-CNN detections and produce per-RoI heatmaps.
 2. Plot side-by-side comparisons: Grad-CAM vs SODT local evidence heatmaps.
-3. Run the full baseline pipeline from checkpoint + test images.
 """
 
 from __future__ import annotations
@@ -14,12 +13,10 @@ from typing import Any
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
-import torch
 from matplotlib.colors import LinearSegmentedColormap
 from PIL import Image
 from torch import Tensor
 
-from neuro.inference import load_checkpoint_model
 from util.visualization import image_to_array
 
 from .gradcam import GradCAM
@@ -249,91 +246,3 @@ def plot_gradcam_comparison(
     if save_path is not None:
         fig.savefig(str(save_path), dpi=200, bbox_inches="tight")
     return fig
-
-
-def run_gradcam_baseline(
-    checkpoint_path: str | Path,
-    model_config_path: str | Path = "neuro.yaml",
-    train_config_path: str | Path = "neuro_train.yaml",
-    image_paths: list[str | Path] | None = None,
-    score_threshold: float = 0.3,
-    output_size: tuple[int, int] = (7, 7),
-    device: str | None = None,
-    save_dir: str | Path | None = None,
-) -> list[list[dict[str, Any]]]:
-    """End-to-end Grad-CAM baseline: load model, run on images, plot results.
-
-    Parameters
-    ----------
-    checkpoint_path:
-        Path to the Faster R-CNN checkpoint (``.pt``).
-    model_config_path:
-        Path to ``neuro.yaml`` (relative to ``configs/``).
-    train_config_path:
-        Path to ``neuro_train.yaml`` (relative to ``configs/``).
-    image_paths:
-        List of image file paths to process.
-    score_threshold:
-        Minimum detection score.
-    output_size:
-        Per-RoI heatmap spatial size.
-    device:
-        Compute device.
-    save_dir:
-        If provided, save figures here.
-
-    Returns
-    -------
-    list[list[dict]]
-        Grad-CAM results per image.
-    """
-    from neuro.preprocess_dataset import test_preprocess
-    from util.config import load_yaml
-    from neuro.config import NeuroTrainConfig
-
-    model, _ = load_checkpoint_model(
-        checkpoint_path, model_config_path, train_config_path, device
-    )
-    train_config = load_yaml(train_config_path, NeuroTrainConfig)
-    class_names = tuple(train_config["dataset"]["class_names"])
-    preprocess = test_preprocess()
-
-    gradcam = GradCAM(model, device=str(next(model.parameters()).device))
-
-    all_results: list[list[dict[str, Any]]] = []
-    if image_paths is None:
-        image_paths = []
-
-    if save_dir is not None:
-        Path(save_dir).mkdir(parents=True, exist_ok=True)
-
-    for img_path in image_paths:
-        pil_image = Image.open(str(img_path)).convert("RGB")
-        image_tensor = preprocess(pil_image, {})[0]
-
-        # Run standard Faster R-CNN inference (no grad) for detection boxes.
-        with torch.inference_mode():
-            predictions = model([image_tensor.to(next(model.parameters()).device)])
-            prediction = {k: v.detach().cpu() for k, v in predictions[0].items()}
-
-        # Generate Grad-CAM heatmaps.
-        results = gradcam_for_detections(
-            gradcam, image_tensor, prediction, score_threshold, output_size
-        )
-        all_results.append(results)
-
-        # Plot.
-        fig = plot_gradcam_comparison(
-            image_tensor,
-            results,
-            class_names,
-            save_path=(
-                Path(save_dir) / f"{Path(img_path).stem}_gradcam.png"
-                if save_dir
-                else None
-            ),
-        )
-        plt.close(fig)
-
-    gradcam.release()
-    return all_results

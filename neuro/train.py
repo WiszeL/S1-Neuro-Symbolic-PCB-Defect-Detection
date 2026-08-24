@@ -182,6 +182,45 @@ def train_model(
     return history
 
 
+def _greedy_match_within_label(
+    predicted_boxes: Tensor,
+    prediction_scores: Tensor,
+    target_boxes: Tensor,
+    iou_threshold: float,
+) -> tuple[int, int, int]:
+    """Greedily match one label's predictions (highest score first) to
+    unclaimed target boxes above iou_threshold. Returns (true_positives,
+    false_positives, false_negatives) for just these boxes — the shared
+    core of count_detection_matches and _confusion_and_per_class, which
+    differ only in how they aggregate this result across labels."""
+    if predicted_boxes.numel() == 0:
+        return 0, 0, target_boxes.shape[0]
+    if target_boxes.numel() == 0:
+        return 0, predicted_boxes.shape[0], 0
+
+    predicted_boxes = predicted_boxes[
+        torch.argsort(prediction_scores, descending=True)
+    ]
+    ious = box_iou(predicted_boxes, target_boxes)
+    matched_targets: set[int] = set()
+    true_positives = 0
+    false_positives = 0
+
+    for row_index in range(predicted_boxes.shape[0]):
+        best_iou, best_target_index = ious[row_index].max(dim=0)
+        if (
+            best_iou.item() >= iou_threshold
+            and int(best_target_index) not in matched_targets
+        ):
+            matched_targets.add(int(best_target_index))
+            true_positives += 1
+        else:
+            false_positives += 1
+
+    false_negatives = target_boxes.shape[0] - len(matched_targets)
+    return true_positives, false_positives, false_negatives
+
+
 def count_detection_matches(
     prediction: dict[str, Tensor],
     target: dict[str, Tensor],
@@ -208,35 +247,15 @@ def count_detection_matches(
         prediction_indices = torch.where(filtered_prediction["labels"] == label)[0]
         target_indices = torch.where(target["labels"] == label)[0]
 
-        predicted_boxes = filtered_prediction["boxes"][prediction_indices]
-        target_boxes = target["boxes"][target_indices]
-
-        if predicted_boxes.numel() == 0:
-            false_negatives += target_boxes.shape[0]
-            continue
-        if target_boxes.numel() == 0:
-            false_positives += predicted_boxes.shape[0]
-            continue
-
-        prediction_scores = filtered_prediction["scores"][prediction_indices]
-        predicted_boxes = predicted_boxes[
-            torch.argsort(prediction_scores, descending=True)
-        ]
-        ious = box_iou(predicted_boxes, target_boxes)
-        matched_targets: set[int] = set()
-
-        for row_index in range(predicted_boxes.shape[0]):
-            best_iou, best_target_index = ious[row_index].max(dim=0)
-            if (
-                best_iou.item() >= iou_threshold
-                and int(best_target_index) not in matched_targets
-            ):
-                matched_targets.add(int(best_target_index))
-                true_positives += 1
-            else:
-                false_positives += 1
-
-        false_negatives += target_boxes.shape[0] - len(matched_targets)
+        tp, fp, fn = _greedy_match_within_label(
+            filtered_prediction["boxes"][prediction_indices],
+            filtered_prediction["scores"][prediction_indices],
+            target["boxes"][target_indices],
+            iou_threshold,
+        )
+        true_positives += tp
+        false_positives += fp
+        false_negatives += fn
 
     return true_positives, false_positives, false_negatives
 
@@ -316,32 +335,15 @@ def _confusion_and_per_class(
         label = int(label)
         pred_idx = torch.where(filtered["labels"] == label)[0]
         tgt_idx = torch.where(target["labels"] == label)[0]
-        pred_boxes = filtered["boxes"][pred_idx]
-        tgt_boxes = target["boxes"][tgt_idx]
 
-        if pred_boxes.numel() == 0:
-            cfn[label] = tgt_boxes.shape[0]
-            continue
-
-        if tgt_boxes.numel() == 0:
-            cfp[label] = pred_boxes.shape[0]
-            continue
-
-        scores = filtered["scores"][pred_idx]
-        srt = torch.argsort(scores, descending=True)
-        pred_boxes = pred_boxes[srt]
-        ious = box_iou(pred_boxes, tgt_boxes)
-        matched = set()
-
-        for r in range(pred_boxes.shape[0]):
-            best_iou, best_tgt = ious[r].max(dim=0)
-            if best_iou.item() >= iou_threshold and best_tgt.item() not in matched:
-                matched.add(best_tgt.item())
-                cp[label] += 1
-            else:
-                cfp[label] += 1
-
-        fn = tgt_boxes.shape[0] - len(matched)
+        tp, fp, fn = _greedy_match_within_label(
+            filtered["boxes"][pred_idx],
+            filtered["scores"][pred_idx],
+            target["boxes"][tgt_idx],
+            iou_threshold,
+        )
+        cp[label] = tp
+        cfp[label] = fp
         cfn[label] = fn
 
     conf = _global_confusion_matrix(

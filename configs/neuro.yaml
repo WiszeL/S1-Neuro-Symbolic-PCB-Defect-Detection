@@ -1,7 +1,6 @@
 net:
   backbone_pretrained: true
   backbone_freeze_batch_norm: true
-  neck_attention_reduction: 16
 
 anchors:
   sizes:

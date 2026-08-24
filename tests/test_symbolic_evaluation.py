@@ -8,7 +8,9 @@ from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 
 
 def test_insertion_step0_uses_real_zero_input_confidence():
-    tree = SparseObliqueDecisionTreeClassifier(max_depth=1, num_classes=2, input_dim=4)
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=1, num_classes=2, input_dim=4, feature_shape=(1, 2, 2)
+    )
     tree.node_weights[0] = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)
     tree.leaf_distributions[0] = np.array([0.1, 0.9], dtype=np.float32)
     tree.leaf_distributions[1] = np.array([0.9, 0.1], dtype=np.float32)
@@ -33,7 +35,9 @@ def test_insertion_step0_uses_real_zero_input_confidence():
 
 
 def test_degenerate_all_zero_tree_stays_flat():
-    tree = SparseObliqueDecisionTreeClassifier(max_depth=1, num_classes=2, input_dim=4)
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=1, num_classes=2, input_dim=4, feature_shape=(1, 2, 2)
+    )
     features = np.random.default_rng(1).random((5, 4)).astype(np.float32)
     preds = tree.predict(features)
 

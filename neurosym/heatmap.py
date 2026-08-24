@@ -122,39 +122,9 @@ def compute_symbolic_heatmap(
 ) -> dict[str, Any]:
     grid = _as_feature_grid(feature_grid)
     feature_vector = grid.reshape(-1)
+    # tree.decision_path is never empty here: SparseObliqueDecisionTreeClassifier
+    # rejects max_depth <= 0 at construction, so num_internal_nodes >= 1 always.
     path = tree.decision_path(feature_vector)
-
-    if not path:
-        zero_heatmap = np.zeros(grid.shape[-2:], dtype=np.float32)
-        return {
-            "heatmap": zero_heatmap,
-            "path": path,
-            "leaf_index": tree.leaf_index_for_feature(feature_vector),
-            "global_or_structural_density_map": zero_heatmap,
-            "local_instance_evidence_map": zero_heatmap,
-            "negative_local_evidence_map": zero_heatmap,
-            "signed_local_evidence_map": zero_heatmap,
-            "combined_local_evidence_map": zero_heatmap,
-            "reasoning_summary": {
-                "path_length": 0,
-                "active_path_original_feature_count": 0,
-                "mean_active_original_features_per_node": 0.0,
-                "map_types": {
-                    "global_or_structural_density_map": (
-                        "Intrinsic structural view of what the active symbolic path weights use in general."
-                    ),
-                    "local_instance_evidence_map": (
-                        "Intrinsic per-instance symbolic evidence for this RoI using the actual pooled feature values."
-                    ),
-                },
-            },
-            "node_summaries": [],
-            "top_positive_contributing_features": [],
-            "top_negative_contributing_features": [],
-            "top_structural_channels": [],
-            "top_positive_local_channels": [],
-            "top_negative_local_channels": [],
-        }
 
     # ---------------------------------------------------------------------
     # Gather the actual path weights in the original pooled-feature lattice
@@ -207,16 +177,16 @@ def compute_symbolic_heatmap(
         "signed_local_evidence_map": signed_local_evidence_map,
         "combined_local_evidence_map": combined_local_evidence_map,
     }
-    selected_mode = mode if mode in maps else "local_instance_evidence_map"
+    if mode not in maps:
+        raise ValueError(
+            f"Unknown symbolic heatmap mode {mode!r}. Expected one of {sorted(maps)}."
+        )
     path_summary = tree.summarize_path(feature_vector, path=path)
     path_trace = [
         {
             "node_index": int(step.node_index),
             "score": float(step.score),
             "went_left": bool(step.went_left),
-            "active_retained_feature_count": int(
-                tree.node_feature_indices(step.node_index).size
-            ),
             "active_original_feature_count": int(
                 tree.node_feature_indices(step.node_index).size
             ),
@@ -230,7 +200,7 @@ def compute_symbolic_heatmap(
     top_positive_local_channels = _top_channels(positive_local_channel_scores, top_k=8)
     top_negative_local_channels = _top_channels(negative_local_channel_scores, top_k=8)
     return {
-        "heatmap": maps[selected_mode],
+        "heatmap": maps[mode],
         "path": path,
         "path_trace": path_trace,
         "leaf_index": tree.leaf_index_for_feature(feature_vector),

@@ -1,3 +1,30 @@
+"""Symbolic (SODT) explanation-quality evaluation.
+
+Faithfulness perturbation protocol — shared with gradcam/evaluation.py so the
+two sides are directly comparable:
+
+  * unit:    one spatial cell of the pooled RoI-Align grid, ALL channels
+             zeroed/kept together (not a raw per-feature mask)
+  * ranking: each method's own heatmap over every cell in the grid
+  * budget:  identical cell counts and step schedule on both sides
+             (top-50% for sufficiency/necessity; k = s/steps * num_cells
+             for deletion/insertion)
+  * probe:   each explainer's own model — the SODT probes `tree.predict_proba`,
+             Grad-CAM probes the FRCNN box head. This is a self-consistency
+             check ("is the explanation faithful to what THIS model did"),
+             not a cross-model comparison.
+
+Note what this does NOT test: the SODT's decision is exactly reconstructible
+from its path (every node on the path has nonzero weight only inside its own
+feature set), so masking by "the tree's own active path features" would be
+tautologically sufficient/necessary by construction — that structural
+property is real but belongs in the thesis as a proposition, not a measured
+number next to Grad-CAM's. Masking by spatial cell — the same interface both
+the SODT and the FRCNN classifier head consume — avoids that trivially-true
+result and asks the intended question instead: is the *heatmap* (a lossy
+spatial rendering of the tree's decision) a faithful proxy for it.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -10,9 +37,15 @@ from tqdm import tqdm
 from .sodt import SparseObliqueDecisionTreeClassifier
 from util.features import ensure_float32
 from util.geometry import project_gt_box_to_roi_grid
-from util.heatmap_metrics import normalize_heatmap, pointing_score, topk_region_overlap
+from util.heatmap_metrics import (
+    importance_ranking,
+    normalize_heatmap,
+    pointing_score,
+    stratified_spatial_result,
+    topk_region_overlap,
+)
 
-_NAN = float("nan")
+_FAITHFULNESS_CELL_BUDGET_FRACTION = 0.5
 
 
 def _safe_macro_f1(
@@ -78,6 +111,29 @@ def _build_selected_mask(
     return mask
 
 
+def _row_cell_ranking(
+    tree: SparseObliqueDecisionTreeClassifier, feature_row: np.ndarray
+) -> np.ndarray:
+    """Spatial cells of the pooled grid (flattened H*W index), ranked by
+    descending importance under the tree's own leaf-node heatmap — the same
+    reduction the displayed explanations use (neurosym/heatmap.py's default
+    "leaf_only" mode)."""
+    grid = feature_row.reshape(tree.feature_shape)
+    heatmap = _compute_local_instance_heatmap(tree, grid, mode="leaf_only")
+    return importance_ranking(heatmap).cpu().numpy()
+
+
+def _full_channel_flat_indices(
+    cells: np.ndarray, feature_shape: tuple[int, int, int]
+) -> np.ndarray:
+    """Flat feature indices covering ALL channels at the given spatial
+    cells — the perturbation unit (one grid cell, every channel), matching
+    what gradcam/evaluation.py masks on the pooled features."""
+    channels, height, width = feature_shape
+    channel_offsets = (np.arange(channels) * height * width)[:, None]
+    return (channel_offsets + cells[None, :]).reshape(-1).astype(np.int64)
+
+
 def _deletion_insertion_auc(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
@@ -86,6 +142,13 @@ def _deletion_insertion_auc(
     steps: int = 10,
     random_state: int = 42,
 ) -> tuple[float, float]:
+    if tree.feature_shape is None:
+        raise ValueError(
+            "_deletion_insertion_auc requires tree.feature_shape to rank spatial cells."
+        )
+    _, height, width = tree.feature_shape
+    num_cells = height * width
+
     N, D = features.shape
     if N > num_samples:
         rng = np.random.default_rng(random_state)
@@ -97,21 +160,7 @@ def _deletion_insertion_auc(
     auc_features = features[indices]
     auc_preds = predictions[indices]
 
-    sorted_feats_list: list[np.ndarray] = []
-    path_lens: list[int] = []
-    for idx_idx in range(n):
-        feat = auc_features[idx_idx]
-        path_feats = tree.path_feature_indices(feat)
-        m = len(path_feats)
-        path_lens.append(m)
-        if m == 0:
-            sorted_feats_list.append(np.array([], dtype=np.int64))
-            continue
-        path = tree.decision_path(feat)
-        importance = np.zeros(D, dtype=np.float64)
-        for step_node in path:
-            importance += np.abs(tree.node_weights[step_node.node_index])
-        sorted_feats_list.append(path_feats[np.argsort(importance[path_feats])[::-1]])
+    cell_rankings = [_row_cell_ranking(tree, auc_features[i]) for i in range(n)]
 
     deletion_curves = np.ones((n, steps + 1))
     insertion_curves = np.zeros((n, steps + 1))
@@ -130,17 +179,18 @@ def _deletion_insertion_auc(
         del_batch = auc_features[batch_start:batch_end].copy()
         ins_batch = np.zeros_like(del_batch)
         for s in range(1, steps + 1):
+            k = int(s / steps * num_cells)
             for bi in range(B):
                 gi = batch_start + bi
-                m = path_lens[gi]
-                if m == 0:
-                    continue
-                k = int(s / steps * m)
-                sorted_feats = sorted_feats_list[gi]
+                top_cells = cell_rankings[gi][:k]
+                flat_indices = _full_channel_flat_indices(
+                    top_cells, tree.feature_shape
+                )
+
                 del_batch[bi] = auc_features[gi].copy()
-                del_batch[bi, sorted_feats[:k]] = 0.0
+                del_batch[bi, flat_indices] = 0.0
                 ins_batch[bi] = 0.0
-                ins_batch[bi, sorted_feats[:k]] = auc_features[gi, sorted_feats[:k]]
+                ins_batch[bi, flat_indices] = auc_features[gi, flat_indices]
 
             del_probs = tree.predict_proba(del_batch)
             ins_probs = tree.predict_proba(ins_batch)
@@ -165,8 +215,16 @@ def evaluate_symbolic_model(
     labels = np.asarray(teacher_labels, dtype=np.int64)
     if features.ndim != 2:
         raise ValueError("evaluate_symbolic_model expects a 2D feature matrix.")
+    if tree.feature_shape is None:
+        raise ValueError(
+            "evaluate_symbolic_model requires tree.feature_shape to rank spatial cells."
+        )
 
     N, D = features.shape
+    _, grid_height, grid_width = tree.feature_shape
+    cell_budget = max(
+        int(grid_height * grid_width * _FAITHFULNESS_CELL_BUDGET_FRACTION), 1
+    )
 
     # Pre-allocate output arrays for N samples
     predictions = np.empty(N, dtype=np.int64)
@@ -192,11 +250,16 @@ def evaluate_symbolic_model(
         batch_conf = probabilities[batch_row_range, batch_preds]
         predictions[start_idx:end_idx] = batch_preds
 
-        # --- collect path feature indices per row ---
+        # --- rank spatial cells by the tree's own heatmap (same protocol
+        # as gradcam/evaluation.py), then mask the top cell_budget cells
+        # across ALL channels — see the module docstring above ---
         selected_per_row: list[np.ndarray] = []
         for i in range(B):
-            sel = tree.path_feature_indices(batch_features[i])
-            selected_per_row.append(sel)
+            ranking = _row_cell_ranking(tree, batch_features[i])
+            top_cells = ranking[:cell_budget]
+            selected_per_row.append(
+                _full_channel_flat_indices(top_cells, tree.feature_shape)
+            )
 
         # --- build boolean mask and masked feature matrices ---
         selected_mask = _build_selected_mask(B, D, selected_per_row)
@@ -284,18 +347,6 @@ def _compute_local_instance_heatmap(
     return torch.from_numpy(positive_map)
 
 
-def _spatial_result(
-    count: int,
-    overlap: float,
-    pointing: float,
-) -> dict[str, Any]:
-    return {
-        "evaluated_roi_count": count,
-        "box_grounded_roi_overlap": overlap,
-        "pointing_score": pointing,
-    }
-
-
 def evaluate_symbolic_spatial_metrics(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_grids: Tensor | np.ndarray,
@@ -307,10 +358,11 @@ def evaluate_symbolic_spatial_metrics(
     min_proposal_iou: float = 0.0,
 ) -> dict[str, Any]:
     if matched_gt_boxes is None or has_matched_gt is None:
-        return _spatial_result(0, _NAN, _NAN)
+        return stratified_spatial_result([], [], [])
 
     overlap_scores: list[float] = []
     pointing_scores: list[float] = []
+    gt_coverage: list[float] = []
 
     for index in tqdm(
         range(feature_grids.shape[0]),
@@ -336,12 +388,6 @@ def evaluate_symbolic_spatial_metrics(
 
         overlap_scores.append(topk_region_overlap(normalized_heatmap, gt_mask))
         pointing_scores.append(pointing_score(normalized_heatmap, gt_mask))
+        gt_coverage.append(float(gt_mask.float().mean().item()))
 
-    if not overlap_scores:
-        return _spatial_result(0, _NAN, _NAN)
-
-    return _spatial_result(
-        len(overlap_scores),
-        float(np.mean(overlap_scores)),
-        float(np.mean(pointing_scores)),
-    )
+    return stratified_spatial_result(overlap_scores, pointing_scores, gt_coverage)

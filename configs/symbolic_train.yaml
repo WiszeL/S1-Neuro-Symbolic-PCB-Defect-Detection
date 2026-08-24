@@ -1,6 +1,13 @@
 data:
   neg_ratio: 2
   storage_dtype: float16
+  # Image-level model-selection split of the trainval export. null = full
+  # dump (used for the final promoted training run, after the val sweep in
+  # notebooks/03 has picked tree_depth/l1_lambda/sparsity_alpha/class_weights).
+  # "train"/"val" are set by the sweep cells, not here.
+  split: null
+  val_fraction: 0.2
+  split_seed: 0
 
 search:
   tree_depth: 6
@@ -11,11 +18,10 @@ search:
   tolerance: 0.0001
   zero_threshold: 0.00001
   random_state: 112
-  # Upweight the classes with the worst FN counts (short 23, spur 13 on test).
-  # Background stays 1.0 to avoid trading the FP gains back.
+  # Upweight the classes with the worst FN counts. Background stays 1.0 to
+  # avoid trading the FP gains back. These weights, along with tree_depth/
+  # l1_lambda/sparsity_alpha above, are selected on the val split
+  # (notebooks/03) — not on test.txt.
   class_weights:
     short: 2.0
     spur: 1.5
-  # Fallback: weight TAO samples by teacher softmax confidence. Off — class
-  # weighting + routing-margin scoring carry the result without it.
-  use_teacher_weighting: true

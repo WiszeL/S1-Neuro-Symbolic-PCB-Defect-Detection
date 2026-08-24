@@ -167,16 +167,17 @@ class SFPSPyramid(nn.Module):
         weights: one for semantic content and one for spatial detail.
         """
 
-        def __init__(
-            self,
-            channels: int,
-            reduction: int = 16,
-            min_hidden_channels: int = 32,
-        ) -> None:
+        # An SE-style reduction ratio isn't meaningful at the neck's 64-channel
+        # width (see SFPSPyramid.OUT_CHANNELS) — dividing by any realistic
+        # ratio still floors out at this same hidden size, so it's fixed
+        # directly rather than exposed as a config knob that can't actually
+        # change anything.
+        HIDDEN_CHANNELS = 32
+
+        def __init__(self, channels: int) -> None:
             super().__init__()
-            hidden_channels = max(channels // reduction, min_hidden_channels)
-            self.compress = nn.Linear(channels, hidden_channels)
-            self.expand = nn.Linear(hidden_channels, channels * 2)
+            self.compress = nn.Linear(channels, self.HIDDEN_CHANNELS)
+            self.expand = nn.Linear(self.HIDDEN_CHANNELS, channels * 2)
             self.activation = nn.ReLU(inplace=True)
 
         def forward(self, semantic_feature: Tensor, spatial_feature: Tensor) -> Tensor:
@@ -204,7 +205,7 @@ class SFPSPyramid(nn.Module):
     # pooled RoI features; the two must change together.
     OUT_CHANNELS = 64
 
-    def __init__(self, attention_reduction: int = 16) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.out_channels = self.OUT_CHANNELS
 
@@ -215,14 +216,8 @@ class SFPSPyramid(nn.Module):
         self.c4_to_p3 = self.CPBlock(1024, self.OUT_CHANNELS)
         self.c3_to_p2 = self.CPBlock(512, self.OUT_CHANNELS)
 
-        self.p3_attention = self.SFAttention(
-            self.OUT_CHANNELS,
-            reduction=attention_reduction,
-        )
-        self.p2_attention = self.SFAttention(
-            self.OUT_CHANNELS,
-            reduction=attention_reduction,
-        )
+        self.p3_attention = self.SFAttention(self.OUT_CHANNELS)
+        self.p2_attention = self.SFAttention(self.OUT_CHANNELS)
 
     def forward(self, stages: dict[str, Tensor]) -> FeatureMap:
         """Build p2-p6 exactly from the c2-c5 ResNet stage maps."""
@@ -270,14 +265,13 @@ class BackboneWithNeck(nn.Module):
         self,
         pretrained: bool = True,
         freeze_batch_norm: bool = True,
-        attention_reduction: int = 16,
     ) -> None:
         super().__init__()
         self.extractor = ResNet50Extractor(
             pretrained=pretrained,
             freeze_batch_norm=freeze_batch_norm,
         )
-        self.neck = SFPSPyramid(attention_reduction=attention_reduction)
+        self.neck = SFPSPyramid()
         self.out_channels = self.neck.out_channels
 
     def forward(self, images: Tensor) -> FeatureMap:
@@ -561,7 +555,6 @@ class NeuroFasterRCNN(nn.Module):
         self.backbone = BackboneWithNeck(
             pretrained=neuro_config["net"]["backbone_pretrained"],
             freeze_batch_norm=neuro_config["net"]["backbone_freeze_batch_norm"],
-            attention_reduction=neuro_config["net"]["neck_attention_reduction"],
         )
         self.rpn = L1RegionProposalNetwork.build(
             self.backbone.out_channels,

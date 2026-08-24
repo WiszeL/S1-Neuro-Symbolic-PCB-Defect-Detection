@@ -7,6 +7,10 @@ This repository contains two layers of the thesis codebase:
 
 The Faster R-CNN baseline remains intact and is treated as a frozen teacher for the symbolic stage.
 
+See `WHAT-I-DID.md` for the chronological narrative of this work — the problem it addresses,
+what was built, what broke, how it was diagnosed and fixed, and what the final results do and
+do not claim.
+
 What is intentionally not implemented:
 - No referential/template-based detector
 - No TDD dataset pipeline
@@ -19,12 +23,12 @@ What is intentionally not implemented:
 - `neuro/`: pure Faster R-CNN baseline code
   - `prepare_dataset.py`: DeepPCB dataset records, image loading, and torchvision `BoundingBoxes` target preparation
   - `preprocess_dataset.py`: torchvision-native train/eval preprocessing and Faster R-CNN input preprocessing
-- `symbolic/`: strict teacher-student export, symbolic dataset handling, sparse oblique tree, and TAO training
+- `symbolic/`: strict teacher-student export, symbolic dataset handling (including the train/val image split used for hyperparameter selection, see Reproducibility Notes), sparse oblique tree, and TAO training
 - `neurosym/`: frozen-detector + symbolic-classifier hybrid inference and symbolic heatmaps
 - `gradcam/`: Grad-CAM baseline (backbone hook, evaluation metrics, comparison plots) used as an XAI reference point against the symbolic heatmaps
-- `util/`: shared helpers used across `neuro`/`symbolic`/`neurosym`/`gradcam` — device/seed/config/IO, `geometry.py` (GT-to-RoI-grid projection), `heatmap_metrics.py` (normalize/pointing-score/top-k overlap), `visualization.py` (tensor-to-image), `artifacts.py` (run numbering)
+- `util/`: shared helpers used across `neuro`/`symbolic`/`neurosym`/`gradcam` — `device.py`/`seed.py`/`config.py`/`io.py`/`features.py`, `geometry.py` (GT-to-RoI-grid projection), `heatmap_metrics.py` (normalize/pointing-score/top-k overlap/importance-ranking/random-baseline/stratified spatial results — shared by the symbolic and Grad-CAM evaluators so both sides use identical logic), `visualization.py` (tensor-to-image), `artifacts.py` (run numbering)
 - `dataset/DeepPCB/`: raw DeepPCB structure with `trainval.txt`, `test.txt`, `groupXXXXX/`, and `*_not/`
-- `checkpoints/`: model artifacts and metric/history files. Auto-numbered runs use `runN.pt`/`runN_metrics.json`; checkpoints promoted as the reference result are copied to `BESTEST.pt` (neuro) or `BEST_N.pt` (symbolic)
+- `checkpoints/`: model artifacts and metric/history files. Auto-numbered runs use `runN.pt`/`runN_metrics.json`; checkpoints promoted as the reference result are copied to `NEWBEST.pt` (both `neuro/` and `symbolic/`)
 - `tests/`: smoke checks (plain `assert`-based, runnable via `pytest` or directly with `python tests/test_X.py`)
 
 ## Environment Assumptions
@@ -65,8 +69,12 @@ The notebooks are orchestration-only. Core logic lives under `neuro/`, `symbolic
 - The paper specifies the multi-scale sizes, optimizer family, warmup, epochs, random flip, Soft-NMS threshold, and RPN anchor IoU rules. Those are reflected directly in the YAML files.
 - The paper does not fully specify numeric label ordering, batch size, exact anchor sizes, backbone pretraining, or some module internals. Those are explicit assumptions in the configs and notebook notes.
 - The current default assumes ImageNet-pretrained ResNet-50 weights with frozen backbone batch norms, which is a practical small-batch detection assumption rather than an explicitly stated paper detail.
-- Each completed training run is saved once as `checkpoints/<split>/runN.pt` plus `runN_metrics.json`/`runN_train_history.json` (`util/artifacts.py` picks the next `N`). Reference checkpoints are then copied to a stable name (`BESTEST.pt` for neuro, `BEST_N.pt` for symbolic) so notebooks can point at a fixed path across reruns.
+- **SF-PSPyramid output width is 64 channels; Fung et al. specify 256.** This is a deliberate cross-stage design choice, not a memory shortcut: TAO's per-node reduced problem is an L1-logistic fit capped at 30,000 samples (`symbolic/tao.py`), and at 256ch (D=12544) that puts the samples-per-feature ratio at ≈2.4 — well below the region where a regularized logistic fit is well-posed. At 64ch (D=3136) the ratio is ≈9.6. Narrowing the neck keeps TAO's node fits well-posed and the resulting splits sparse and interpretable, which is the actual objective of the symbolic stage. The consequence: the neck architecture (SF-PSPyramid topology, no-lateral-connection rule, L1 regression loss on both heads, Soft-NMS, multi-scale training) is reproduced faithfully, but absolute AP numbers are **not** directly comparable to Fung et al.'s Table 1/3/4 — those were measured at 256ch. The internal three-way comparison (Faster R-CNN vs NeSy vs Grad-CAM in `notebooks/06`) is unaffected, since all three legs run on the same 64ch teacher checkpoint.
+- `configs/neuro_train.yaml` trains for 15 epochs; the paper specifies 12. Given the neck-width deviation above already scopes the AP comparison to architecture-only, this is disclosed rather than matched exactly.
+- Each completed training run is saved once as `checkpoints/<split>/runN.pt` plus `runN_metrics.json`/`runN_train_history.json` (`util/artifacts.py` picks the next `N`). Reference checkpoints are then copied to a stable name (`NEWBEST.pt`, both `neuro/` and `symbolic/`) so notebooks can point at a fixed path across reruns.
+- **SODT hyperparameter selection uses a held-out validation split**, not `test.txt`. `symbolic/dataset.py::_image_level_split_row_indices` deterministically partitions the `trainval` export's *images* (not RoIs) into `train`/`val` (default 80/20, seeded by `split_seed`), governed by the `data.split`/`data.val_fraction`/`data.split_seed` keys in `configs/symbolic_train.yaml`. `notebooks/03_train_symbolic_sodt.ipynb`'s "Hyperparameter Selection" section sweeps `tree_depth`/`l1_lambda`/`sparsity_alpha`/`class_weights` on `train`→`val`, following Hada §4 step 1 ("pick a tree with close to highest validation accuracy and as sparse as possible") and Kairgeldin's (λ, α) regularization-path selection. The selected config is then trained once on the full `trainval` dump and evaluated exactly once on `test.txt`. Note the frozen Faster R-CNN teacher itself trains on all of `trainval` (its own hyperparameters follow Fung et al. directly, with the two disclosed deviations above), so `val` is a model-selection split for the student, not an independent generalization estimate — `test.txt` remains the only split neither stage has seen.
 - The SODT checkpoint (`tree_state` + `metrics` + `history` + `export_path` + `training_config`) intentionally does not repeat `class_names`/`feature_shape`/`tree_depth`/`l1_lambda`/`sparsity_alpha` at the top level — those live once in `tree_state`/`training_config`. The paired `*_metrics.json` keeps them at the top level too, since it's meant to be read without loading the tensor payload.
 - Strict symbolic teacher exports use pooled RoI grids from `box_roi_pool`, not the post-MLP RoI embeddings.
 - The symbolic tree is trained offline with TAO-style alternating updates, using the frozen detector's teacher labels on pre-postprocess RoIs.
 - Heatmaps in `neurosym/` are derived from the sparse oblique tree path weights reshaped back onto the pooled RoI grid, not from Grad-CAM or another post-hoc saliency method.
+- The symbolic and Grad-CAM faithfulness/spatial metrics (`symbolic/evaluation.py`, `gradcam/evaluation.py`) follow a shared perturbation protocol — one 7×7 grid cell (all channels) per unit, ranked by each method's own heatmap, identical cell budgets, each side probing its own model — so the two are directly comparable. See the module docstrings in those files for the full rationale.

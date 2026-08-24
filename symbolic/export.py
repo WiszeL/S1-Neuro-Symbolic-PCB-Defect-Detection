@@ -33,20 +33,15 @@ def _storage_dtypes(storage_dtype: str) -> tuple[torch.dtype, np.dtype[Any]]:
 def _match_proposals_to_ground_truth(
     proposal_boxes: torch.Tensor,
     target_boxes: torch.Tensor,
-    target_labels: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
     target_boxes = target_boxes.to(
         device=proposal_boxes.device, dtype=proposal_boxes.dtype
     )
-    target_labels = target_labels.to(device=proposal_boxes.device, dtype=torch.int64)
 
     if proposal_boxes.numel() == 0:
         return {
             "matched_gt_boxes": torch.zeros(
                 (0, 4), dtype=torch.float32, device=proposal_boxes.device
-            ),
-            "matched_gt_labels": torch.zeros(
-                (0,), dtype=torch.int64, device=proposal_boxes.device
             ),
             "matched_gt_iou": torch.zeros(
                 (0,), dtype=torch.float32, device=proposal_boxes.device
@@ -62,9 +57,6 @@ def _match_proposals_to_ground_truth(
             "matched_gt_boxes": torch.zeros(
                 (num_boxes, 4), dtype=torch.float32, device=proposal_boxes.device
             ),
-            "matched_gt_labels": torch.zeros(
-                (num_boxes,), dtype=torch.int64, device=proposal_boxes.device
-            ),
             "matched_gt_iou": torch.zeros(
                 (num_boxes,), dtype=torch.float32, device=proposal_boxes.device
             ),
@@ -76,21 +68,14 @@ def _match_proposals_to_ground_truth(
     overlaps = box_iou(proposal_boxes, target_boxes)
     matched_iou, matched_indices = overlaps.max(dim=1)
     matched_boxes = target_boxes[matched_indices]
-    matched_labels = target_labels[matched_indices]
     has_match = matched_iou > 0
     matched_boxes = torch.where(
         has_match[:, None],
         matched_boxes,
         torch.zeros_like(matched_boxes),
     )
-    matched_labels = torch.where(
-        has_match,
-        matched_labels,
-        torch.zeros_like(matched_labels),
-    )
     return {
         "matched_gt_boxes": matched_boxes,
-        "matched_gt_labels": matched_labels,
         "matched_gt_iou": matched_iou,
         "has_matched_gt": has_match,
     }
@@ -108,7 +93,6 @@ def _build_symbolic_record(
     matched_ground_truth = _match_proposals_to_ground_truth(
         proposal_boxes=proposal_boxes,
         target_boxes=target["boxes"],
-        target_labels=target["labels"],
     )
 
     record: dict[str, Any] = {

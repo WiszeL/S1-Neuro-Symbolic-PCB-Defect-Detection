@@ -93,12 +93,18 @@ def _load_symbolic_data(
     export_path: str | Path,
     random_state: int = 42,
     neg_ratio: float | None = None,
+    split: str | None = None,
+    val_fraction: float = 0.2,
+    split_seed: int = 0,
 ) -> tuple[Any, Any, Any]:
     bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
         random_state=random_state,
         feature_dtype="float32",
         neg_ratio=neg_ratio,
+        split=split,
+        val_fraction=val_fraction,
+        split_seed=split_seed,
     )
     feature_matrix = bundle.feature_vectors
     labels = bundle.teacher_labels.detach().cpu().numpy()
@@ -188,7 +194,18 @@ def evaluate_heldout(
     export_path: str | Path,
     checkpoint_path: str | Path,
     random_state: int = 42,
+    split: str | None = None,
+    val_fraction: float = 0.2,
+    split_seed: int = 0,
 ) -> dict[str, Any]:
+    """Evaluate a checkpoint on an export dump.
+
+    With ``split=None`` (default), evaluates on the full dump — this is the
+    single final `test.txt` evaluation. Pass ``split="val"`` against the
+    *trainval* export to score a hyperparameter candidate during model
+    selection instead (see notebooks/03's val sweep); ``split="train"``
+    evaluates on the complementary slice.
+    """
     print(f"Loading heldout evaluation data from {export_path}...", flush=True)
     t0 = perf_counter()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
@@ -196,6 +213,9 @@ def evaluate_heldout(
     bundle, feature_matrix, labels = _load_symbolic_data(
         export_path,
         random_state=random_state,
+        split=split,
+        val_fraction=val_fraction,
+        split_seed=split_seed,
     )
     print(
         f"Loaded {feature_matrix.shape[0]:,} samples in {_format_duration(perf_counter() - t0)}",
@@ -238,6 +258,9 @@ def train_symbolic_tree(
         export_path,
         random_state=sodt_config["random_state"],
         neg_ratio=data_config.get("neg_ratio"),
+        split=data_config.get("split"),
+        val_fraction=float(data_config.get("val_fraction", 0.2)),
+        split_seed=int(data_config.get("split_seed", 0)),
     )
     print(
         f"Symbolic training data ready in {_format_duration(perf_counter() - load_start_time)}.",
@@ -313,24 +336,6 @@ def train_symbolic_tree(
         tree_depth=sodt_config["tree_depth"],
     )
 
-    # Optional confidence-weighted TAO: downweights samples where the
-    # teacher's softmax was uncertain. Off by default — the ablation showed
-    # class weighting + routing-margin scoring carry the result; kept as a
-    # fallback switch.
-    use_teacher_weighting = bool(config["search"].get("use_teacher_weighting", False))
-    teacher_confidence_np: np.ndarray | None = None
-    if use_teacher_weighting and bundle.teacher_confidence is not None:
-        teacher_confidence_np = (
-            bundle.teacher_confidence.detach().cpu().numpy().astype(np.float32)
-        )
-        print(
-            f"Teacher confidence weighting enabled: "
-            f"mean={teacher_confidence_np.mean():.4f}, "
-            f"min={teacher_confidence_np.min():.4f}, "
-            f"max={teacher_confidence_np.max():.4f}",
-            flush=True,
-        )
-
     class_weights_config = config["search"].get("class_weights")
     class_weights_np: np.ndarray | None = None
     if class_weights_config:
@@ -361,7 +366,6 @@ def train_symbolic_tree(
         show_progress=False,
         progress_callback=_on_iteration,
         node_progress_callback=_on_node,
-        teacher_confidence=teacher_confidence_np,
         class_weights=class_weights_np,
     )
 
@@ -383,7 +387,6 @@ def train_symbolic_tree(
         "training_config": {
             **sodt_config,
             "neg_ratio": data_config.get("neg_ratio"),
-            "use_teacher_weighting": use_teacher_weighting,
             "class_weights": dict(class_weights_config)
             if class_weights_config
             else None,
@@ -506,26 +509,7 @@ def prune_symbolic_tree(
     torch.save(artifact, checkpoint_path)
     print("Saving checkpoint... done")
 
-    if summary_path is not None:
-        ensure_dir(Path(summary_path).parent)
-        save_json(
-            {
-                "export_path": str(export_path),
-                "output_path": str(checkpoint_path),
-                "metrics": tree_metrics,
-                "history": history,
-                "class_names": bundle.class_names,
-                "feature_shape": bundle.feature_shape,
-                "tree_depth": tree_depth,
-                "l1_lambda": l1_lambda,
-                "sparsity_alpha": sparsity_alpha,
-                "training_config": training_config,
-            },
-            summary_path,
-        )
-        print("Saving metrics... done")
-
-    return {
+    summary = {
         "export_path": str(export_path),
         "output_path": str(checkpoint_path),
         "metrics": tree_metrics,
@@ -537,3 +521,10 @@ def prune_symbolic_tree(
         "sparsity_alpha": sparsity_alpha,
         "training_config": training_config,
     }
+
+    if summary_path is not None:
+        ensure_dir(Path(summary_path).parent)
+        save_json(summary, summary_path)
+        print("Saving metrics... done")
+
+    return summary

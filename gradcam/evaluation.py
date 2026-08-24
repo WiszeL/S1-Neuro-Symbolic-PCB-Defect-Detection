@@ -21,6 +21,14 @@ for Grad-CAM heatmaps:
 All feature-level metrics use the *neural* classifier's probabilities on
 masked/unmasked pooled features, ensuring the metrics measure how well the
 Grad-CAM heatmap explains the *same* model that produced it.
+
+Perturbation protocol — shared with symbolic/evaluation.py so the two sides
+are directly comparable: one 7x7 grid cell (all channels) per unit, ranked
+by each method's own heatmap via util.heatmap_metrics.importance_ranking,
+identical cell budget (top-50% for sufficiency/necessity) and step schedule
+(k = s/steps * num_cells for deletion/insertion). Each side probes its own
+model — this is a faithfulness check, not a cross-model comparison. See
+symbolic/evaluation.py's module docstring for why that split matters.
 """
 
 from __future__ import annotations
@@ -37,7 +45,13 @@ from tqdm import tqdm
 
 from neuro.faster_rcnn import NeuroFasterRCNN
 from util.geometry import project_gt_box_to_roi_grid
-from util.heatmap_metrics import normalize_heatmap, pointing_score, topk_region_overlap
+from util.heatmap_metrics import (
+    importance_ranking,
+    normalize_heatmap,
+    pointing_score,
+    stratified_spatial_result,
+    topk_region_overlap,
+)
 
 from .gradcam import GradCAM
 
@@ -89,11 +103,6 @@ def _match_proposals_to_gt(
     return matched_boxes, has_match, matched_iou
 
 
-def _importance_ranking(heatmap: Tensor) -> Tensor:
-    """Return spatial indices (0..48) sorted by descending heatmap value."""
-    return torch.argsort(heatmap.reshape(-1), descending=True)
-
-
 # ──────────────────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────────────────
@@ -104,12 +113,12 @@ def evaluate_gradcam(
     gradcam: GradCAM,
     images: list[Tensor],
     targets: list[dict[str, Tensor]],
-    class_names: tuple[str, ...],
     score_threshold: float = 0.3,
     num_images: int | None = None,
     num_samples: int = 2000,
     deletion_insertion_steps: int = 10,
     random_state: int = 42,
+    min_proposal_iou: float = 0.0,
 ) -> dict[str, Any]:
     """Evaluate Grad-CAM explanation quality over a set of images.
 
@@ -123,8 +132,6 @@ def evaluate_gradcam(
         List of preprocessed image tensors ``[3, H, W]``.
     targets:
         Corresponding annotation dicts with ``boxes`` and ``labels``.
-    class_names:
-        Tuple of class names (excluding background).
     score_threshold:
         Minimum detection score to include a detection in evaluation.
     num_images:
@@ -136,6 +143,11 @@ def evaluate_gradcam(
         Number of intermediate steps for the deletion/insertion curves.
     random_state:
         Seed for the subsampling RNG.
+    min_proposal_iou:
+        Minimum GT-match IoU for a detection to enter the spatial metrics.
+        Pass the same value given to evaluate_symbolic_spatial_metrics so
+        the two sides' spatial numbers are computed over comparably
+        GT-aligned populations, not one filtered and one not.
 
     Returns
     -------
@@ -144,7 +156,9 @@ def evaluate_gradcam(
         ``necessity_prediction_flip_rate``,
         ``deletion_auc``, ``insertion_auc``,
         ``pointing_score``, ``box_grounded_roi_overlap``,
-        ``evaluated_roi_count``, ``total_detections``.
+        ``evaluated_roi_count``, ``total_detections``,
+        ``low_gt_coverage`` (same three spatial keys, restricted to RoIs
+        whose GT box covers less of the grid — see stratified_spatial_result).
     """
     rng_img = np.random.default_rng(random_state)
     if num_images is not None and num_images < len(images):
@@ -162,6 +176,7 @@ def evaluate_gradcam(
     all_det_boxes: list[Tensor] = []
     all_matched_gt: list[Tensor] = []
     all_has_gt: list[Tensor] = []
+    all_matched_iou: list[Tensor] = []
     per_image_times: list[float] = []
 
     n_images = len(images)
@@ -288,9 +303,10 @@ def evaluate_gradcam(
 
         # Match detection boxes to GT.
         gt_boxes = target["boxes"]
-        matched_gt, has_gt, _ = _match_proposals_to_gt(det_boxes, gt_boxes)
+        matched_gt, has_gt, matched_iou = _match_proposals_to_gt(det_boxes, gt_boxes)
 
         all_pooled.append(pooled.detach().cpu())
+        all_matched_iou.append(matched_iou)
         all_heatmaps.extend(heatmaps)
         all_det_boxes.append(det_boxes)
         all_matched_gt.append(matched_gt)
@@ -302,14 +318,13 @@ def evaluate_gradcam(
             torch.cuda.empty_cache()
 
     if not all_pooled:
+        empty_spatial = stratified_spatial_result([], [], [])
         return {
             "sufficiency_prediction_preservation": _NAN,
             "necessity_prediction_flip_rate": _NAN,
             "deletion_auc": _NAN,
             "insertion_auc": _NAN,
-            "pointing_score": _NAN,
-            "box_grounded_roi_overlap": _NAN,
-            "evaluated_roi_count": 0,
+            **empty_spatial,
             "total_detections": 0,
             "inference_time_ms_avg": 0.0,
             "inference_time_ms_min": 0.0,
@@ -320,6 +335,7 @@ def evaluate_gradcam(
     det_boxes_all = torch.cat(all_det_boxes, dim=0)
     matched_gt_all = torch.cat(all_matched_gt, dim=0)
     has_gt_all = torch.cat(all_has_gt, dim=0)
+    matched_iou_all = torch.cat(all_matched_iou, dim=0)
     N = pooled_all.shape[0]
 
     # Full (unmasked) neural classifier predictions.
@@ -333,7 +349,7 @@ def evaluate_gradcam(
 
     for i in range(N):
         heatmap = all_heatmaps[i]
-        ranking = _importance_ranking(heatmap)
+        ranking = importance_ranking(heatmap)
         grid_h, grid_w = _ROI_GRID
         # Threshold: top half of spatial positions are "important".
         threshold = max(int(grid_h * grid_w * 0.5), 1)
@@ -374,13 +390,20 @@ def evaluate_gradcam(
     insertion_curves = np.zeros((n_auc, steps + 1))
     num_positions = _ROI_GRID[0] * _ROI_GRID[1]
 
+    # Insertion step 0 starts from an all-zero input — its real confidence,
+    # not a hardcoded 0.0 (that floor biased insertion AUC low regardless of
+    # heatmap quality). The all-zero input is the same for every row, so one
+    # forward pass suffices; only the readout class (pred_cls) varies.
+    empty_probs = _neural_probs(model, torch.zeros((1, *pooled_all.shape[1:])))[0]
+
     for ai, idx in enumerate(auc_indices):
         heatmap = all_heatmaps[idx]
-        ranking = _importance_ranking(heatmap)
+        ranking = importance_ranking(heatmap)
         pred_cls = full_preds[idx].item()
 
-        # Step 0: full confidence.
+        # Step 0: full confidence (deletion) / empty-input confidence (insertion).
         deletion_curves[ai, 0] = full_conf[idx].item()
+        insertion_curves[ai, 0] = empty_probs[pred_cls].item()
 
         for s in range(1, steps + 1):
             k = int(s / steps * num_positions)
@@ -409,11 +432,17 @@ def evaluate_gradcam(
     insertion_auc = float(np.trapz(insertion_curves, dx=dx, axis=1).mean())
 
     # ── Spatial: pointing game & IoU heatmap overlap ──────────────
+    # min_proposal_iou filter matches evaluate_symbolic_spatial_metrics's
+    # gt_iou filter, so the two sides are computed over comparably
+    # GT-aligned populations rather than one filtered and one not.
     overlap_scores: list[float] = []
     pointing_scores: list[float] = []
+    gt_coverage: list[float] = []
 
     for i in range(N):
         if not bool(has_gt_all[i]):
+            continue
+        if float(matched_iou_all[i]) < min_proposal_iou:
             continue
 
         heatmap = all_heatmaps[i]
@@ -428,9 +457,11 @@ def evaluate_gradcam(
 
         overlap_scores.append(topk_region_overlap(norm_hm, gt_mask))
         pointing_scores.append(pointing_score(norm_hm, gt_mask))
+        gt_coverage.append(float(gt_mask.float().mean().item()))
 
-    spatial_overlap = float(np.mean(overlap_scores)) if overlap_scores else _NAN
-    spatial_pointing = float(np.mean(pointing_scores)) if pointing_scores else _NAN
+    spatial_metrics = stratified_spatial_result(
+        overlap_scores, pointing_scores, gt_coverage
+    )
 
     times_arr = np.array(per_image_times) if per_image_times else np.array([0.0])
     return {
@@ -438,9 +469,7 @@ def evaluate_gradcam(
         "necessity_prediction_flip_rate": float(nec_flip.mean()),
         "deletion_auc": deletion_auc,
         "insertion_auc": insertion_auc,
-        "pointing_score": spatial_pointing,
-        "box_grounded_roi_overlap": spatial_overlap,
-        "evaluated_roi_count": len(overlap_scores),
+        **spatial_metrics,
         "total_detections": N,
         "inference_time_ms_avg": float(times_arr.mean()) * 1000,
         "inference_time_ms_min": float(times_arr.min()) * 1000,

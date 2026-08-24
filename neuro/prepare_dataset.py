@@ -190,7 +190,6 @@ class PCBDataset(Dataset[PCBItem]):
         inspection = _build_inspection(
             self.samples,
             self.class_names,
-            inspected_samples,
         )
         _print_inspection_summary(self.split_file, inspection)
         _plot_class_counts(inspection)
@@ -200,10 +199,7 @@ class PCBDataset(Dataset[PCBItem]):
 def _build_inspection(
     samples: list[PCBRecord],
     class_names: tuple[str, ...],
-    inspected_samples: list[PCBRecord],
 ) -> InspectionSummary:
-    # Full-split statistics use cached annotations, while image sizes use only
-    # the sampled files chosen by inspect().
     annotation_counts = torch.tensor(
         [sample.boxes.shape[0] for sample in samples],
         dtype=torch.int64,
@@ -240,7 +236,6 @@ def _build_inspection(
         "min_boxes_per_image": annotation_counts.min().item(),
         "mean_boxes_per_image": annotation_counts.float().mean().item(),
         "max_boxes_per_image": annotation_counts.max().item(),
-        "image_size_checked_count": len(inspected_samples),
     }
 
 

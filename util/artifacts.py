@@ -34,17 +34,3 @@ def next_run_artifacts(checkpoint_dir: str | Path) -> RunArtifacts:
         metrics_path=checkpoint_dir / f"{run_name}_metrics.json",
         history_path=checkpoint_dir / f"{run_name}_train_history.json",
     )
-
-
-def latest_run_checkpoint(checkpoint_dir: str | Path) -> Path:
-    checkpoint_dir = Path(checkpoint_dir)
-    checkpoints = sorted(checkpoint_dir.glob("run*.pt"))
-
-    if not checkpoints:
-        raise FileNotFoundError(f"No run checkpoints were found in {checkpoint_dir}.")
-
-    def run_index(path: Path) -> int:
-        match = re.search(r"run(\d+)\.pt$", path.name)
-        return int(match.group(1)) if match else -1
-
-    return max(checkpoints, key=run_index)
