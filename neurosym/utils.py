@@ -15,6 +15,7 @@ def postprocess_symbolic_detections(
     pooled_features: Tensor,
     proposal_probabilities: Tensor,
     proposal_leaf_indices: Tensor,
+    proposal_level_indices: Tensor | None = None,
 ) -> list[dict[str, Tensor]]:
     device = proposal_probabilities.device
     num_classes = proposal_probabilities.shape[-1]
@@ -28,6 +29,10 @@ def postprocess_symbolic_detections(
     pooled_features_list = pooled_features.split(boxes_per_image, dim=0)
     probabilities_list = proposal_probabilities.split(boxes_per_image, dim=0)
     leaf_indices_list = proposal_leaf_indices.split(boxes_per_image, dim=0)
+    if proposal_level_indices is not None:
+        level_indices_list = proposal_level_indices.split(boxes_per_image, dim=0)
+    else:
+        level_indices_list = [None] * len(boxes_per_image)
 
     results: list[dict[str, Tensor]] = []
     for (
@@ -37,6 +42,7 @@ def postprocess_symbolic_detections(
         pooled_per_image,
         probabilities_per_image,
         leaf_indices_per_image,
+        level_indices_per_image,
         image_shape,
     ) in zip(
         pred_boxes_list,
@@ -45,6 +51,7 @@ def postprocess_symbolic_detections(
         pooled_features_list,
         probabilities_list,
         leaf_indices_list,
+        level_indices_list,
         image_shapes,
     ):
         boxes = boxes.reshape(-1, num_classes, 4)
@@ -76,6 +83,12 @@ def postprocess_symbolic_detections(
         symbolic_leaf_indices = (
             leaf_indices_per_image[:, None].expand(-1, num_classes - 1).reshape(-1)
         )
+        if level_indices_per_image is not None:
+            symbolic_level_indices = (
+                level_indices_per_image[:, None].expand(-1, num_classes - 1).reshape(-1)
+            )
+        else:
+            symbolic_level_indices = None
 
         keep = torch.where(scores > detector.BOX_SCORE_THRESH)[0]
         boxes = boxes[keep]
@@ -85,6 +98,8 @@ def postprocess_symbolic_detections(
         pooled_grids = pooled_grids[keep]
         symbolic_probabilities = symbolic_probabilities[keep]
         symbolic_leaf_indices = symbolic_leaf_indices[keep]
+        if symbolic_level_indices is not None:
+            symbolic_level_indices = symbolic_level_indices[keep]
 
         keep = box_ops.remove_small_boxes(boxes, min_size=1e-2)
         boxes = boxes[keep]
@@ -94,6 +109,8 @@ def postprocess_symbolic_detections(
         pooled_grids = pooled_grids[keep]
         symbolic_probabilities = symbolic_probabilities[keep]
         symbolic_leaf_indices = symbolic_leaf_indices[keep]
+        if symbolic_level_indices is not None:
+            symbolic_level_indices = symbolic_level_indices[keep]
 
         use_soft_nms = detector.soft_nms_enabled
 
@@ -110,6 +127,8 @@ def postprocess_symbolic_detections(
             pooled_grids = pooled_grids[keep]
             symbolic_probabilities = symbolic_probabilities[keep]
             symbolic_leaf_indices = symbolic_leaf_indices[keep]
+            if symbolic_level_indices is not None:
+                symbolic_level_indices = symbolic_level_indices[keep]
         else:
             keep = box_ops.batched_nms(
                 boxes,
@@ -124,17 +143,20 @@ def postprocess_symbolic_detections(
             pooled_grids = pooled_grids[keep]
             symbolic_probabilities = symbolic_probabilities[keep]
             symbolic_leaf_indices = symbolic_leaf_indices[keep]
+            if symbolic_level_indices is not None:
+                symbolic_level_indices = symbolic_level_indices[keep]
 
-        results.append(
-            {
-                "boxes": boxes,
-                "scores": scores,
-                "labels": labels,
-                "proposal_boxes": proposal_boxes,
-                "pooled_features": pooled_grids,
-                "symbolic_probabilities": symbolic_probabilities,
-                "symbolic_leaf_indices": symbolic_leaf_indices,
-            }
-        )
+        result = {
+            "boxes": boxes,
+            "scores": scores,
+            "labels": labels,
+            "proposal_boxes": proposal_boxes,
+            "pooled_features": pooled_grids,
+            "symbolic_probabilities": symbolic_probabilities,
+            "symbolic_leaf_indices": symbolic_leaf_indices,
+        }
+        if symbolic_level_indices is not None:
+            result["symbolic_level_indices"] = symbolic_level_indices
+        results.append(result)
 
     return results

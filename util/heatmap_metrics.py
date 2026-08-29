@@ -114,6 +114,7 @@ def evaluate_random_baseline_spatial_metrics(
     gt_iou: Tensor | None,
     grid_shape: tuple[int, int] = (7, 7),
     min_proposal_iou: float = 0.0,
+    max_proposal_iou: float = 1.0,
     random_state: int = 42,
 ) -> dict[str, Any]:
     """Uniform-random heatmap baseline, scored on the exact same RoI
@@ -123,7 +124,10 @@ def evaluate_random_baseline_spatial_metrics(
     typically covers most of the grid — this control makes that visible
     instead of letting a high-looking number pass as a win. See
     stratified_spatial_result for the low-coverage subset where the metrics
-    can still discriminate.
+    can still discriminate. `max_proposal_iou` narrows to loose proposals
+    (e.g. 0.05-0.35) where the GT box covers only part of the grid — at the
+    default min_proposal_iou=0.5 that subset is empty (tight proposals only),
+    which is why the low-coverage table can otherwise report n=0.
     """
     if matched_gt_boxes is None or has_matched_gt is None:
         return stratified_spatial_result([], [], [])
@@ -136,7 +140,7 @@ def evaluate_random_baseline_spatial_metrics(
     for index in range(proposal_boxes.shape[0]):
         if not bool(has_matched_gt[index]):
             continue
-        if gt_iou is not None and float(gt_iou[index]) < min_proposal_iou:
+        if gt_iou is not None and not (min_proposal_iou <= float(gt_iou[index]) <= max_proposal_iou):
             continue
 
         gt_mask = project_gt_box_to_roi_grid(

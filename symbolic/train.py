@@ -13,7 +13,7 @@ from .config import SymbolicTrainConfig
 from .evaluation import evaluate_symbolic_model as evaluate_symbolic_metrics
 from .evaluation import evaluate_symbolic_spatial_metrics
 from .sodt import SparseObliqueDecisionTreeClassifier
-from .tao import fit_tree_with_tao, postprocess_tree
+from .tao import fit_tree_with_tao, postprocess_tree, raise_if_tree_collapsed
 from util.io import ensure_dir, save_json
 
 
@@ -372,6 +372,7 @@ def train_symbolic_tree(
     if current_node_bar is not None:
         current_node_bar.close()
 
+    raise_if_tree_collapsed(tree)
     metrics = _augment_tree_metrics(tree, {})
 
     # tree_state already carries feature_shape/class_names/max_depth, and
@@ -474,6 +475,7 @@ def prune_symbolic_tree(
         f"Pruning complete — {pruned_count} nodes removed, "
         f"{active_nodes} remain active ({_format_duration(perf_counter() - t0)})"
     )
+    raise_if_tree_collapsed(tree)
 
     print()
     tree_metrics = _augment_tree_metrics(tree, {})

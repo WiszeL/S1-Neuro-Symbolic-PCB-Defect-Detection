@@ -37,6 +37,17 @@ def test_initialize_tree_weights_uses_configured_scale():
     assert np.std(tree.node_weights) > 0.3
 
 
+def test_initialize_tree_weights_randomizes_leaf_labels():
+    # Both papers randomize leaf labels alongside hyperplanes (Hada Fig.1 /
+    # Kairgeldin Fig.5). A tree with several leaves and several classes
+    # should not have every leaf land on the same label by chance.
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=4, num_classes=5, input_dim=6
+    )
+    initialize_tree_weights(tree, random_state=0)
+    assert len(set(tree.leaf_labels.tolist())) > 1
+
+
 def test_evaluate_tree_objective_is_class_weighted_when_given():
     tree = SparseObliqueDecisionTreeClassifier(
         max_depth=1, num_classes=2, input_dim=4
@@ -127,11 +138,46 @@ def test_fit_tree_with_tao_runs_end_to_end_without_teacher_confidence():
     assert final_accuracy > 0.8  # near-linearly-separable data, small tree
 
 
+def test_fit_tree_with_tao_does_not_deadlock_on_dominant_class():
+    # Regression test for the cold-start deadlock: when one class dominates
+    # (here ~67%, matching neg_ratio=2 background fraction), a majority-vote
+    # leaf init makes every leaf agree on the dominant class, zeroing every
+    # node's |left_loss - right_loss| split signal so no node can ever fit.
+    # This must not happen: fails on the pre-fix majority-vote leaf init,
+    # passes with initialize_tree_weights's random leaf-label bootstrap.
+    rng = np.random.default_rng(7)
+    n, dim = 900, 6
+    features = rng.normal(size=(n, dim)).astype(np.float32)
+    true_weights = rng.normal(size=(dim,)).astype(np.float32)
+    scores = features @ true_weights
+    # Bottom third minority classes 1/2, top two-thirds dominant class 0.
+    threshold = np.quantile(scores, 1 / 3)
+    labels = np.where(scores <= threshold, rng.integers(1, 3, size=n), 0).astype(
+        np.int64
+    )
+    majority_baseline = float((labels == 0).mean())
+
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=3, num_classes=3, input_dim=dim
+    )
+    history = fit_tree_with_tao(
+        tree, features, labels, iterations=10, l1_lambda=1e-3, random_state=0
+    )
+
+    assert len(history) > 0
+    final = history[-1]
+    assert final["active_internal_nodes"] > 0
+    assert len(set(tree.leaf_labels.tolist())) > 1
+    assert final["mimic_accuracy"] > majority_baseline
+
+
 if __name__ == "__main__":
     test_init_weight_scale_matches_papers_gaussian_0_1()
     test_initialize_tree_weights_uses_configured_scale()
+    test_initialize_tree_weights_randomizes_leaf_labels()
     test_evaluate_tree_objective_is_class_weighted_when_given()
     test_acceptance_check_never_increases_the_local_objective()
     test_acceptance_check_always_accepts_an_unfit_node()
     test_fit_tree_with_tao_runs_end_to_end_without_teacher_confidence()
+    test_fit_tree_with_tao_does_not_deadlock_on_dominant_class()
     print("OK")

@@ -34,6 +34,14 @@ def initialize_tree_weights(
         scale=_INIT_WEIGHT_SCALE,
         size=tree.node_bias.shape,
     ).astype(np.float32)
+    # Both papers randomize leaf labels too (Hada Fig.1 / Kairgeldin Fig.5).
+    # This matters beyond fidelity: a majority-vote leaf init makes every leaf
+    # agree on the dominant class whenever one class dominates the data (e.g.
+    # background under neg_ratio subsampling), which zeroes every node's
+    # |left_loss - right_loss| signal and deadlocks TAO before it starts.
+    tree.leaf_labels = generator.integers(
+        0, tree.num_classes, size=tree.leaf_labels.shape
+    ).astype(np.int64)
 
 
 def _is_contiguous_indices(indices: np.ndarray) -> bool:
@@ -363,6 +371,27 @@ def evaluate_tree(
     }
 
 
+def raise_if_tree_collapsed(tree: SparseObliqueDecisionTreeClassifier) -> None:
+    """Guard against silently saving a dead tree.
+
+    A collapsed tree (every internal node pruned, or every leaf voting the
+    same class) predicts one label for all inputs. It trains and evaluates
+    without error, so nothing else in the pipeline would ever flag it.
+    """
+    nonzero_counts = tree.nonzero_weight_counts()
+    active_internal_nodes = sum(count > 0 for count in nonzero_counts)
+    distinct_leaf_labels = len(set(tree.leaf_labels.tolist()))
+    if active_internal_nodes == 0 or distinct_leaf_labels <= 1:
+        raise RuntimeError(
+            f"Tree collapsed: {active_internal_nodes} active internal nodes, "
+            f"{distinct_leaf_labels} distinct leaf label(s) — it predicts one "
+            "class for every input. Likely a TAO cold-start deadlock (a "
+            "dominant class, e.g. background under a low neg_ratio, made "
+            "every leaf's majority vote agree, so no node ever had a split "
+            "signal). Not a valid trained model; do not use this checkpoint."
+        )
+
+
 def postprocess_tree(
     tree: SparseObliqueDecisionTreeClassifier,
     features: np.ndarray,
@@ -452,7 +481,8 @@ def fit_tree_with_tao(
             "TAO expects a 2D feature matrix of shape [num_samples, num_features]."
         )
 
-    if np.allclose(tree.node_weights, 0.0):
+    freshly_initialized = np.allclose(tree.node_weights, 0.0)
+    if freshly_initialized:
         initialize_tree_weights(tree, random_state=random_state)
 
     history: list[dict[str, Any]] = []
@@ -466,8 +496,18 @@ def fit_tree_with_tao(
     # each iteration below and reused as-is at the top of the next iteration
     # — nothing mutates node_weights/node_bias between those two points, so
     # recomputing again here would just repeat the same work.
+    #
+    # On a fresh init, keep the random leaf labels initialize_tree_weights just
+    # drew instead of majority-voting them: with an imbalanced label
+    # distribution (e.g. background under neg_ratio subsampling), a majority
+    # vote makes every leaf agree on the dominant class, which zeroes every
+    # node's |left_loss - right_loss| split signal and deadlocks TAO before
+    # the first node ever fits. The random labels give the first iteration
+    # something to route against; update_leaf_predictions takes over as
+    # normal from the end of iteration 1 onward.
     reduced_sets = compute_reduced_sets(tree, features)
-    update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
+    if not freshly_initialized:
+        update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
     for iteration_index in iteration_range:
         iteration_start = perf_counter()

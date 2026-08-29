@@ -255,8 +255,16 @@ def draw_neurosymbolic_explanation(
             while curr < num_internal:
                 curr = curr * 2 + 1
             leaf_offset = curr - num_internal
-            label_idx = symbolic_tree.leaf_labels[leaf_offset]
-            leaf_override[node] = class_names[int(label_idx) - 1]
+            label_idx = int(symbolic_tree.leaf_labels[leaf_offset])
+            # leaf_labels are 0-indexed INCLUDING background — index the
+            # tree's own (7-name) class_names directly when available.
+            # class_names passed in here is the detector's defect-only
+            # (6-name) tuple, 1-indexed against label_idx; using it directly
+            # sends label_idx=0 (background) to class_names[-1].
+            if symbolic_tree.class_names is not None:
+                leaf_override[node] = symbolic_tree.class_names[label_idx]
+            else:
+                leaf_override[node] = class_names[label_idx - 1]
             return
 
         left = node * 2 + 1
@@ -406,11 +414,73 @@ def draw_neurosymbolic_explanation(
     ax_tree.set_ylim(-tree_depth * 2.5 - 1.0, 1.0)
 
     # 2. RIGHT SIDE: Vertical Heatmaps
-    gs_right = gridspec.GridSpecFromSubplotSpec(
-        node_count, 1, subplot_spec=gs[1], hspace=0.4
+    has_exact = (
+        "projected_exact_attribution_on_proposal_box"
+        in explanation["node_explanations"][0]
     )
+    panel_count = node_count + (1 if has_exact else 0)
+    gs_right = gridspec.GridSpecFromSubplotSpec(
+        panel_count, 1, subplot_spec=gs[1], hspace=0.4
+    )
+
+    proposal_box = explanation["proposal_box"]
+    detection_box = explanation["detection_box"]
+    # The heat is projected onto proposal_box (RoI-Align pooled from it) — draw
+    # that as the primary frame and zoom to the union of both boxes, so heat
+    # near a proposal edge is never cropped out and the refinement is still
+    # visible. See neurosym/inference.py::explain_hybrid_detection.
+    union_box = torch.tensor(
+        [
+            min(proposal_box[0], detection_box[0]),
+            min(proposal_box[1], detection_box[1]),
+            max(proposal_box[2], detection_box[2]),
+            max(proposal_box[3], detection_box[3]),
+        ]
+    )
+
+    def _draw_boxes(axis) -> None:
+        x1, y1, x2, y2 = proposal_box.tolist()
+        axis.add_patch(
+            patches.Rectangle(
+                (x1, y1), x2 - x1, y2 - y1,
+                linewidth=2, edgecolor="cyan", facecolor="none",
+            )
+        )
+        dx1, dy1, dx2, dy2 = detection_box.tolist()
+        axis.add_patch(
+            patches.Rectangle(
+                (dx1, dy1), dx2 - dx1, dy2 - dy1,
+                linewidth=1.5, edgecolor="lime", linestyle="--", facecolor="none",
+            )
+        )
+
+    panel_offset = 0
+    if has_exact:
+        axis = plt.subplot(gs_right[0])
+        axis.imshow(image_to_array(image_tensor))
+        dimmer = np.zeros(
+            (image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32
+        )
+        dimmer[..., 3] = 0.4
+        axis.imshow(dimmer)
+        axis.imshow(
+            heatmap_to_array(
+                explanation["projected_path_exact_attribution_on_proposal_box"]
+            ),
+            cmap="jet", vmin=0.0, vmax=1.0,
+        )
+        _draw_boxes(axis)
+        zoom_axis_to_box(axis, union_box, tuple(image_tensor.shape[-2:]))
+        axis.set_title(
+            f"Exact path attribution ({node_count} nodes, "
+            f"{explanation.get('exact_attribution_level', '?')})\n"
+            "cyan=proposal (heat frame)  lime=detection box"
+        )
+        axis.axis("off")
+        panel_offset = 1
+
     for axis_index, node in enumerate(explanation["node_explanations"]):
-        axis = plt.subplot(gs_right[axis_index])
+        axis = plt.subplot(gs_right[axis_index + panel_offset])
         axis.imshow(image_to_array(image_tensor))
         # Add a separate black dimmer layer over the image so it doesn't corrupt the heatmap colors
         dimmer = np.zeros(
@@ -418,29 +488,27 @@ def draw_neurosymbolic_explanation(
         )
         dimmer[..., 3] = 0.4  # 40% perfect black dimmer
         axis.imshow(dimmer)
+        heatmap_key = (
+            "projected_exact_attribution_on_proposal_box"
+            if has_exact
+            else "projected_node_heatmap_on_proposal_box"
+        )
         axis.imshow(
-            heatmap_to_array(node["projected_node_heatmap_on_proposal_box"]),
+            heatmap_to_array(node[heatmap_key]),
             cmap="jet",
             vmin=0.0,
             vmax=1.0,
         )
-        x1, y1, x2, y2 = explanation["detection_box"].tolist()
-        axis.add_patch(
-            patches.Rectangle(
-                (x1, y1),
-                x2 - x1,
-                y2 - y1,
-                linewidth=2,
-                edgecolor="cyan",
-                facecolor="none",
-            )
-        )
-        zoom_axis_to_box(
-            axis, explanation["detection_box"], tuple(image_tensor.shape[-2:])
+        _draw_boxes(axis)
+        zoom_axis_to_box(axis, union_box, tuple(image_tensor.shape[-2:]))
+        evidence = node.get("positive_evidence_sum", 0.0)
+        title_prefix = (
+            "Exact attribution" if has_exact else "Pooled-grid evidence"
         )
         axis.set_title(
-            f"Depth {node['depth'] + 1} | Node {node['node_index']} Features\n"
-            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}"
+            f"{title_prefix} — Depth {node['depth'] + 1} | Node {node['node_index']}\n"
+            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()} "
+            f"(evidence {evidence:.2f})"
         )
         axis.axis("off")
 

@@ -356,6 +356,7 @@ def evaluate_symbolic_spatial_metrics(
     gt_iou: Tensor | None,
     heatmap_mode: str = "leaf_only",
     min_proposal_iou: float = 0.0,
+    max_proposal_iou: float = 1.0,
 ) -> dict[str, Any]:
     if matched_gt_boxes is None or has_matched_gt is None:
         return stratified_spatial_result([], [], [])
@@ -371,7 +372,7 @@ def evaluate_symbolic_spatial_metrics(
     ):
         if not bool(has_matched_gt[index]):
             continue
-        if gt_iou is not None and float(gt_iou[index]) < min_proposal_iou:
+        if gt_iou is not None and not (min_proposal_iou <= float(gt_iou[index]) <= max_proposal_iou):
             continue
 
         heatmap = _compute_local_instance_heatmap(

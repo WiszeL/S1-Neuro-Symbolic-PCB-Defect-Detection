@@ -119,6 +119,7 @@ def evaluate_gradcam(
     deletion_insertion_steps: int = 10,
     random_state: int = 42,
     min_proposal_iou: float = 0.0,
+    max_proposal_iou: float = 1.0,
 ) -> dict[str, Any]:
     """Evaluate Grad-CAM explanation quality over a set of images.
 
@@ -442,7 +443,7 @@ def evaluate_gradcam(
     for i in range(N):
         if not bool(has_gt_all[i]):
             continue
-        if float(matched_iou_all[i]) < min_proposal_iou:
+        if not (min_proposal_iou <= float(matched_iou_all[i]) <= max_proposal_iou):
             continue
 
         heatmap = all_heatmaps[i]

@@ -102,6 +102,14 @@ class NeuroSymbolicDetector(nn.Module):
             proposals,
             images_list.image_sizes,
         )
+
+        # The exact attribution map (see neurosym/heatmap.py) needs the
+        # pre-pooling FPN level each proposal was actually pooled from — reuse
+        # the same LevelMapper MultiScaleRoIAlign uses internally so the map
+        # never targets the wrong level. `pool.map_levels` is populated on the
+        # first forward call above.
+        roi_level_indices = self.detector.roi_align.pool.map_levels(proposals)
+        featmap_names = list(self.detector.roi_align.pool.featmap_names)
         roi_representations = self.detector.box_head(pooled_features)
         box_regression = self.detector.box_predictor.box_regressor(roi_representations)
         symbolic_probabilities, symbolic_leaf_indices = self._symbolic_predict(
@@ -116,6 +124,7 @@ class NeuroSymbolicDetector(nn.Module):
             pooled_features=pooled_features,
             proposal_probabilities=symbolic_probabilities,
             proposal_leaf_indices=symbolic_leaf_indices,
+            proposal_level_indices=roi_level_indices,
         )
 
         postprocessed_boxes = self.detector.transform.postprocess(
@@ -130,8 +139,8 @@ class NeuroSymbolicDetector(nn.Module):
         )
 
         outputs: list[dict[str, Tensor]] = []
-        for result, boxes_dict, proposals_dict in zip(
-            results, postprocessed_boxes, postprocessed_proposals
+        for image_index, (result, boxes_dict, proposals_dict, processed_size) in enumerate(
+            zip(results, postprocessed_boxes, postprocessed_proposals, images_list.image_sizes)
         ):
             outputs.append(
                 {
@@ -139,6 +148,12 @@ class NeuroSymbolicDetector(nn.Module):
                     "scores": result["scores"].detach().cpu(),
                     "labels": result["labels"].detach().cpu(),
                     "proposal_boxes": proposals_dict["boxes"].detach().cpu(),
+                    # Proposal boxes in the *processed* (resized/padded) image
+                    # space the FPN feature maps below live in — the exact
+                    # attribution map must crop against these, not the
+                    # original-image "proposal_boxes" above (see
+                    # neurosym/heatmap.py::compute_exact_attribution).
+                    "proposal_boxes_processed": result["proposal_boxes"].detach().cpu(),
                     "pooled_features": result["pooled_features"].detach().cpu(),
                     "symbolic_probabilities": result["symbolic_probabilities"]
                     .detach()
@@ -146,6 +161,20 @@ class NeuroSymbolicDetector(nn.Module):
                     "symbolic_leaf_indices": result["symbolic_leaf_indices"]
                     .detach()
                     .cpu(),
+                    "symbolic_level_indices": result["symbolic_level_indices"]
+                    .detach()
+                    .cpu(),
+                    # Shared per-image context the exact attribution map needs
+                    # to rebuild itself from a single stored detection dict
+                    # without a second backbone forward pass.
+                    "fpn_features": {
+                        name: level_map[image_index].detach().cpu()
+                        for name, level_map in features.items()
+                        if name in featmap_names
+                    },
+                    "featmap_names": featmap_names,
+                    "padded_image_size": tuple(images_list.tensors.shape[-2:]),
+                    "processed_image_size": tuple(processed_size),
                 }
             )
 

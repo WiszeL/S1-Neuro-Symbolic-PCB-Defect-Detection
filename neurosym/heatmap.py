@@ -104,6 +104,10 @@ def compute_node_local_evidence_maps(
                 ),
                 "node_heatmap": node_heatmap,
                 "raw_node_heatmap": positive_evidence,
+                # Signed, so it sums exactly to the node's score minus bias
+                # (the positive-only map above does not). Checked in
+                # tests/test_exact_attribution.py.
+                "signed_evidence_map": signed_local.sum(axis=0).astype(np.float32),
                 "top_local_cells": _top_grid_cells(node_heatmap, top_k=8),
                 "top_positive_local_channels": _top_channels(
                     np.maximum(signed_local, 0.0).sum(axis=(1, 2)),
@@ -229,6 +233,126 @@ def compute_symbolic_heatmap(
         "top_negative_local_channels": top_negative_local_channels,
         **maps,
     }
+
+
+def _fpn_box_bounds(
+    box_processed: Tensor,
+    padded_size: tuple[int, int],
+    feature_hw: tuple[int, int],
+    margin: int = 0,
+) -> tuple[int, int, int, int]:
+    """The proposal box as integer index bounds on an FPN level map. `margin`
+    widens the crop, since RoI-Align samples a little outside the box.
+    """
+    feature_h, feature_w = feature_hw
+    padded_h, padded_w = padded_size
+    scale_x = feature_w / padded_w
+    scale_y = feature_h / padded_h
+    x1, y1, x2, y2 = box_processed.detach().cpu().tolist()
+    fx1 = max(0, int(np.floor(x1 * scale_x)) - margin)
+    fy1 = max(0, int(np.floor(y1 * scale_y)) - margin)
+    fx2 = min(feature_w, int(np.ceil(x2 * scale_x)) + margin)
+    fy2 = min(feature_h, int(np.ceil(y2 * scale_y)) + margin)
+    return fx1, fy1, fx2, fy2
+
+
+def path_weight_grid(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    path: list[Any] | None = None,
+) -> np.ndarray:
+    """The path's node weights summed, signed by which way each split routed
+    (`+1` left, `-1` right). `path=None` walks the full root-to-leaf path; a
+    one-step list gives one node's grid.
+    """
+    grid = _as_feature_grid(feature_grid)
+    if path is None:
+        path = tree.decision_path(grid.reshape(-1))
+    total = np.zeros(tree.feature_shape, dtype=np.float32)
+    for step in path:
+        direction = 1.0 if step.went_left else -1.0
+        total += direction * tree.node_weight_grid(step.node_index)
+    return total
+
+
+def exact_fpn_contribution(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    roi_align: Any,
+    fpn_features: dict[str, Tensor],
+    level_name: str,
+    box_processed: Tensor,
+    processed_image_size: tuple[int, int],
+    path: list[Any] | None = None,
+    weight_grid_override: np.ndarray | None = None,  # controls only (permuted/foreign weights)
+) -> Tensor:
+    """Split the path's score exactly across the FPN pixels it was pooled from,
+    `(C, Hf, Wf)`.
+
+    RoI-Align is linear, so `grad(score, FPN) * FPN` sums back to the score with
+    no approximation — autograd here just reads RoI-Align's coefficients. The
+    sum identity is checked in tests/test_exact_attribution.py.
+    """
+    weights = (
+        weight_grid_override
+        if weight_grid_override is not None
+        else path_weight_grid(tree, feature_grid, path=path)
+    )
+    with torch.enable_grad():
+        # numpy round-trip: escape inference-mode so autograd can run on the map
+        feats = {
+            name: torch.from_numpy(
+                np.ascontiguousarray(level.detach().cpu().numpy())
+            ).unsqueeze(0)
+            for name, level in fpn_features.items()
+        }
+        feats[level_name].requires_grad_(True)
+        pooled = roi_align(
+            feats,
+            [box_processed.detach().cpu().unsqueeze(0)],
+            [tuple(processed_image_size)],
+        )[0]
+        score = (torch.as_tensor(weights, dtype=torch.float32) * pooled).sum()
+        (grad,) = torch.autograd.grad(score, feats[level_name])
+    return (grad[0] * feats[level_name][0]).detach()
+
+
+def compute_exact_attribution(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    roi_align: Any,
+    fpn_features: dict[str, Tensor],
+    level_name: str,
+    box_processed: Tensor,
+    processed_image_size: tuple[int, int],
+    padded_size: tuple[int, int],
+    path: list[Any] | None = None,
+    margin: int = 0,
+) -> np.ndarray:
+    """2-D heatmap from `exact_fpn_contribution`, cropped to the proposal box.
+
+    Two limits to be honest about: `abs().sum(0)` over channels is a display
+    choice, not part of the exact claim; and the map lives on the FPN grid, not
+    image pixels, so it points at a region, not a pixel.
+    """
+    contribution = exact_fpn_contribution(
+        tree,
+        feature_grid,
+        roi_align,
+        fpn_features,
+        level_name,
+        box_processed,
+        processed_image_size,
+        path=path,
+    )
+    heatmap = contribution.abs().sum(0).cpu().numpy().astype(np.float32)
+
+    fx1, fy1, fx2, fy2 = _fpn_box_bounds(
+        box_processed, padded_size, heatmap.shape, margin=margin
+    )
+    if fx2 <= fx1 or fy2 <= fy1:
+        return np.zeros((1, 1), dtype=np.float32)
+    return _normalize_heatmap_array(heatmap[fy1:fy2, fx1:fx2])
 
 
 def resize_heatmap_to_box(

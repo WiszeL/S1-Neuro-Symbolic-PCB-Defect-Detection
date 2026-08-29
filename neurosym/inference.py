@@ -14,6 +14,7 @@ from util.device import select_device
 from .heatmap import (
     compute_symbolic_heatmap,
     compute_node_local_evidence_maps,
+    compute_exact_attribution,
     project_heatmap_to_image,
 )
 from .hybrid import NeuroSymbolicDetector
@@ -72,19 +73,53 @@ def explain_hybrid_detection(
         feature_grid=feature_grid,
         mode=mode,
     )
+
+    # The exact attribution needs the FPN map and the processed-space box. Only
+    # a real detection from NeuroSymbolicDetector.forward carries them, so
+    # hand-built test dicts fall through without an exact-attribution panel.
+    has_fpn_inputs = "fpn_features" in detection and "featmap_names" in detection
+    if has_fpn_inputs:
+        level_index = int(detection["symbolic_level_indices"][detection_index])
+        level_name = detection["featmap_names"][level_index]
+        fpn_features = detection["fpn_features"]
+        proposal_box_processed = detection["proposal_boxes_processed"][detection_index]
+        processed_image_size = detection["processed_image_size"]
+        padded_size = detection["padded_image_size"]
+        roi_align = model.detector.roi_align
+
     node_explanations = []
-    for node in compute_node_local_evidence_maps(model.symbolic_tree, feature_grid):
+    path = model.symbolic_tree.decision_path(feature_grid.detach().cpu().numpy().reshape(-1))
+    for node, step in zip(
+        compute_node_local_evidence_maps(model.symbolic_tree, feature_grid), path
+    ):
         node_heatmap = node["node_heatmap"]
-        node_explanations.append(
-            {
-                **node,
-                "projected_node_heatmap_on_proposal_box": project_heatmap_to_image(
-                    node_heatmap,
-                    box=proposal_box,
-                    image_shape=image_shape,
-                ),
-            }
-        )
+        node_result = {
+            **node,
+            "projected_node_heatmap_on_proposal_box": project_heatmap_to_image(
+                node_heatmap,
+                box=proposal_box,
+                image_shape=image_shape,
+            ),
+        }
+        if has_fpn_inputs:
+            node_attribution = compute_exact_attribution(
+                model.symbolic_tree,
+                feature_grid,
+                roi_align,
+                fpn_features,
+                level_name,
+                proposal_box_processed,
+                processed_image_size,
+                padded_size,
+                path=[step],
+            )
+            node_result["exact_attribution"] = node_attribution
+            node_result["projected_exact_attribution_on_proposal_box"] = (
+                project_heatmap_to_image(
+                    node_attribution, box=proposal_box, image_shape=image_shape
+                )
+            )
+        node_explanations.append(node_result)
 
     explanation["node_explanations"] = node_explanations
     explanation["proposal_box"] = proposal_box.detach().cpu()
@@ -99,6 +134,27 @@ def explain_hybrid_detection(
         detection_index
     ]
     explanation["explanation_mode"] = mode
+
+    if has_fpn_inputs:
+        path_attribution = compute_exact_attribution(
+            model.symbolic_tree,
+            feature_grid,
+            roi_align,
+            fpn_features,
+            level_name,
+            proposal_box_processed,
+            processed_image_size,
+            padded_size,
+            path=path,
+        )
+        explanation["path_exact_attribution"] = path_attribution
+        explanation["projected_path_exact_attribution_on_proposal_box"] = (
+            project_heatmap_to_image(
+                path_attribution, box=proposal_box, image_shape=image_shape
+            )
+        )
+        explanation["exact_attribution_level"] = level_name
+
     return explanation
 
 

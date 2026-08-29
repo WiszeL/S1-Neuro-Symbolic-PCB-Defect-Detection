@@ -143,7 +143,7 @@ The causal chain is **two** mechanisms, not three.
 ## 6. The audit
 
 A code review against the source papers and against the codebase's own academic claims found
-four things that would not have survived a thesis defense unexamined. Each is addressed below;
+five things that would not have survived a thesis defense unexamined. Each is addressed below;
 this section exists so the correction is visible, not silent.
 
 1. **Faithfulness metrics were tautological.** Sufficiency/necessity/deletion/insertion on the
@@ -193,6 +193,38 @@ this section exists so the correction is visible, not silent.
    reports all three (SODT, Grad-CAM, random) with the stratified subset alongside the overall,
    overall-saturated numbers.
 
+5. **The node heatmap highlights areas that are not the defect, even on correct
+   classifications.** Investigated as a possible bug before being confirmed as a property of the
+   pooled representation. Three independent checks, each of which would catch a bug if one were
+   there: (a) `project_gt_box_to_roi_grid`'s row/col orientation is correct — a GT box occupying
+   the top-left quarter of the proposal projects to low row/col indices, a right-half GT projects
+   to high column indices, verified directly; (b) the **raw pooled activation**, with zero tree
+   math involved at all, barely beats a random heatmap on RoIs where the GT box covers less than
+   half the grid (pointing ≈ 0.45 vs a random-heatmap baseline ≈ 0.43 — chosen because tight
+   proposals saturate this metric near-identically for every method, masking the effect); (c)
+   *reshaping the node's weight lattice back onto the 7×7 grid* — the "leaf-only" heatmap — and
+   forcing a 2D peak out of it lands near that same random baseline regardless of aggregation
+   formula (positive/negative/absolute/signed all ≈ 0.35–0.45).
+
+   *(These per-cell figures come from a one-off investigation script that was not committed; the
+   receptive-field measurements below are in the same category. The numbers that survive into a
+   permanent, re-runnable form are the exact-attribution metrics in §8 and the "does the SODT use
+   the 7×7 layout at all" probe — see §8.)*
+
+   **Root cause, measured directly:** one 7×7 cell's effective receptive field is roughly
+   **360×350 px** (gradient-traced back to the input image), while the mean proposal box is only
+   about **33×29 px** — the receptive field is **12–13× larger than the entire box**. All 49
+   cells therefore read almost the same window (cell-to-cell cosine similarity ≈ 0.5).
+   Consequence: on the *pooled grid*, variation across cells is far smaller than variation across
+   channels, and the tree's weight mass shows no preference for the cells covering the defect.
+   The SODT separates classes by *which channels fire*. It also uses the 7×7 layout — permuting
+   the cells independently per sample collapses held-out mimic macro-F1 from 0.884 to 0.402, so
+   the layout is not noise — but that layout does not align with *where the defect is*: the two
+   facts are both true and do not conflict.
+
+   **Not a fix, a finding — see the "Exact path attribution" subsection in §8** for the map that
+   replaced the channel-collapsed heatmap and what is now claimed and not claimed as a result.
+
 ## 7. Results
 
 **To be regenerated.** The val-split hyperparameter sweep (§6.2) and the TAO fidelity fixes
@@ -211,7 +243,9 @@ result, from before this audit, and should not be read as the final numbers. Reg
 Faithfulness and spatial numbers are omitted entirely — the pre-audit values (sufficiency
 1.000, necessity flip 0.999, deletion 0.260, insertion 0.812, pointing 0.930, IoU overlap
 0.910) were produced by the broken protocol in §6.1 and would misrepresent the fixed one if
-reprinted here.
+reprinted here. The exact-attribution figures quoted in §8 (necessity 0.876, localization
+≈ 0.48 / 0.25) are dev references from the current `run1.pt`/`NEWBEST` pair; regenerate them
+in the same `notebooks/06` pass that replaces this table.
 
 **Two findings from the pre-audit run remain evidentially sound and are expected to hold under
 re-measurement**, since neither depends on the faithfulness protocol or the val split:
@@ -250,15 +284,67 @@ That claim has a precise scope, established directly by the mechanism:
 | "What does the model use for class X in general?" | **Yes** — the tree's sparse global weights describe every RoI, not just one |
 | "Where is the model looking on the whole board?" | **No** — the heatmap is confined to the detected proposal box (`neurosym/heatmap.py`'s projection is zero outside it by construction). Grad-CAM's CAM is computed on the pre-crop backbone feature map and can show attention spread across the whole image — a genuine advantage on this specific axis, conceded rather than argued away. |
 
-**The receptive-field caveat.** The 7×7-grid-to-image projection is *positionally exact* — RoI
-Align defines the bin↔image-region mapping by construction, unlike Hada/Kairgeldin, who must
-reconstruct approximate receptive fields because their features (raw conv activations) have no
-inherent box alignment. But each cell's *value* is interpolated from feature-map units whose
-effective receptive field is wider than one bin — a `p2` unit's receptive field, traced back
-through the CP block and C3, spans tens of pixels, comparable to or larger than a small DeepPCB
-defect box. So the map is a **region-level** claim ("this decision node weighted this part of
-the RoI"), not a pixel-level one. This is also the underlying reason the spatial metrics in §6.4
-saturate: sub-bin localization is unresolvable at this receptive-field scale, for any method.
+**The receptive-field caveat, quantified.** The 7×7-grid-to-image projection is *positionally
+exact* — RoI Align defines the bin↔image-region mapping by construction, unlike
+Hada/Kairgeldin, who must reconstruct approximate receptive fields because their features (raw
+conv activations) have no inherent box alignment. But each cell's *value* is interpolated from
+feature-map units whose effective receptive field is far wider than one bin: gradient-traced
+directly from a pooled cell back to the input image, one `p2`-level cell's receptive field
+measures **361×349 px**, against a mean DeepPCB proposal box of **33×29 px** — **12–13× the
+entire box**, not merely "comparable to or larger than" it. So the map is a **region-level**
+claim ("this decision node weighted this part of the RoI"), not a pixel-level one, and the
+region in question is closer to "the whole RoI and its surroundings" than to any one bin. This is
+also the underlying reason the spatial metrics in §6.4 saturate, and the direct cause of §6.5:
+sub-bin localization is unresolvable at this receptive-field scale, for any method operating on
+the pooled grid.
+
+**Exact path attribution — what it is, and what it is not.** §6.5 diagnosed *why* the
+pooled-grid heatmap cannot localize; this is the response. `neurosym/heatmap.py::compute_exact_attribution`
+does not weight or approximate anything. RoI-Align is linear (bilinear sampling + averaging, no
+ReLU), so the SODT path's score decomposes onto the pixels of the FPN level map it was pooled
+from with **no approximation**:
+
+```
+score = Σ_c Σ_ij W[c,i,j] · pooled[c,i,j] = Σ_p Σ_c FPN[c,p] · ∂score/∂FPN[c,p]
+```
+
+`∂score/∂FPN` is just RoI-Align's own linear coefficients, read off with autograd (the backbone
+is never in the graph); `grad · activation`, summed over channels, is the per-pixel
+contribution. The level comes from RoI-Align's `LevelMapper`, not a guess.
+
+- **What is exact:** the whole per-pixel *score* attribution. Verified: `|Σ(map) − score|` is at
+  the floating-point floor (`< 1e-5` over ~1900 RoIs). No gradients estimated, no surrogate, no
+  second network, and — unlike the earlier channel-collapsed heatmap — nothing about `W`
+  discarded: sign, per-cell pattern and activation are all carried.
+- **What is a presentation choice, not exact:** reducing the `(C, Hf, Wf)` contribution to one
+  2-D map via `abs().sum(0)`; and the resolution — exactness reaches the FPN feature map, whose
+  pixels each summarise a wide receptive field, not raw image pixels. So the map is a
+  *region-level* claim.
+- **Localization** (pointing / IoU vs the GT box, low-GT-coverage subset; *dev reference on the
+  current `run1.pt` pair, regenerate alongside §7*): exact **0.48 / 0.25**, leaf-only 0.33 /
+  0.25, random 0.27 / 0.20. Paired tests: exact is statistically tied with the old channel-
+  collapsed map on pointing and beats it on IoU; both the exact map and leaf-only clear random
+  on one axis each, and only the exact map clears it on both. Grad-CAM still scores higher on
+  localization alone (≈ 0.61 / 0.32 on the same subset) — a genuine gap on that axis, conceded
+  rather than argued away. Faithfulness, not localization, is the thesis's stated scope.
+- **Faithfulness, measured with controls, not asserted.** Masking directly in the FPN map and
+  re-pooling (`neurosym/evaluation.py::evaluate_faithfulness_fpn_masking`), necessity flip rate
+  (n=960, dev reference): **exact 0.876**, leaf-only 0.414, random 0.017. §6.1 is an audit
+  finding about a metric that was true by construction, so three controls were run:
+  `activation_only` (rank FPN pixels by activation magnitude, no tree) flips 0.072 — the exact
+  map is not just deleting the brightest pixels; `shuffled_w` (the same weight values, entries
+  permuted) flips 0.651 — the SODT's weight *structure*, not merely its scale, carries a large,
+  significant share of the signal (McNemar p ≈ 1e-37). The one control it does **not** beat is
+  `foreign_exact` (another RoI's path weights, ≈ 0.86, p = 0.13): this test cannot separate one
+  root-to-leaf path from another, most plausibly because every path shares the root node in a
+  depth-5 tree. That is a bound on what the necessity number proves — not on the exactness
+  identity, which is decision-specific by construction.
+- **The caption rule.** Panels are labelled "exact attribution" / "exact path attribution".
+  Because the necessity test measures exactly this — removing the pixels the map ranks highest
+  flips the SODT's prediction 0.876 of the time vs 0.017 for random — the panels *can* be read
+  as showing what the decision used. Still **not** claimed: pixel-level precision (one FPN pixel
+  summarises a wide receptive field), and uniqueness to this exact root-to-leaf path (the
+  `foreign_exact` control above).
 
 ## 9. Closing framing
 
