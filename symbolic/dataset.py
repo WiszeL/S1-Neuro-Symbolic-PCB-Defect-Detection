@@ -84,56 +84,15 @@ def _positive_all_neg_ratio_indices(
     return torch.cat([positive_indices, selected_neg], dim=0)
 
 
-def _image_level_split_row_indices(
-    records: list[dict[str, Any]],
-    split: str,
-    val_fraction: float = 0.2,
-    split_seed: int = 0,
-) -> Tensor:
-    """Row indices for a train/val split of the images (not RoIs) an export
-    covers, using the per-image ``row_start``/``row_stop`` ranges already in
-    the manifest (symbolic/export.py). Selecting hyperparameters against the
-    same rows they train on leaks information; both source papers hold out
-    images for this instead. Deterministic in ``split_seed`` — the same seed
-    always yields the same train/val image partition.
-    """
-    if split not in ("train", "val"):
-        raise ValueError(f"split must be 'train' or 'val', got {split!r}")
-
-    generator = torch.Generator()
-    generator.manual_seed(split_seed)
-    perm = torch.randperm(len(records), generator=generator).tolist()
-
-    num_val = max(1, int(round(len(records) * val_fraction)))
-    val_image_positions = set(perm[:num_val])
-
-    row_chunks = []
-    for position, record in enumerate(records):
-        is_val_image = position in val_image_positions
-        if (split == "val") != is_val_image:
-            continue
-        row_chunks.append(
-            torch.arange(record["row_start"], record["row_stop"], dtype=torch.int64)
-        )
-
-    if not row_chunks:
-        return torch.empty((0,), dtype=torch.int64)
-    return torch.cat(row_chunks, dim=0)
-
-
 def _selected_indices_from_metadata(
     metadata: dict[str, Any],
     random_state: int,
     neg_ratio: float | None = None,
-    restrict_to: Tensor | None = None,
 ) -> Tensor:
     labels = metadata["teacher_labels"]
-    if restrict_to is not None:
-        labels = labels[restrict_to]
 
     if neg_ratio is not None:
-        # ALL positive RoIs + neg_ratio × background RoIs, within the
-        # (optionally split-restricted) label subset.
+        # ALL positive RoIs + neg_ratio × background RoIs.
         keep = _positive_all_neg_ratio_indices(
             labels,
             neg_ratio=neg_ratio,
@@ -141,9 +100,6 @@ def _selected_indices_from_metadata(
         )
     else:
         keep = torch.arange(labels.shape[0], dtype=torch.int64)
-
-    if restrict_to is not None:
-        keep = restrict_to[keep]
 
     # Sort indices for efficient sequential memmap access
     return torch.sort(keep).values
@@ -259,9 +215,6 @@ def open_exported_symbolic_array_payload(
     feature_dtype: str = "float32",
     cache_chunk_size: int = 256,
     neg_ratio: float | None = None,
-    split: str | None = None,
-    val_fraction: float = 0.2,
-    split_seed: int = 0,
 ) -> SymbolicArrayBundle:
     if payload.get("storage_format") != "array_memmap_v1":
         raise ValueError(
@@ -272,20 +225,10 @@ def open_exported_symbolic_array_payload(
     metadata_path = _resolve_artifact_path(payload["metadata_path"])
     metadata = torch.load(metadata_path, map_location="cpu", weights_only=True)
 
-    split_rows: Tensor | None = None
-    if split is not None:
-        split_rows = _image_level_split_row_indices(
-            payload["records"],
-            split=split,
-            val_fraction=val_fraction,
-            split_seed=split_seed,
-        )
-
     keep = _selected_indices_from_metadata(
         metadata,
         random_state=random_state,
         neg_ratio=neg_ratio,
-        restrict_to=split_rows,
     )
 
     feature_grids = _open_selected_feature_grids(

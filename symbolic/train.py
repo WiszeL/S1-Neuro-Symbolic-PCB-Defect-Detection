@@ -93,18 +93,12 @@ def _load_symbolic_data(
     export_path: str | Path,
     random_state: int = 42,
     neg_ratio: float | None = None,
-    split: str | None = None,
-    val_fraction: float = 0.2,
-    split_seed: int = 0,
 ) -> tuple[Any, Any, Any]:
     bundle = open_exported_symbolic_array_payload(
         torch.load(export_path, map_location="cpu", weights_only=True),
         random_state=random_state,
         feature_dtype="float32",
         neg_ratio=neg_ratio,
-        split=split,
-        val_fraction=val_fraction,
-        split_seed=split_seed,
     )
     feature_matrix = bundle.feature_vectors
     labels = bundle.teacher_labels.detach().cpu().numpy()
@@ -186,6 +180,7 @@ def _evaluate_trained_model_on_bundle(
         "tree_depth": tree.max_depth,
         "l1_lambda": float(training_config.get("l1_lambda", 0.0)),
         "sparsity_alpha": float(training_config.get("sparsity_alpha", 0.0)),
+        "class_weights": training_config.get("class_weights"),
         "metrics": metrics,
     }
 
@@ -194,17 +189,11 @@ def evaluate_heldout(
     export_path: str | Path,
     checkpoint_path: str | Path,
     random_state: int = 42,
-    split: str | None = None,
-    val_fraction: float = 0.2,
-    split_seed: int = 0,
+    summary_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a checkpoint on an export dump.
-
-    With ``split=None`` (default), evaluates on the full dump — this is the
-    single final `test.txt` evaluation. Pass ``split="val"`` against the
-    *trainval* export to score a hyperparameter candidate during model
-    selection instead (see notebooks/03's val sweep); ``split="train"``
-    evaluates on the complementary slice.
+    """Evaluate a trained checkpoint on a full export dump (the single final
+    `test.txt` evaluation). When ``summary_path`` is given, the result dict is
+    also written there as JSON.
     """
     print(f"Loading heldout evaluation data from {export_path}...", flush=True)
     t0 = perf_counter()
@@ -213,9 +202,6 @@ def evaluate_heldout(
     bundle, feature_matrix, labels = _load_symbolic_data(
         export_path,
         random_state=random_state,
-        split=split,
-        val_fraction=val_fraction,
-        split_seed=split_seed,
     )
     print(
         f"Loaded {feature_matrix.shape[0]:,} samples in {_format_duration(perf_counter() - t0)}",
@@ -230,7 +216,7 @@ def evaluate_heldout(
         labels=labels,
     )
 
-    return {
+    result = {
         "export_path": str(export_path),
         "sample_count": feature_matrix.shape[0],
         "class_names": bundle.class_names,
@@ -238,8 +224,13 @@ def evaluate_heldout(
         "tree_depth": heldout_model["tree_depth"],
         "l1_lambda": heldout_model["l1_lambda"],
         "sparsity_alpha": heldout_model["sparsity_alpha"],
+        "class_weights": heldout_model["class_weights"],
         "metrics": heldout_model["metrics"],
     }
+    if summary_path is not None:
+        ensure_dir(Path(summary_path).parent)
+        save_json(result, summary_path)
+    return result
 
 
 def train_symbolic_tree(
@@ -258,9 +249,6 @@ def train_symbolic_tree(
         export_path,
         random_state=sodt_config["random_state"],
         neg_ratio=data_config.get("neg_ratio"),
-        split=data_config.get("split"),
-        val_fraction=float(data_config.get("val_fraction", 0.2)),
-        split_seed=int(data_config.get("split_seed", 0)),
     )
     print(
         f"Symbolic training data ready in {_format_duration(perf_counter() - load_start_time)}.",
@@ -408,6 +396,7 @@ def train_symbolic_tree(
         "tree_depth": int(sodt_config["tree_depth"]),
         "l1_lambda": float(sodt_config["l1_lambda"]),
         "sparsity_alpha": float(sodt_config["sparsity_alpha"]),
+        "class_weights": artifact["training_config"]["class_weights"],
         "training_config": artifact["training_config"],
     }
     if summary_path is not None:
@@ -521,6 +510,7 @@ def prune_symbolic_tree(
         "tree_depth": tree_depth,
         "l1_lambda": l1_lambda,
         "sparsity_alpha": sparsity_alpha,
+        "class_weights": training_config.get("class_weights"),
         "training_config": training_config,
     }
 

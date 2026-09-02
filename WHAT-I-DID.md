@@ -181,15 +181,21 @@ this section exists so the correction is visible, not silent.
    construction*. That belongs in this document as a stated property of the mechanism, not as a
    number sitting next to Grad-CAM's in a results table.
 
-2. **No validation split — hyperparameters were being selected against `test.txt`.** A
-   config comment literally read "Upweight the classes with the worst FN counts... on test."
-   Both source papers hold out a validation set for exactly this kind of selection (Hada §6.1
-   splits 1000/100/200 for train/val/test; §4 step 1 explicitly picks the tree with "close to
-   highest validation accuracy"). **Fix:** `symbolic/dataset.py` now supports an image-level
-   train/val split of the `trainval` export (`split`/`val_fraction`/`split_seed`), and
-   `notebooks/03`'s new "Hyperparameter Selection" section sweeps the six configurations already
-   explored (plus one class-weighting ablation) on `train`→`val`, with an explicit manual
-   promotion step. `test.txt` is now touched exactly once, after promotion.
+2. **Hyperparameters were being selected against `test.txt`.** A config comment literally read
+   "Upweight the classes with the worst FN counts... on test." **Fix:** `tree_depth`,
+   `l1_lambda`, `sparsity_alpha`, and `class_weights` are now fixed a priori in
+   `configs/symbolic_train.yaml` and disclosed there as a stated design choice — the config is
+   the single source of truth, nothing overrides it, and no selection procedure runs against any
+   evaluation split. This matches both source papers, which fix tree depth before training rather
+   than searching it (Hada §6.1 depth 6, §6.2 depth 5; Kairgeldin §6 depth 5). `test.txt` is
+   touched exactly once, at the end.
+
+   A middle version of this codebase instead added an image-level train/val split of the
+   `trainval` export and a validation sweep in `notebooks/03`. That was removed: at ~3 h per TAO
+   run it cost three extra full trainings to choose four numbers the papers fix a priori, it
+   shipped no model of its own (the final tree is always retrained from scratch on the full
+   dump), and reporting a config as "won on val" while shipping a differently-trained tree is
+   itself a thing to defend. Fixing the values a priori is the smaller claim.
 
 3. **Teacher-confidence weighting was credited but unused.** See §5 — removed.
 
@@ -242,10 +248,10 @@ this section exists so the correction is visible, not silent.
 
 ## 7. Results
 
-**To be regenerated.** The val-split hyperparameter sweep (§6.2) and the TAO fidelity fixes
-below have not yet been re-run through training; the detection table below is the last recorded
-result, from before this audit, and should not be read as the final numbers. Regenerate via
-`notebooks/03`'s sweep → promote → `notebooks/06`, then replace this table.
+**To be regenerated.** The a-priori config (§6.2) and the TAO fidelity fixes below have not yet
+been re-run through training; the detection table below is the last recorded result, from before
+this audit, and should not be read as the final numbers. Regenerate via `notebooks/03` (train →
+evaluate once on `test.txt`) → `notebooks/06`, then replace this table.
 
 | Metric | Faster R-CNN | NeSy (FRCNN + SODT) |
 |---|---|---|
@@ -263,7 +269,8 @@ reprinted here. The exact-attribution figures quoted in §8 (necessity 0.876, lo
 in the same `notebooks/06` pass that replaces this table.
 
 **Two findings from the pre-audit run remain evidentially sound and are expected to hold under
-re-measurement**, since neither depends on the faithfulness protocol or the val split:
+re-measurement**, since neither depends on the faithfulness protocol or on how hyperparameters
+are chosen:
 
 - **Held-out mimic accuracy caps at ~97%, and this is teacher noise, not tree capacity.**
   Stratifying tree–teacher agreement by the teacher's own softmax confidence: at confidence
