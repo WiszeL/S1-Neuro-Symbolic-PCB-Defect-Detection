@@ -1,6 +1,6 @@
 data:
   neg_ratio: 2
-  storage_dtype: float16
+  storage_dtype: float32
   # Image-level model-selection split of the trainval export. null = full
   # dump (used for the final promoted training run, after the val sweep in
   # notebooks/03 has picked tree_depth/l1_lambda/sparsity_alpha/class_weights).

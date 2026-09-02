@@ -583,11 +583,9 @@ def fit_tree_with_tao(
                 l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha)
             )
 
-            # Cap LIBLINEAR samples to prevent memory exhaustion.
-            # L1 logistic regression on 30K random samples gives nearly
-            # identical solutions to the full set, and avoids allocating
-            # multi-GB float64 matrices that cause swap death.
-            solver_cap = 30_000
+            # Cap LIBLINEAR samples to bound memory on large reduced sets.
+            # 0 = no cap.
+            solver_cap = 120_000
 
             # Pass the full features memmap and the subset indices separately.
             # This allows the solver to stream the data in chunks rather than

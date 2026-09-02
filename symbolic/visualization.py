@@ -94,7 +94,7 @@ def visualize_spatial_topology(
 ) -> plt.Figure:
     """Visualize RoI Align spatial topology preservation.
 
-    Mean-pools the 64 FPN channels of the exported ``(C, 7, 7)`` RoI Align
+    Mean-pools the C FPN channels of the exported ``(C, 7, 7)`` RoI Align
     tensors down to a ``(7, 7)`` spatial activation map.  Random high-confidence
     samples per class are shown to demonstrate that spatial geometry is
     preserved in the feature grid before being flattened for SODT training.
