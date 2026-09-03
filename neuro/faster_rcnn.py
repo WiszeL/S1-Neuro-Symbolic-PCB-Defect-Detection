@@ -167,9 +167,10 @@ class SFPSPyramid(nn.Module):
         weights: one for semantic content and one for spatial detail.
         """
 
-        # Fung's SKNet-style attention compresses c→z→2c; z is the bottleneck
-        # width. Paper leaves z unspecified; z=64 pairs with the 256ch neck.
-        HIDDEN_CHANNELS = 64
+        # Bottleneck width for the c -> z -> 2c attention projections (Fung
+        # leaves z unspecified). Fixed directly rather than exposed as a
+        # config knob.
+        HIDDEN_CHANNELS = 32
 
         def __init__(self, channels: int) -> None:
             super().__init__()
@@ -198,9 +199,8 @@ class SFPSPyramid(nn.Module):
 
             return weights[:, 0] * semantic_feature + weights[:, 1] * spatial_feature
 
-    # Fixed to match BoxHead.POOLED_CHANNELS, which assumes 256-channel
-    # pooled RoI features; the two must change together. 256 = Fung et al.
-    OUT_CHANNELS = 256
+    # Must match BoxHead.POOLED_CHANNELS; the two change together.
+    OUT_CHANNELS = 64
 
     def __init__(self) -> None:
         super().__init__()
@@ -398,7 +398,7 @@ class RoIAlign(nn.Module):
         proposal_boxes: list[Tensor],
         image_shapes: list[tuple[int, int]],
     ) -> Tensor:
-        """Return true RoI Align pooled features: [total_rois, 256, 7, 7]."""
+        """Return true RoI Align pooled features: [total_rois, 64, 7, 7]."""
 
         return self.pool(features, proposal_boxes, image_shapes)
 
@@ -434,9 +434,8 @@ class BoxHead(nn.Module):
     classification and bounding-box regression.
     """
 
-    # pooled_channels must match SFPSPyramid.OUT_CHANNELS (256): BoxHead consumes
-    # RoI-Align-pooled 256-channel, 7x7 feature grids from the backbone neck.
-    POOLED_CHANNELS = 256
+    # Must match SFPSPyramid.OUT_CHANNELS; the two change together.
+    POOLED_CHANNELS = 64
     POOLED_SIZE = 7
     REPRESENTATION_SIZE = 1024
 

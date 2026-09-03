@@ -31,25 +31,24 @@ ones), pixel-shuffle upsampling in each CP block, SF attention (SKNet-style) fus
 pyramid levels, multi-scale training, L1 regression loss on both the RPN and RoI heads, and
 Soft-NMS at inference.
 
-One deliberate deviation from the paper, disclosed in `README.md`:
+Two deliberate deviations from the paper, both disclosed in `README.md`:
 
+- **Neck width: 64 channels, not 256.** This is not a memory shortcut — it is a cross-stage
+  design choice made for the *next* stage. TAO's per-node reduced problem is an L1-logistic fit;
+  at the paper's 256ch (a 12,544-dimensional pooled feature) the samples-per-feature ratio sits
+  well below where a regularized logistic fit is well-posed. At 64ch (3,136-dimensional) the
+  ratio is ≈9.6. Narrowing the neck keeps the SODT's node fits well-posed and its splits sparse
+  and interpretable — the actual objective of the symbolic stage. The cost: absolute AP is not
+  directly comparable to Fung et al.'s Table 1/3/4, which were measured at 256ch. The
+  architecture itself — topology, loss functions, Soft-NMS, multi-scale training — is reproduced
+  faithfully; only the width differs, and only for a stated reason.
 - **15 training epochs, not 12.** Simple disclosure; a second retrain to shave three epochs was
   not judged worth it.
 
 Fung et al.'s SF attention (§3.3) compresses the pooled descriptor to `z` channels before
-expanding it back — their symbol, but they never give `z` a value. It is set to 64 here as an
+expanding it back — their symbol, but they never give `z` a value. It is set to 32 here as an
 assumption, not a deviation. (Unrelated to Kairgeldin's `z`, the feature vector fed to the
 tree.)
-
-**Neck width: 256 channels, matching the paper.** An earlier version of this work ran the
-SF-PSPyramid at 128 channels, on the reasoning that the *next* stage's TAO node fits — an
-L1-logistic regression per internal node — would be better-posed on a narrower pooled feature:
-at 256ch the pooled grid is 12,544-dimensional, and against the then-uncapped solver that put
-the samples-per-feature ratio near the edge of where a regularized logistic fit behaves. That
-reasoning was retired once the TAO solver gained an explicit sample cap (see §3): the cap fixes
-the well-posedness concern directly, at the node level, without paying for it with a
-paper-divergent architecture. The neck is now 256ch as Fung et al. specify, so absolute AP is
-comparable to their Table 1/3/4 up to the 15-vs-12-epoch difference.
 
 ## 3. The student: SODT + TAO (Hada et al., 2024; Kairgeldin et al., 2025)
 
@@ -63,10 +62,10 @@ implemented exactly: `λ · |R_i|^α`.
 **One deviation from Hada/Kairgeldin: a solver sample cap.** Both papers fit each internal
 node's reduced problem on its full reduced set. Here the LIBLINEAR fit is capped at 120,000
 samples (`symbolic/tao.py`, `solver_cap`): LIBLINEAR is double-precision and materializes the
-feature matrix densely, so at 256ch an uncapped root reduced set (~350k rows on the DeepPCB
-`trainval` export) needs roughly 50 GB of RAM. Only the root and the top two or three nodes
+feature matrix densely, so an uncapped root reduced set (~350k rows on the DeepPCB `trainval`
+export, D=3136 at 64ch) needs roughly 9 GB of RAM. Only the root and the top two or three nodes
 ever exceed 120k — every deeper node still fits on its full set. At the cap the
-samples-per-feature ratio is ≈9.6, comfortably in the well-posed regime, and the subsample is
+samples-per-feature ratio is ≈38, comfortably in the well-posed regime, and the subsample is
 uniform (unbiased; the per-node regularization `C` is still computed from the true `|R_i|`).
 The effect on the learned splits is expected to be within TAO's run-to-run variation, but this
 has not been verified against an uncapped baseline.
@@ -79,7 +78,7 @@ evaluation secretly use ground-truth boxes instead of the detector's own pipelin
    standard objectness-ranked, post-NMS RPN output (`proposal_source:
    "rpn_pre_detector_postprocess"` in the export manifest).
 2. **Features are RoI Align on those proposals** — the identical `MultiScaleRoIAlign` cut the
-   SODT consumes at inference. Pooled grid shape: `256×7×7`.
+   SODT consumes at inference. Pooled grid shape: `64×7×7`.
 3. **Labels are the teacher's own predictions** — `argmax(softmax(classifier(box_head(pooled))))`
    on the same RoIs, not ground truth. Ground truth appears only as a side channel
    (`matched_gt_boxes`, `gt_iou`, `has_matched_gt`) for spatial explanation metrics, matched by
