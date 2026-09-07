@@ -1,10 +1,4 @@
-"""RoI Align spatial-topology visualization for the symbolic export.
-
-Visualizes the (C, 7, 7) RoI Align pooled tensors to demonstrate that
-spatial geometry is preserved in the feature grid before being flattened
-for SODT training.  Channel-wise mean pooling collapses the FPN channels
-into a pure (7, 7) spatial activation map per sample.
-"""
+"""Sanity check: the flattened grid still carries spatial layout."""
 
 from __future__ import annotations
 
@@ -19,7 +13,7 @@ import torch
 def _load_manifest_and_features(
     export_path: str | Path,
 ) -> tuple[dict[str, Any], np.memmap, dict[str, Any]]:
-    """Load the teacher export manifest, metadata, and open features as memmap."""
+    """Open the export without loading features into RAM."""
     export_path = Path(export_path)
     manifest: dict[str, Any] = torch.load(
         export_path, map_location="cpu", weights_only=True
@@ -35,7 +29,7 @@ def _load_manifest_and_features(
     feature_storage = manifest["feature_storage"]
     feature_path = Path(feature_storage["path"])
     if not feature_path.exists():
-        # Fall back to relative resolution from the manifest's storage dir.
+        # Paths move with the export dir, so retry relative to it.
         storage_dir = Path(manifest.get("storage_dir", feature_path.parent))
         feature_path = storage_dir / feature_path.name
     features = np.memmap(
@@ -55,15 +49,7 @@ def _select_random_samples(
     top_k_multiplier: int,
     rng: np.random.Generator,
 ) -> list[list[tuple[int, float]]]:
-    """Pick *num_samples* random high-confidence RoIs per class.
-
-    For each class the top ``num_samples * top_k_multiplier`` scoring RoIs
-    (among those the teacher labelled as that class) are shortlisted, then
-    *num_samples* are drawn uniformly at random from that pool.
-
-    Returns a list of length *num_classes*, each containing a list of
-    ``(roi_index, score)`` tuples.
-    """
+    """Confident but varied picks per class, for the sanity plot."""
     selections: list[list[tuple[int, float]]] = []
     for cls_idx in range(num_classes):
         mask = teacher_labels == cls_idx
@@ -92,32 +78,7 @@ def visualize_spatial_topology(
     seed: int = 42,
     top_k_multiplier: int = 10,
 ) -> plt.Figure:
-    """Visualize RoI Align spatial topology preservation.
-
-    Mean-pools the C FPN channels of the exported ``(C, 7, 7)`` RoI Align
-    tensors down to a ``(7, 7)`` spatial activation map.  Random high-confidence
-    samples per class are shown to demonstrate that spatial geometry is
-    preserved in the feature grid before being flattened for SODT training.
-
-    Parameters
-    ----------
-    export_path:
-        Path to the teacher manifest ``.pt`` file produced by
-        :func:`symbolic.export.extract_dataset_from_teacher`.
-    num_samples:
-        Number of random picks per class (default 2).
-    seed:
-        Random seed for reproducibility.
-    top_k_multiplier:
-        The top ``num_samples * top_k_multiplier`` scoring RoIs per class
-        are shortlisted before random selection (keeps picks confident but
-        varied).
-
-    Returns
-    -------
-    matplotlib.figure.Figure
-        The figure containing the spatial-topology heatmap grid.
-    """
+    """One plot proving the grid keeps spatial layout before flattening."""
     manifest, features, metadata = _load_manifest_and_features(export_path)
     class_names: tuple[str, ...] = tuple(manifest["class_names"])
     num_classes = len(class_names)
@@ -136,7 +97,7 @@ def visualize_spatial_topology(
         rng=rng,
     )
 
-    # --- Build figure: one row per class, one column per sample ---
+    # Layout
     fig, axes = plt.subplots(
         num_classes,
         num_samples,
@@ -157,7 +118,7 @@ def visualize_spatial_topology(
 
             if col < len(cls_selections):
                 roi_idx, score = cls_selections[col]
-                spatial_map = features[roi_idx].mean(axis=0)  # (C,H,W) -> (H,W)
+                spatial_map = features[roi_idx].mean(axis=0)
 
                 ax.imshow(
                     spatial_map,
@@ -167,7 +128,7 @@ def visualize_spatial_topology(
                     vmax=float(spatial_map.max()),
                 )
 
-                # White grid lines at every cell boundary.
+                # Cell borders.
                 for edge in range(grid_size + 1):
                     ax.axhline(edge - 0.5, color="white", linewidth=0.5)
                     ax.axvline(edge - 0.5, color="white", linewidth=0.5)
@@ -206,7 +167,7 @@ def visualize_spatial_topology(
             ax.set_xticks([])
             ax.set_yticks([])
 
-            # Row label on the first column only.
+            # Labels
             if col == 0:
                 ax.set_ylabel(
                     cls_name,

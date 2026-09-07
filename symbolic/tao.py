@@ -13,9 +13,7 @@ from util.features import ensure_float32
 _TAO_CHUNK_SIZE = 2048
 
 
-# Both papers specify Gaussian(0,1) init at the decision nodes (Hada Fig.1 /
-# Kairgeldin Fig.5); TAO's first iteration refits every node from scratch
-# anyway, so the scale only affects which local optimum the first fit lands in.
+# Gaussian init per both papers; the scale only picks which local optimum the first fit lands in.
 _INIT_WEIGHT_SCALE = 1.0
 
 
@@ -34,11 +32,7 @@ def initialize_tree_weights(
         scale=_INIT_WEIGHT_SCALE,
         size=tree.node_bias.shape,
     ).astype(np.float32)
-    # Both papers randomize leaf labels too (Hada Fig.1 / Kairgeldin Fig.5).
-    # This matters beyond fidelity: a majority-vote leaf init makes every leaf
-    # agree on the dominant class whenever one class dominates the data (e.g.
-    # background under neg_ratio subsampling), which zeroes every node's
-    # |left_loss - right_loss| signal and deadlocks TAO before it starts.
+    # Random leaf labels too — a majority vote would deadlock TAO on dominant classes.
     tree.leaf_labels = generator.integers(
         0, tree.num_classes, size=tree.leaf_labels.shape
     ).astype(np.int64)
@@ -59,13 +53,11 @@ def _select_rows(source: np.ndarray, indices: np.ndarray) -> np.ndarray:
     if indices.size == 0:
         return np.empty((0, source.shape[1]), dtype=source.dtype)
 
-    # Optimization: if indices are contiguous, we can use a slice which is
-    # extremely fast and returns a view if source is a memmap.
+    # Slices stay on disk when rows are contiguous.
     if _is_contiguous_indices(indices):
         return source[int(indices[0]) : int(indices[-1]) + 1]
 
-    # Chunked reads prevent massive numpy IO scatter-gather freezes
-    # when selecting thousands of fragmented rows from a memmap.
+    # Read in chunks so scattered rows don't stall on disk.
     if indices.size <= _TAO_CHUNK_SIZE:
         return source[indices]
 
@@ -154,9 +146,7 @@ def update_leaf_predictions(
         counts = np.bincount(labels[node_indices], minlength=tree.num_classes).astype(
             np.float32
         )
-        # Per-class weights scale counts uniformly within each class, so
-        # weighting after binning is exact. Weighted counts feed both the
-        # leaf label and the distribution so argmax semantics stay consistent.
+        # Weighting after counting is exact, and keeps label and distribution in agreement.
         if class_weights is not None:
             counts = counts * class_weights.astype(np.float32)
         tree.leaf_labels[leaf_offset] = int(counts.argmax())
@@ -170,10 +160,8 @@ def _prepare_reduced_problem_batch(
     labels: np.ndarray,
     sample_weights: np.ndarray,
     indices: np.ndarray | None = None,
-    random_state: int = 42,
-    max_solver_samples: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Cap and materialize the rows a node's reduced problem will fit on.
+    """Materialize the rows a node's reduced problem will fit on.
 
     Split out from the solver so the acceptance check (below) can score the
     old vs. new weights on the exact same batch without a second data read.
@@ -182,24 +170,7 @@ def _prepare_reduced_problem_batch(
     if labels.size == 0:
         return None
 
-    # ---- Subsample cap for LIBLINEAR memory safety ----
-    # max_solver_samples > 0: cap to that many samples
-    # max_solver_samples == 0: no cap (use all samples)
-    # The regularization C is computed from the actual node size (N_i),
-    # so this cap only affects solver sample count, not regularization strength.
-    n = labels.size
-    if max_solver_samples > 0 and n > max_solver_samples:
-        rng = np.random.RandomState(random_state)
-        keep = np.sort(rng.choice(n, size=max_solver_samples, replace=False))
-        labels = labels[keep]
-        sample_weights = sample_weights[keep]
-        if indices is not None:
-            indices = indices[keep]
-        else:
-            features = features[keep]
-
-    # Avoid materializing the full 'features' memmap.
-    # We only materialize the specific rows needed for this node.
+    # Only this node's rows ever leave the disk.
     if indices is not None:
         features = _select_rows(features, indices)
     else:
@@ -220,10 +191,9 @@ def solve_l1_logistic_reduced_problem(
     tolerance: float = 1e-4,
     zero_threshold: float = 1e-5,
     random_state: int = 42,
-    max_solver_samples: int = 0,
 ) -> tuple[np.ndarray, float]:
     batch = _prepare_reduced_problem_batch(
-        features, labels, sample_weights, indices, random_state, max_solver_samples
+        features, labels, sample_weights, indices
     )
     if batch is None:
         dim = features.shape[1]
@@ -243,17 +213,10 @@ def solve_l1_logistic_reduced_problem(
             "scikit-learn is required for the paper-faithful TAO reduced-problem solver."
         ) from exc
 
-    # ---------------------------------------------------------------------
-    # Match the paper solver family: L1 logistic regression with LIBLINEAR
-    # ---------------------------------------------------------------------
-    # Kairgeldin eq. 4: RP_i = Σ loss + λ·|R_i|^α · ‖w‖₁
-    # LIBLINEAR minimises: ‖w‖₁ + C·Σ loss, so 1/C = λ·|R_i|^α.
-    # The caller pre-computes the effective λ (= λ·N_i^α) and passes it
-    # as l1_lambda.  We set C = 1 / l1_lambda.
+    # Solver: L1 logistic via LIBLINEAR, the paper's solver family.
+    # LIBLINEAR takes C, so convert our lambda (C = 1/lambda).
 
-    # We convert directly to float64 here. This is what LIBLINEAR requires.
-    # By doing it now and letting the previous 'features' reference go,
-    # we avoid having both float32 and float64 copies in RAM simultaneously.
+    # Upcast for LIBLINEAR, dropping the float32 copy so RAM holds one.
     features_64 = batch_features.astype(np.float64)
 
     effective_lambda = max(float(l1_lambda), 1e-12)
@@ -285,9 +248,9 @@ def _reduced_problem_objective(
     bias: float,
     effective_lambda: float,
 ) -> float:
-    """RP_i(θ) = Σ weighted 0/1-loss + λ·‖w‖₁ (Kairgeldin eq. 2/4)."""
+    """This node's own score: mistakes plus sparsity penalty."""
     scores = features.astype(np.float64) @ weights.astype(np.float64) + bias
-    predicted_left = (scores >= 0.0).astype(np.int64)  # matches sodt.py routing
+    predicted_left = (scores >= 0.0).astype(np.int64)  # Same left-rule as sodt.py.
     loss = float(
         np.sum((predicted_left != labels).astype(np.float64) * sample_weights)
     )
@@ -305,14 +268,9 @@ def _accept_or_reject_node_update(
     new_bias: float,
     effective_lambda: float,
 ) -> tuple[np.ndarray, float]:
-    """Keep the new fit only if it does not increase the node's own RP
-    objective (Hada Fig.1 / Kairgeldin App.A.2: "accepting updates only if
-    they improve (2)"). The L1-logistic surrogate can occasionally make the
-    true weighted 0/1 objective worse; this is the cheap local guard against
-    that, using the exact batch already fit — no full-tree re-evaluation.
-    """
+    """Keep the new fit only if this node's own score didn't get worse."""
     if not np.any(old_weights) and old_bias == 0.0:
-        return new_weights, new_bias  # nothing fit yet at this node
+        return new_weights, new_bias  # No baseline yet, so the first fit always wins.
     old_objective = _reduced_problem_objective(
         batch_features, batch_labels, batch_sample_weights,
         old_weights, old_bias, effective_lambda,
@@ -339,10 +297,7 @@ def evaluate_tree(
     accuracy = float((predictions == labels).mean())
     nonzero_counts = tree.nonzero_weight_counts()
 
-    # Compute the full TAO objective: Σ 0/1-loss + λ Σ_i |R_i|^α ‖w_i‖₁
-    # (Kairgeldin eq. 3).  Used for convergence checking. Weighted by
-    # class_weights when training is class-weighted, so the convergence
-    # check tracks the objective TAO actually minimizes, not a different one.
+    # Full training score for the convergence check, weighted like training.
     misclassified = (predictions != labels).astype(np.float64)
     if class_weights is not None:
         misclassified *= class_weights[labels]
@@ -372,12 +327,7 @@ def evaluate_tree(
 
 
 def raise_if_tree_collapsed(tree: SparseObliqueDecisionTreeClassifier) -> None:
-    """Guard against silently saving a dead tree.
-
-    A collapsed tree (every internal node pruned, or every leaf voting the
-    same class) predicts one label for all inputs. It trains and evaluates
-    without error, so nothing else in the pipeline would ever flag it.
-    """
+    """Refuse one-class-for-everything trees — they'd train fine and fail silently."""
     nonzero_counts = tree.nonzero_weight_counts()
     active_internal_nodes = sum(count > 0 for count in nonzero_counts)
     distinct_leaf_labels = len(set(tree.leaf_labels.tolist()))
@@ -492,19 +442,8 @@ def fit_tree_with_tao(
         progress_bar = tqdm(iteration_range, desc=progress_desc or "TAO", leave=False)
         iteration_range = progress_bar
 
-    # Leaf predictions for the initial routing. Refreshed once at the end of
-    # each iteration below and reused as-is at the top of the next iteration
-    # — nothing mutates node_weights/node_bias between those two points, so
-    # recomputing again here would just repeat the same work.
-    #
-    # On a fresh init, keep the random leaf labels initialize_tree_weights just
-    # drew instead of majority-voting them: with an imbalanced label
-    # distribution (e.g. background under neg_ratio subsampling), a majority
-    # vote makes every leaf agree on the dominant class, which zeroes every
-    # node's |left_loss - right_loss| split signal and deadlocks TAO before
-    # the first node ever fits. The random labels give the first iteration
-    # something to route against; update_leaf_predictions takes over as
-    # normal from the end of iteration 1 onward.
+    # Leaf labels carry over from last iteration's refresh — recomputing here repeats the same work.
+    # Fresh trees keep their random leaves instead; voting now would deadlock TAO on dominant classes.
     reduced_sets = compute_reduced_sets(tree, features)
     if not freshly_initialized:
         update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
@@ -512,9 +451,7 @@ def fit_tree_with_tao(
     for iteration_index in iteration_range:
         iteration_start = perf_counter()
 
-        # ---------------------------------------------------------------------
-        # Solve each internal-node reduced problem in reverse breadth-first order
-        # ---------------------------------------------------------------------
+        # Solve nodes
         for node_index in range(tree.num_internal_nodes - 1, -1, -1):
             node_indices = reduced_sets.get(node_index, np.zeros((0,), dtype=np.int64))
             node_event = {
@@ -558,9 +495,7 @@ def fit_tree_with_tao(
             right_loss = (right_predictions != node_labels).astype(np.float32)
             sample_weights = np.abs(left_loss - right_loss)
 
-            # Per-class weights make misrouting the weighted classes costlier
-            # in the node's reduced problem (e.g. upweight minority defect
-            # classes so boundaries lean away from background).
+            # Misrouting weighted classes costs more, so boundaries lean away from background.
             if class_weights is not None:
                 sample_weights *= class_weights[node_labels].astype(np.float32)
 
@@ -576,27 +511,17 @@ def fit_tree_with_tao(
             pseudolabels = (left_loss <= right_loss).astype(np.int64)
             solver_indices = node_indices[positive_weight_mask]
 
-            # Kairgeldin eq. 3-4: RP_i = Σ loss + λ·h_α(|R_i|)·‖w‖₁
-            # where h_α(t) = t^α.  LIBLINEAR uses ‖w‖₁ + C·Σ loss,
-            # so C = 1 / (λ · |R_i|^α).
+            # Penalty sized by this node's sample count (same lambda-to-C deal as above).
             effective_lambda = float(
                 l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha)
             )
 
-            # Cap LIBLINEAR samples to bound memory on large reduced sets.
-            # 0 = no cap.
-            solver_cap = 120_000
-
-            # Pass the full features memmap and the subset indices separately.
-            # This allows the solver to stream the data in chunks rather than
-            # materializing a multi-gigabyte array in RAM.
+            # Stream rows in chunks so big nodes never sit fully in RAM.
             batch = _prepare_reduced_problem_batch(
                 features,
                 pseudolabels[positive_weight_mask],
                 sample_weights[positive_weight_mask],
                 indices=solver_indices,
-                random_state=random_state,
-                max_solver_samples=solver_cap,
             )
             batch_features, batch_labels, batch_sample_weights = batch
 
@@ -611,9 +536,7 @@ def fit_tree_with_tao(
                 random_state=random_state,
             )
 
-            # Accept the fit only if it does not worsen this node's own
-            # reduced-problem objective, scored on the same materialized
-            # batch — no extra data read.
+            # Accept
             weights, bias = _accept_or_reject_node_update(
                 batch_features,
                 batch_labels,
@@ -637,9 +560,7 @@ def fit_tree_with_tao(
                     }
                 )
 
-        # Refresh leaf predictions and reduced sets under the routing just
-        # fit above — scores this iteration's metrics and carries over as
-        # the starting state for the next iteration's node solving.
+        # Refresh routing
         reduced_sets = compute_reduced_sets(tree, features)
         update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
@@ -664,8 +585,7 @@ def fit_tree_with_tao(
                 obj=f"{metrics['objective']:.1f}",
             )
 
-        # Convergence check (Hada Fig. 1 / Kairgeldin Fig. 5):
-        # stop when the objective function decreases less than a tolerance.
+        # Stop when the score barely moves.
         if len(history) >= 2:
             prev_obj = history[-2]["objective"]
             curr_obj = metrics["objective"]

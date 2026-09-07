@@ -1,11 +1,4 @@
-"""Exact path attribution: the SODT decision path's score decomposed onto the
-pre-pooling FPN feature map (see neurosym/heatmap.py).
-
-The load-bearing property is exactness — the per-pixel contribution sums back to
-the node/path score with no approximation, because RoI-Align is linear. The
-other checks confirm the presentation wrapper stays inside the box and follows
-the tree's channel selection.
-"""
+"""The map must sum back to the score exactly — linearity, not luck."""
 
 import numpy as np
 import torch
@@ -35,8 +28,7 @@ def _single_leaf_tree(feature_shape: tuple[int, int, int]) -> SparseObliqueDecis
 
 
 def _roi_align(feature_shape: tuple[int, int, int]) -> MultiScaleRoIAlign:
-    # One level => LevelMapper can only route to it, so the exactness identity
-    # is deterministic in a synthetic test.
+    # One level keeps the identity deterministic.
     return MultiScaleRoIAlign(
         featmap_names=["p2"], output_size=feature_shape[1:], sampling_ratio=2
     )
@@ -55,7 +47,7 @@ def test_exact_fpn_contribution_sums_to_the_path_score():
     fpn["p2"][:, 2:10, 2:10] = torch.rand(3, 8, 8) + 0.5
     box = torch.tensor([4.0, 4.0, 20.0, 20.0])
 
-    # Grid the tree splits on = what RoI-Align produces for this box.
+    # Setup
     grid = roi_align(
         {k: v.unsqueeze(0) for k, v in fpn.items()}, [box.unsqueeze(0)], [PROCESSED_SIZE]
     )[0].numpy().astype(np.float32)
@@ -108,8 +100,7 @@ def test_map_crops_to_the_processed_box():
 
 
 def test_signed_evidence_map_sums_to_the_node_score_exactly():
-    # The leaf-only pooled-grid path (unchanged by the exact-attribution work):
-    # the signed evidence map's total is direction*(w.x) = direction*(score - bias).
+    # Leaf-only path, untouched by exact-attribution work.
     rng = np.random.default_rng(0)
     feature_shape = (5, 4, 4)
     tree = SparseObliqueDecisionTreeClassifier(
@@ -131,6 +122,52 @@ def test_signed_evidence_map_sums_to_the_node_score_exactly():
         assert abs(actual - expected) < 1e-4
 
 
+def test_exact_fpn_contribution_sums_to_each_node_score_not_just_the_path():
+    """Per-node claim: each node's own map is a decomposition of THAT node's
+    score, not just the whole path's. Note the bias correction — `score` from
+    `decision_path` is `w.x + b`, but the weight-grid contribution only
+    carries `w.x` (direction-signed), so the identity is `direction*(score-bias)`,
+    same as `test_signed_evidence_map_sums_to_the_node_score_exactly` below."""
+    rng = np.random.default_rng(1)
+    feature_shape = (3, 4, 4)
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=3, num_classes=2, input_dim=int(np.prod(feature_shape)),
+        feature_shape=feature_shape,
+    )
+    tree.node_weights[:] = rng.normal(size=tree.node_weights.shape).astype(np.float32)
+    tree.node_bias[:] = rng.normal(size=tree.node_bias.shape).astype(np.float32)
+    roi_align = _roi_align(feature_shape)
+
+    fpn = _fpn(3, 16)
+    fpn["p2"][:, 2:10, 2:10] = torch.rand(3, 8, 8) + 0.5
+    box = torch.tensor([4.0, 4.0, 20.0, 20.0])
+
+    grid = roi_align(
+        {k: v.unsqueeze(0) for k, v in fpn.items()}, [box.unsqueeze(0)], [PROCESSED_SIZE]
+    )[0].numpy().astype(np.float32)
+
+    path = tree.decision_path(grid.reshape(-1))
+    node_maps = []
+    for step in path:
+        contribution = exact_fpn_contribution(
+            tree, grid, roi_align, fpn, "p2", box, PROCESSED_SIZE, path=[step],
+        )
+        node_maps.append(contribution)
+
+        direction = 1.0 if step.went_left else -1.0
+        bias = float(tree.node_bias[step.node_index])
+        expected = direction * (step.score - bias)
+        assert abs(float(contribution.sum()) - expected) < 1e-4
+
+    # Additivity: the six (here: three) node maps sum to the path map exactly
+    # — everything's linear, so this must hold before `abs()` collapses sign.
+    path_contribution = exact_fpn_contribution(
+        tree, grid, roi_align, fpn, "p2", box, PROCESSED_SIZE, path=path,
+    )
+    summed_nodes = torch.stack(node_maps, dim=0).sum(dim=0)
+    assert torch.allclose(summed_nodes, path_contribution, atol=1e-4)
+
+
 class _FakeModel:
     def __init__(self, tree: SparseObliqueDecisionTreeClassifier, roi_align) -> None:
         self.symbolic_tree = tree
@@ -150,7 +187,7 @@ def test_explain_hybrid_detection_projects_attribution_from_processed_box():
 
     fpn_map = torch.zeros(2, 32, 32)
     fpn_map[0, 10:20, 10:20] = 3.0  # hot inside the processed box
-    # Original-image proposal box is 2x the processed-space box.
+    # Setup: original box is 2x the processed box.
     proposal_box = torch.tensor([20.0, 20.0, 40.0, 40.0])
     proposal_box_processed = torch.tensor([10.0, 10.0, 20.0, 20.0])
 
@@ -190,5 +227,6 @@ if __name__ == "__main__":
     test_map_follows_the_tree_selected_channel()
     test_map_crops_to_the_processed_box()
     test_signed_evidence_map_sums_to_the_node_score_exactly()
+    test_exact_fpn_contribution_sums_to_each_node_score_not_just_the_path()
     test_explain_hybrid_detection_projects_attribution_from_processed_box()
     print("OK")

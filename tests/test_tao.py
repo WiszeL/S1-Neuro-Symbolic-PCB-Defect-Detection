@@ -1,6 +1,4 @@
-"""Smoke checks for the TAO fidelity fixes: N(0,1) init, class-weighted
-convergence objective, and the cheap per-node acceptance check that never
-lets a node's own reduced-problem objective get worse."""
+"""TAO fixes locked: init scale, weighted objective, accept-only-improvements."""
 
 import numpy as np
 
@@ -33,14 +31,12 @@ def test_initialize_tree_weights_uses_configured_scale():
         max_depth=2, num_classes=2, input_dim=10
     )
     initialize_tree_weights(tree, random_state=0)
-    # A N(0, 1) sample of this size should not look like a N(0, 1e-3) sample.
+    # Spread must read ~1, not ~0.001.
     assert np.std(tree.node_weights) > 0.3
 
 
 def test_initialize_tree_weights_randomizes_leaf_labels():
-    # Both papers randomize leaf labels alongside hyperplanes (Hada Fig.1 /
-    # Kairgeldin Fig.5). A tree with several leaves and several classes
-    # should not have every leaf land on the same label by chance.
+    # Papers randomize leaves too; several leaves must not all agree.
     tree = SparseObliqueDecisionTreeClassifier(
         max_depth=4, num_classes=5, input_dim=6
     )
@@ -60,10 +56,9 @@ def test_evaluate_tree_objective_is_class_weighted_when_given():
     class_weights = np.array([1.0, 5.0], dtype=np.float32)  # weight is indexed by TRUE label
     weighted = evaluate_tree(tree, features, labels, class_weights=class_weights)
 
-    # Two misclassified 0-labeled samples, weight 1.0 each -> unweighted loss 2.0.
+    # Baseline loss.
     assert unweighted["objective"] == 2.0
-    # Same two samples, but weighted by class_weights[0] = 1.0 -> unchanged here;
-    # flip the weighting to confirm it actually reads class_weights[labels].
+    # Flipped weights must actually bite.
     class_weights_flipped = np.array([3.0, 1.0], dtype=np.float32)
     weighted_flipped = evaluate_tree(
         tree, features, labels, class_weights=class_weights_flipped
@@ -84,8 +79,7 @@ def test_acceptance_check_never_increases_the_local_objective():
     effective_lambda = 0.1
 
     for _ in range(20):
-        # A random "candidate" fit standing in for what the L1-logistic
-        # surrogate solver might occasionally propose.
+        # Fake solver proposal.
         new_weights = rng.normal(size=(dim,)).astype(np.float32)
         new_bias = float(rng.normal())
 
@@ -139,18 +133,13 @@ def test_fit_tree_with_tao_runs_end_to_end_without_teacher_confidence():
 
 
 def test_fit_tree_with_tao_does_not_deadlock_on_dominant_class():
-    # Regression test for the cold-start deadlock: when one class dominates
-    # (here ~67%, matching neg_ratio=2 background fraction), a majority-vote
-    # leaf init makes every leaf agree on the dominant class, zeroing every
-    # node's |left_loss - right_loss| split signal so no node can ever fit.
-    # This must not happen: fails on the pre-fix majority-vote leaf init,
-    # passes with initialize_tree_weights's random leaf-label bootstrap.
+    # Deadlock guard: dominant class + majority vote means no node ever fits.
     rng = np.random.default_rng(7)
     n, dim = 900, 6
     features = rng.normal(size=(n, dim)).astype(np.float32)
     true_weights = rng.normal(size=(dim,)).astype(np.float32)
     scores = features @ true_weights
-    # Bottom third minority classes 1/2, top two-thirds dominant class 0.
+    # Setup: minority at the bottom, dominant class on top.
     threshold = np.quantile(scores, 1 / 3)
     labels = np.where(scores <= threshold, rng.integers(1, 3, size=n), 0).astype(
         np.int64

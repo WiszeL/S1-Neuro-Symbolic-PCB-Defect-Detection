@@ -1,5 +1,4 @@
-"""Smoke check: node heatmaps project onto the proposal box, not the regressed
-detection box, since the RoI-Align grid was pooled from the proposal box."""
+"""Node heatmaps land on the proposal box (pooled from it), not the regressed box."""
 
 import numpy as np
 import torch

@@ -1,5 +1,4 @@
-"""Smoke check: _deletion_insertion_auc's insertion curve starts from the
-tree's actual all-zero-input prediction, not a hardcoded 0.0."""
+"""Insertion starts from the tree's real zero-input answer, not a hardcoded 0.0."""
 
 import numpy as np
 
@@ -27,8 +26,7 @@ def test_insertion_step0_uses_real_zero_input_confidence():
     zero_probs = tree.predict_proba(np.zeros((5, 4), dtype=np.float32))
     expected = float(zero_probs[np.arange(5), preds].mean())
 
-    # A flat curve at the true zero-input confidence should score close to
-    # that confidence, not be dragged toward 0 by a fake floor.
+    # Flat curves must sit at the true zero-input confidence, not a fake floor.
     assert insertion_auc > 0.85
     assert abs(insertion_auc - expected) < 1e-4
     assert abs(deletion_auc - expected) < 1e-4

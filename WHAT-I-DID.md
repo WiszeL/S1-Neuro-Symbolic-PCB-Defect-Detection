@@ -1,256 +1,83 @@
 # What I Did: Faster R-CNN + SODT for Accountable PCB Defect Detection
 
-*A chronological account: the problem, what was built, what broke, how it was diagnosed and
-fixed, and — after a code review — what was found wrong and corrected. Numbers below are
-from the DeepPCB test split. Detection numbers predate the fixes in §6 and must be
-regenerated (see §7); this is stated explicitly rather than silently updated.*
+*Chronological account: problem, build, breakage, fixes, audit corrections. Detection numbers below predate the §6 fixes — regenerate before citing (see §7).*
 
----
+## 1. Goal
 
-## 1. The goal
+A black-box detector gives a box and a score, but no answer to "why" — nothing to audit, nothing tracing a decision back to its cause. This work fixes that without giving up accuracy: keep Faster R-CNN for features and proposals, replace its classification head with a sparse oblique decision tree (SODT) trained to mimic it. Every tree decision is an exact, inspectable root-to-leaf path — real hyperplane weights over real pooled features, not a post-hoc guess.
 
-A black-box detector gives a box and a score. When it is wrong, there is no answer to "why" —
-no record a human can audit, no way to trace a specific decision back to a specific cause.
-That is the problem this work addresses: build a detector whose every decision comes with a
-complete, reproducible record, without giving up the accuracy that makes black-box detectors
-attractive in the first place. Interpretability here is meant to be a property of the system,
-not a trade-off paid for with worse detection.
+## 2. Teacher: Faster R-CNN + SF-PSPyramid (Fung et al., 2024)
 
-The approach: keep a standard two-stage detector (Faster R-CNN) for feature extraction and
-region proposal, and replace its classification head with a sparse oblique decision tree (SODT)
-trained to mimic it. The tree's decision is exact and inspectable by construction — a root-to-leaf
-path with real hyperplane weights over real pooled features, not a post-hoc approximation of
-what the network "might have" used.
+Rebuilt from Fung et al.'s non-referential DeepPCB detector:
 
-## 2. The teacher: Faster R-CNN + SF-PSPyramid (Fung et al., 2024)
+- ResNet-50 backbone (C2–C5), SF-PSPyramid neck (no lateral Ci→Pi links — every level feeds from deeper stages only), pixel-shuffle upsampling, SKNet-style SF attention between levels, multi-scale training, L1 regression loss on both heads, Soft-NMS.
 
-Reconstructed from Fung et al.'s non-referential DeepPCB detector: ResNet-50 backbone (C2–C5,
-C1 unused), the SF-PSPyramid neck (no lateral Ci→Pi connections — every Pi level is fed only
-from the *deeper* Cj, forcing the model to route through semantic features rather than shallow
-ones), pixel-shuffle upsampling in each CP block, SF attention (SKNet-style) fusing adjacent
-pyramid levels, multi-scale training, L1 regression loss on both the RPN and RoI heads, and
-Soft-NMS at inference.
+Two disclosed deviations:
 
-Two deliberate deviations from the paper, both disclosed in `README.md`:
+| Deviation | Why |
+|---|---|
+| Neck 64ch, not 256 | Cross-stage call: fewer weights per tree node from the same data keeps fits well-posed and splits sparse. Cost: absolute AP not comparable to Fung Tables 1/3/4. Architecture (topology, losses, Soft-NMS, multi-scale) still faithful. |
+| 15 epochs, not 12 | Disclosure only; a retrain to shave 3 epochs wasn't worth it. |
 
-- **Neck width: 64 channels, not 256.** This is not a memory shortcut — it is a cross-stage
-  design choice made for the *next* stage. TAO's per-node reduced problem is an L1-logistic fit;
-  at the paper's 256ch (a 12,544-dimensional pooled feature) the samples-per-feature ratio sits
-  well below where a regularized logistic fit is well-posed. At 64ch (3,136-dimensional) the
-  ratio is ≈9.6. Narrowing the neck keeps the SODT's node fits well-posed and its splits sparse
-  and interpretable — the actual objective of the symbolic stage. The cost: absolute AP is not
-  directly comparable to Fung et al.'s Table 1/3/4, which were measured at 256ch. The
-  architecture itself — topology, loss functions, Soft-NMS, multi-scale training — is reproduced
-  faithfully; only the width differs, and only for a stated reason.
-- **15 training epochs, not 12.** Simple disclosure; a second retrain to shave three epochs was
-  not judged worth it.
+- SF attention bottleneck `z=32` is our assumption (Fung never sizes it; unrelated to Kairgeldin's `z`).
 
-Fung et al.'s SF attention (§3.3) compresses the pooled descriptor to `z` channels before
-expanding it back — their symbol, but they never give `z` a value. It is set to 32 here as an
-assumption, not a deviation. (Unrelated to Kairgeldin's `z`, the feature vector fed to the
-tree.)
+## 3. Student: SODT + TAO (Hada et al., 2024; Kairgeldin et al., 2025)
 
-## 3. The student: SODT + TAO (Hada et al., 2024; Kairgeldin et al., 2025)
+- The head becomes a tree trained with Tree Alternating Optimization: reverse-BFS node updates, each node an L1-logistic fit (LIBLINEAR) on a routing problem, leaves set to the (optionally weighted) majority label.
+- Kairgeldin's sparsity exponent implemented exactly: `λ · |R_i|^α`.
+- **Sparsity schedule (`l1_lambda: 20.0`, `sparsity_alpha: 0.15`) — visualization-driven.** High α scatters node weights across the grid, so heatmaps diffuse instead of sitting on defects. Low α keeps heatmaps dense on defects; l1 raised to compensate so splits stay sparse and oblique. A claim about the heatmaps, not the features.
+- **Teacher-student export, audited end to end** (does held-out evaluation secretly use truth boxes? No):
+  - Proposals come from the inference-path RPN in eval mode — no truth boxes injected (`proposal_source: "rpn_pre_detector_postprocess"`).
+  - Features are RoI Align on those same proposals (`64×7×7`) — the identical cut inference consumes.
+  - Labels are the teacher's own argmax on those RoIs, not truth. Truth rides along only as side data (`matched_gt_boxes`, `gt_iou`, `has_matched_gt`) for spatial metrics, matched after extraction.
+  - Split hygiene: held-out dump from `test.txt` (500 images), disjoint from the `trainval.txt` training dump.
+- Honest caveat: test proposals come from the same RPN/backbone the teacher trained — unavoidable, since the hybrid keeps them and swaps only the classifier. Mimic scores are conditioned on that deployment distribution, which is the one that matters.
 
-The classification head is replaced by a sparse oblique decision tree trained with Tree
-Alternating Optimization (TAO): reverse-BFS node updates, each internal node solved as an
-L1-regularized logistic regression (LIBLINEAR) on a 0/1 pseudo-label routing problem, leaves set
-to the majority (optionally class-weighted) label. Kairgeldin's modification — a sparsity
-exponent α controlling how the L1 penalty scales with a node's reduced-set size — is
-implemented exactly: `λ · |R_i|^α`.
+## 4. Breakage: mAP stuck at 0.877
 
-**One deviation from Hada/Kairgeldin: a solver sample cap.** Both papers fit each internal
-node's reduced problem on its full reduced set. Here the LIBLINEAR fit is capped at 120,000
-samples (`symbolic/tao.py`, `solver_cap`): LIBLINEAR is double-precision and materializes the
-feature matrix densely, so an uncapped root reduced set (~350k rows on the DeepPCB `trainval`
-export, D=3136 at 64ch) needs roughly 9 GB of RAM. Only the root and the top two or three nodes
-ever exceed 120k — every deeper node still fits on its full set. At the cap the
-samples-per-feature ratio is ≈38, comfortably in the well-posed regime, and the subsample is
-uniform (unbiased; the per-node regularization `C` is still computed from the true `|R_i|`).
-The effect on the learned splits is expected to be within TAO's run-to-run variation, but this
-has not been verified against an uncapped baseline.
+Early hybrid tied the teacher per-decision but scored mAP@0.5 = 0.877, precision = 0.847.
 
-**The teacher-student export, audited end-to-end** (the question was: does the held-out
-evaluation secretly use ground-truth boxes instead of the detector's own pipeline?):
+- **Cause: score quantization.** A tree routes each RoI to exactly one leaf, and the pruned depth-6 tree has 64 leaves with only a handful carrying defects (`open`/`mouse_bite`: one leaf each, `short`: two). Every `open` detection in the test set got the literally identical score (leaf purity). Two systems broke on the ties:
+  - **AP is a ranking metric** — true/false positives can't separate; per-class AP collapses to one operating point.
+  - **Soft-NMS needs ordering** — survivor picks among overlaps turned arbitrary, sometimes killing the well-localized box.
 
-1. **Proposal source is the RPN, not GT.** `extract_teacher_roi_samples` runs the full
-   inference-path RPN in `eval()` mode. No ground-truth boxes are injected; proposals are the
-   standard objectness-ranked, post-NMS RPN output (`proposal_source:
-   "rpn_pre_detector_postprocess"` in the export manifest).
-2. **Features are RoI Align on those proposals** — the identical `MultiScaleRoIAlign` cut the
-   SODT consumes at inference. Pooled grid shape: `64×7×7`.
-3. **Labels are the teacher's own predictions** — `argmax(softmax(classifier(box_head(pooled))))`
-   on the same RoIs, not ground truth. Ground truth appears only as a side channel
-   (`matched_gt_boxes`, `gt_iou`, `has_matched_gt`) for spatial explanation metrics, matched by
-   IoU *after* extraction, never as a mimic target.
-4. **Split hygiene**: the held-out dump is built from `test.txt` (500 images), disjoint from
-   the `trainval.txt` dump the tree trains on.
+## 5. Fix: two mechanisms
 
-One honest caveat: the RoI proposals on test images come from the same RPN whose backbone the
-teacher trained — by construction, since the hybrid keeps Faster R-CNN's backbone/RPN/regressor
-and replaces only the classification head. The mimic metric is conditioned on that deployment
-distribution, which is precisely the distribution that matters at inference.
-
-## 4. What broke: mAP stuck at 0.877
-
-An early hybrid tied the teacher on mimic accuracy but scored mAP@0.5 = 0.877, precision =
-0.847 — far below the teacher's own detection numbers, despite the tree agreeing with the
-teacher on individual routing decisions. The cause was not tree accuracy.
-
-**Diagnosis: score quantization.** A decision tree is a hard router — every RoI lands in exactly
-one leaf, and the pruned depth-6 tree has 64 leaves, of which only a handful carry defect
-classes (`open` and `mouse_bite` each had exactly one leaf, `short` had two). Consequence:
-*every* `open` detection in the entire test set received the literally identical score (the
-leaf's purity). Two downstream systems assume scores are a meaningful ordering, and both broke
-on the tie:
-
-- **Average Precision is a ranking metric.** With one distinct score per class, true and false
-  positives cannot be separated in the ranking; per-class AP degenerates to roughly the
-  precision at a single operating point.
-- **Soft-NMS needs score ordering to pick survivors.** With tied scores, which overlapping box
-  survives suppression is arbitrary — sometimes the well-localized box lost, sometimes a
-  duplicate won. This produced a confusion-matrix signature that looked like a Soft-NMS bug but
-  was a *score* bug.
-
-## 5. The fix: two mechanisms
-
-### Routing-margin scoring (inference) — the main fix
+**Routing-margin scoring (inference) — the main fix:**
 
 $$\text{score}(x) = p_{\text{leaf}}(c) \times \prod_{i \,\in\, \text{path}(x),\; w_i \neq 0} \sigma\!\left(\lvert w_i^\top x + b_i \rvert\right)$$
 
-The product runs over the *active* internal nodes on the RoI's root-to-leaf path (pruned
-all-zero nodes are skipped, since their score is identically zero and would apply a uniform
-shrink to every sample). $p_{\text{leaf}}(c)$ is the leaf purity for the predicted class.
+- Product over *active* path nodes only (pruned all-zero nodes skipped — they'd shrink every sample equally). $p_{\text{leaf}}(c)$ is leaf purity.
+- Each factor is that node's routing reliability; the product is a conjunction — a prediction is only as trustworthy as its weakest routing call.
+- **Changes zero decisions.** Same path, leaf, label, heatmaps — only the attached confidence turns continuous. Everything read off the tree itself: no neural head, no calibrator, no teacher peeking.
+- Alone (before class weighting): mAP@0.5 0.877 → 0.968, precision 0.847 → 0.912, background FPs −20%, recall flat.
 
-Intuition: $w_i^\top x + b_i$ is the signed distance to node $i$'s hyperplane — its sign decides
-routing (untouched), its magnitude is the classical margin (how far the sample sits from the
-boundary). $\sigma(|\cdot|)$ turns each margin into a per-node routing reliability, and the
-product over the path is a natural conjunction — a prediction is only as trustworthy as its
-*least* confident routing decision.
+**Class weighting (training):** misrouting costs more for weak-recall classes — `short` 2.0×, `spur`/`open` 1.5×, `pinhole` 1.25× — in every node's problem and in the leaf argmax. Hyperplanes lean away from background without touching its weight (which would hand back the FP gains).
 
-Why this is the right kind of fix, not a hack: **it changes zero decisions.** Same path, same
-leaf, same predicted label, same node heatmaps — only the confidence attached to that unchanged
-decision becomes continuous. Every factor is read off the tree itself; no neural head, no
-learned calibrator, no peeking at the teacher. The explanation figures already print these
-node scores; the detection score is now literally a function of the numbers already shown in
-the explanation.
+**Not in the final model:** teacher-confidence weighting (downweighting samples by teacher softmax). Built, tested, removed — the promoted checkpoint never enabled it, and a 64-leaf sparse tree can't fit teacher label noise anyway, so it competed with capacity for the same job. Two mechanisms, not three (see §6).
 
-Measured effect of this change alone (before class weighting): mAP@0.5 0.877 → 0.968,
-precision 0.847 → 0.912, background false positives cut by ~20%, recall essentially unchanged.
+## 6. Audit
 
-### Class weighting (TAO training)
+Review against the papers and this repo's own claims found five indefensible spots. Corrections stay visible here.
 
-Misrouting a `short` RoI costs 2× (and `spur` 1.5×) in every node's reduced problem, and the
-leaf-label argmax uses weighted counts. This shifts decision hyperplanes away from background
-specifically for the classes with the worst false-negative counts, without touching
-background's weight (which would trade the false-positive gains back).
-
-**A third mechanism — teacher-confidence weighting (downweighting TAO samples by the teacher's
-softmax confidence) — was implemented and tested but is *not* part of the final model.** The
-promoted checkpoint's training config has no such setting; it was never enabled in the reported
-result. It was removed after a review found it credited as a fix in an earlier draft of this
-document despite not being used, and found a structural reason it likely wouldn't help: a
-64-leaf, L1-sparse tree already lacks the capacity to fit teacher label noise (the actual
-justification for confidence weighting), so the two mechanisms compete for the same job: See §6.
-The causal chain is **two** mechanisms, not three.
-
-## 6. The audit
-
-A code review against the source papers and against the codebase's own academic claims found
-five things that would not have survived a thesis defense unexamined. Each is addressed below;
-this section exists so the correction is visible, not silent.
-
-1. **Faithfulness metrics were tautological.** Sufficiency/necessity/deletion/insertion on the
-   symbolic side zeroed only the features *outside* the tree's own active path — every node on
-   that path has nonzero weight only inside that set, so the routing is provably unchanged by
-   construction. `sufficiency_prediction_preservation = 1.000` was a theorem, not a measurement.
-   Meanwhile Grad-CAM's faithfulness metrics perturbed whole 7×7 spatial cells (all channels) and
-   probed the FRCNN box head — a different unit, a different model. Comparing the two was
-   comparing a proof to an experiment.
-
-   **Fix:** both sides now perturb the identical unit — one spatial cell of the shared pooled
-   grid, all channels, ranked by each method's own heatmap, identical cell budget and step
-   schedule — and each probes *its own* model (self-consistency, not cross-model transfer). See
-   the module docstrings in `symbolic/evaluation.py` and `gradcam/evaluation.py`. Grad-CAM's
-   insertion-AUC also had an independent bug (step 0 was left at a hardcoded `0.0` instead of the
-   real all-zero-input confidence, biasing the curve low); fixed alongside.
-
-   The structural property survives, correctly framed: because the path's nonzero-weight set
-   fully determines the routing, the SODT's decision is sufficient and necessary *by
-   construction*. That belongs in this document as a stated property of the mechanism, not as a
-   number sitting next to Grad-CAM's in a results table.
-
-2. **Hyperparameters were being selected against `test.txt`.** A config comment literally read
-   "Upweight the classes with the worst FN counts... on test." **Fix:** `tree_depth`,
-   `l1_lambda`, `sparsity_alpha`, and `class_weights` are now fixed a priori in
-   `configs/symbolic_train.yaml` and disclosed there as a stated design choice — the config is
-   the single source of truth, nothing overrides it, and no selection procedure runs against any
-   evaluation split. This matches both source papers, which fix tree depth before training rather
-   than searching it (Hada §6.1 depth 6, §6.2 depth 5; Kairgeldin §6 depth 5). `test.txt` is
-   touched exactly once, at the end.
-
-   A middle version of this codebase instead added an image-level train/val split of the
-   `trainval` export and a validation sweep in `notebooks/03`. That was removed: at ~3 h per TAO
-   run it cost three extra full trainings to choose four numbers the papers fix a priori, it
-   shipped no model of its own (the final tree is always retrained from scratch on the full
-   dump), and reporting a config as "won on val" while shipping a differently-trained tree is
-   itself a thing to defend. Fixing the values a priori is the smaller claim.
-
-3. **Teacher-confidence weighting was credited but unused.** See §5 — removed.
-
-4. **Spatial metrics (pointing game, heatmap IoU) were saturated and measured over mismatched
-   populations.** GT boxes typically cover most of the 7×7 grid (the proposal is tight on the
-   defect), so a *uniform-random* heatmap scores pointing ≈0.91 — meaning the reported 0.93 for
-   SODT was statistically indistinguishable from chance. Grad-CAM's 0.99 was traceable to its
-   `layer4` receptive field producing a smooth, centre-weighted blur rather than genuine
-   localization. Separately, the two sides were filtering different RoI populations (symbolic
-   applied `min_proposal_iou=0.5`, Grad-CAM applied no such filter). **Fix:**
-   `util/heatmap_metrics.py` now provides a random-heatmap baseline
-   (`evaluate_random_baseline_spatial_metrics`) computed over the identical population and GT
-   projection, a shared `min_proposal_iou` filter applied to both sides, and a stratified
-   breakdown (`stratified_spatial_result`) reporting the subset of RoIs where the GT box covers
-   less than 50% of the grid — the regime where these metrics still discriminate. `notebooks/06`
-   reports all three (SODT, Grad-CAM, random) with the stratified subset alongside the overall,
-   overall-saturated numbers.
-
-5. **The node heatmap highlights areas that are not the defect, even on correct
-   classifications.** Investigated as a possible bug before being confirmed as a property of the
-   pooled representation. Three independent checks, each of which would catch a bug if one were
-   there: (a) `project_gt_box_to_roi_grid`'s row/col orientation is correct — a GT box occupying
-   the top-left quarter of the proposal projects to low row/col indices, a right-half GT projects
-   to high column indices, verified directly; (b) the **raw pooled activation**, with zero tree
-   math involved at all, barely beats a random heatmap on RoIs where the GT box covers less than
-   half the grid (pointing ≈ 0.45 vs a random-heatmap baseline ≈ 0.43 — chosen because tight
-   proposals saturate this metric near-identically for every method, masking the effect); (c)
-   *reshaping the node's weight lattice back onto the 7×7 grid* — the "leaf-only" heatmap — and
-   forcing a 2D peak out of it lands near that same random baseline regardless of aggregation
-   formula (positive/negative/absolute/signed all ≈ 0.35–0.45).
-
-   *(These per-cell figures come from a one-off investigation script that was not committed; the
-   receptive-field measurements below are in the same category. The numbers that survive into a
-   permanent, re-runnable form are the exact-attribution metrics in §8 and the "does the SODT use
-   the 7×7 layout at all" probe — see §8.)*
-
-   **Root cause, measured directly:** one 7×7 cell's effective receptive field is roughly
-   **360×350 px** (gradient-traced back to the input image), while the mean proposal box is only
-   about **33×29 px** — the receptive field is **12–13× larger than the entire box**. All 49
-   cells therefore read almost the same window (cell-to-cell cosine similarity ≈ 0.5).
-   Consequence: on the *pooled grid*, variation across cells is far smaller than variation across
-   channels, and the tree's weight mass shows no preference for the cells covering the defect.
-   The SODT separates classes by *which channels fire*. It also uses the 7×7 layout — permuting
-   the cells independently per sample collapses held-out mimic macro-F1 from 0.884 to 0.402, so
-   the layout is not noise — but that layout does not align with *where the defect is*: the two
-   facts are both true and do not conflict.
-
-   **Not a fix, a finding — see the "Exact path attribution" subsection in §8** for the map that
-   replaced the channel-collapsed heatmap and what is now claimed and not claimed as a result.
+1. **Faithfulness metrics were tautological.** Symbolic side zeroed features *outside* the tree's own active path — routing provably unchanged by construction, so `sufficiency = 1.000` was a theorem, not a measurement. Grad-CAM perturbed whole 7×7 cells on a different model. A proof next to an experiment.
+   - **Fix:** identical unit both sides (one grid cell, all channels, same budget/schedule), each probing *its own* model. Plus an independent Grad-CAM insertion bug (step 0 hardcoded `0.0` instead of real all-zero confidence). The structural property survives as a stated mechanism property, not a table number.
+   - **Superseded (SODT side only):** "identical unit" meant the same coarse 7×7 grid on both sides — fair between methods, but it shrinks SODT's finer FPN-native map to 7×7 before scoring it, handicapping the map that actually ships. Current policy: identical *budget fraction* (0.5), each method masked at its own resolution — `neurosym/evaluation.py::evaluate_faithfulness_fpn_masking`. `leaf_only` (the 7×7 SODT ranking) dropped from reported metrics; the 7×7 protocol survives only for sufficiency, which isn't discriminative either way (§8).
+2. **Hyperparameters were picked against `test.txt`.** **Fix:** `tree_depth`, `l1_lambda`, `sparsity_alpha`, `class_weights` fixed up front in `configs/symbolic_train.yaml` — single source of truth, nothing overrides it, `test.txt` touched once at the end. Matches both papers' practice (Hada depth 6/5, Kairgeldin depth 5).
+   - A middle version ran an 80/20 val sweep instead — removed (~3h per TAO run for four numbers the papers fix anyway; shipped no model; "won on val" while shipping a retrained tree needs its own defense).
+3. **Teacher-confidence weighting credited but unused.** Removed (see §5).
+4. **Spatial metrics saturated over mismatched populations.** Tight proposals cover most of the grid, so even a uniform-random heatmap scores pointing ≈0.91 — SODT's 0.93 was chance-level; Grad-CAM's 0.99 was its blurry `layer4` field, not localization. Sides also filtered different RoI sets.
+   - **Fix:** `util/heatmap_metrics.py` adds a random baseline on the identical population, one shared `min_proposal_iou` filter, and a stratified split (GT < 50% of grid) where the metrics still discriminate. `notebooks/06` reports all three + the subset.
+5. **Node heatmaps miss the defect, even when right.** Confirmed as representation property, not a bug — three independent checks:
+   - (a) GT-to-grid projection orientation verified directly (top-left → low indices, right-half → high columns).
+   - (b) Raw pooled activation alone barely beats random on loose RoIs (pointing ≈0.45 vs ≈0.43).
+   - (c) Weight-lattice reshaped onto the grid peaks near random regardless of aggregation (≈0.35–0.45).
+   - **Root cause, measured:** one 7×7 cell's effective receptive field is ≈**360×350 px** vs a mean proposal of ≈**33×29 px** (**12–13× the whole box**). All 49 cells read nearly the same window (cell cosine ≈0.5). The tree separates classes by *which channels fire*, not where — yet permuting cells per-sample collapses mimic macro-F1 0.884 → 0.402, so layout matters without locating the defect. Both true, no conflict.
+   - Response: the exact path attribution map (§8), not a fix to the old one.
 
 ## 7. Results
 
-**To be regenerated.** The a-priori config (§6.2) and the TAO fidelity fixes below have not yet
-been re-run through training; the detection table below is the last recorded result, from before
-this audit, and should not be read as the final numbers. Regenerate via `notebooks/03` (train →
-evaluate once on `test.txt`) → `notebooks/06`, then replace this table.
+**Regenerate before citing.** The up-front config (§6.2) and TAO fidelity fixes haven't been re-run; below is the last pre-audit snapshot.
 
 | Metric | Faster R-CNN | NeSy (FRCNN + SODT) |
 |---|---|---|
@@ -260,120 +87,34 @@ evaluate once on `test.txt`) → `notebooks/06`, then replace this table.
 | Recall | 0.979 | 0.977 *(pre-audit)* |
 | F1 | 0.936 | 0.937 *(pre-audit)* |
 
-Faithfulness and spatial numbers are omitted entirely — the pre-audit values (sufficiency
-1.000, necessity flip 0.999, deletion 0.260, insertion 0.812, pointing 0.930, IoU overlap
-0.910) were produced by the broken protocol in §6.1 and would misrepresent the fixed one if
-reprinted here. The exact-attribution figures quoted in §8 (necessity 0.876, localization
-≈ 0.48 / 0.25) are dev references from the current `run1.pt`/`NEWBEST` pair; regenerate them
-in the same `notebooks/06` pass that replaces this table.
+- Faithfulness/spatial numbers omitted — pre-audit values came from the broken §6.1 protocol. §8 quotes dev references from the current `run1.pt`/`NEWBEST` pair; regenerate via `notebooks/03` → `notebooks/06` alongside this table.
+- **Two pre-audit findings still hold** (independent of protocol and hyperparameter choice):
+  - **Mimic caps at ~97% from teacher noise, not tree capacity.** Agreement by teacher confidence: <0.7 (≈4% of RoIs) → 75.5%; ≥0.99 (≈76%) → 99.98%. 93% of disagreements sit below teacher confidence 0.9 — boundary boxes near the 0.5-IoU line where argmax is near-coin-flip. No student reproduces coin flips; deeper trees didn't help.
+  - **The student sometimes beats the teacher on truth while mimicking it.** No contradiction: mimic scores against teacher labels (every disagreement "loses"), detection scores against truth — and disagreements bunch where the teacher is near-random. The sparse tree fits a smoothed boundary through the noise (classic distillation denoising, helped by GT-aligned weighting and routing-margin ordering).
 
-**Two findings from the pre-audit run remain evidentially sound and are expected to hold under
-re-measurement**, since neither depends on the faithfulness protocol or on how hyperparameters
-are chosen:
+## 8. Claims and limits
 
-- **Held-out mimic accuracy caps at ~97%, and this is teacher noise, not tree capacity.**
-  Stratifying tree–teacher agreement by the teacher's own softmax confidence: at confidence
-  <0.7 (≈4% of RoIs) agreement is 75.5%; at ≥0.99 (≈76% of RoIs) agreement is 99.98%. 93% of all
-  disagreements occur where the teacher's own confidence is below 0.9. The uncertain RoIs are
-  boundary proposals — boxes half-covering a defect near the 0.5-IoU threshold — where the
-  teacher's argmax is closer to a coin flip than a decision. No student of any capacity
-  reproduces coin flips; deeper trees did not help empirically. The residual gap is a property
-  of the teacher's own decision boundary, not the tree's.
-- **The student sometimes beats the teacher on ground truth despite mimicking it.** This is not
-  a contradiction: mimic accuracy is scored against teacher labels (the tree "loses" every
-  disagreement by definition), while detection metrics are scored against ground truth — and
-  disagreements concentrate exactly where the teacher is near-random, so a disagreeing student
-  is not penalized by reality the way it is penalized by the mimic metric. A sparse, L1-regularized
-  tree cannot represent the teacher's noisy high-curvature boundary and instead fits a smoothed
-  version through the ambiguous region — classic distillation denoising, reinforced by class
-  weighting (GT-aligned, not teacher-aligned) and by routing-margin's effect on Soft-NMS
-  ordering.
-
-## 8. What this does and does not claim
-
-The central thesis claim is *accountability*: every detection comes with a complete,
-reproducible decision record — which node tested what, which region of the RoI it weighted,
-what margin it crossed by, and which leaf it landed in. Re-run the same input and you get the
-identical record; there is no gradient estimate, no sampling, nothing to reproduce
-approximately. A black-box detector cannot offer this at any accuracy.
-
-That claim has a precise scope, established directly by the mechanism:
+Core claim is *accountability*: every detection ships a complete, reproducible record — which node tested what, which RoI region it weighted, what margin it crossed, which leaf it landed in. Rerun and the record is identical: no gradient estimate, no sampling. No black box offers this at any accuracy.
 
 | Question | Answered? |
 |---|---|
-| "Why did *this* detection get *this* label?" | **Yes** — exact path, region, and margin, reproducible |
-| "What does the model use for class X in general?" | **Yes** — the tree's sparse global weights describe every RoI, not just one |
-| "Where is the model looking on the whole board?" | **No** — the heatmap is confined to the detected proposal box (`neurosym/heatmap.py`'s projection is zero outside it by construction). Grad-CAM's CAM is computed on the pre-crop backbone feature map and can show attention spread across the whole image — a genuine advantage on this specific axis, conceded rather than argued away. |
+| Why *this* label for *this* detection? | **Yes** — exact path, region, margin, reproducible |
+| What does the model use for class X overall? | **Yes** — sparse global weights cover every RoI |
+| Where is it looking on the whole board? | **No** — heatmap stops at the proposal box. Grad-CAM sees the full image here; genuine edge, conceded. |
 
-**The receptive-field caveat, quantified.** The 7×7-grid-to-image projection is *positionally
-exact* — RoI Align defines the bin↔image-region mapping by construction, unlike
-Hada/Kairgeldin, who must reconstruct approximate receptive fields because their features (raw
-conv activations) have no inherent box alignment. But each cell's *value* is interpolated from
-feature-map units whose effective receptive field is far wider than one bin: gradient-traced
-directly from a pooled cell back to the input image, one `p2`-level cell's receptive field
-measures **361×349 px**, against a mean DeepPCB proposal box of **33×29 px** — **12–13× the
-entire box**, not merely "comparable to or larger than" it. So the map is a **region-level**
-claim ("this decision node weighted this part of the RoI"), not a pixel-level one, and the
-region in question is closer to "the whole RoI and its surroundings" than to any one bin. This is
-also the underlying reason the spatial metrics in §6.4 saturate, and the direct cause of §6.5:
-sub-bin localization is unresolvable at this receptive-field scale, for any method operating on
-the pooled grid.
+- **Receptive-field caveat, measured.** The grid-to-image projection is positionally exact (RoI Align defines it; Hada/Kairgeldin must reconstruct theirs). But each cell's *value* comes from units seeing far more than one bin: one `p2` cell traces to **361×349 px** vs a **33×29 px** mean box. So maps are **region-level** ("this node weighted this part of the RoI"), and the region is closer to the whole RoI than to one bin. This is why §6.4 saturates and why sub-bin localization is unresolvable on the pooled grid — for any method.
+- **Exact path attribution** (`neurosym/heatmap.py::compute_exact_attribution`) — the answer to §6.5. RoI-Align is linear (bilinear sample + average, no ReLU), so the path score splits onto the source FPN pixels with **no approximation**: `score = Σ_p Σ_c FPN[c,p] · ∂score/∂FPN[c,p]`, coefficients read off with autograd (backbone never in graph).
+  - **Exact:** the per-pixel *score*. Checked: `|Σ(map) − score| < 1e-5` over ~1900 RoIs. Nothing discarded — sign, pattern, activation all carried.
+  - **Display choice, not exact:** `abs().sum(0)` to 2-D; FPN pixels, not image pixels. Still region-level.
+  - **Localization** (low-coverage subset; dev refs, regenerate with §7): exact **0.48 / 0.25**, random 0.27 / 0.20. Above chance, but Grad-CAM still leads here (≈0.61 / 0.32) — conceded; localization isn't the thesis scope. (`leaf_only` dropped from this comparison — see §6.1 amendment.)
+  - **Faithfulness with controls** (FPN masking, re-pool; n=960, dev refs): exact **0.876**, random 0.017. Controls: `activation_only` 0.072 (not just bright pixels); `shuffled_w` 0.651 (weight *structure* carries the signal, McNemar p ≈ 1e-37). Not beaten: `foreign_exact` ≈0.86 (p = 0.13) — can't separate one path from another, likely because all share the root in a depth-6 tree. Bounds what the number proves, not the exactness identity (decision-specific by construction).
+  - **Caption rule:** panels say "exact attribution" — fair, since removing top-ranked pixels flips the prediction 0.876 vs 0.017 random. Still **not** claimed: pixel precision, or uniqueness to one path (see `foreign_exact`).
+- **Per-node faithfulness** (`evaluate_faithfulness_fpn_masking`, `return["node"]`) — the six-step claim, made falsifiable per step, not just for the path as a whole: for each node on the path, mask *that node's own* map, re-pool, check whether *that node's own* routing sign flips, plus a deletion/insertion AUC over that node's routing confidence `sigmoid(|w_i·x+b_i|)` (the same quantity `NeuroSymbolicDetector` uses for routing-margin scoring). Pruned nodes (all-zero weights) are excluded — masking can't change a score that's already just the bias. Path-level and per-node numbers are **not the same measurement** (path masks the whole map and checks the *final label*; per-node masks one node's map and checks *that node's own sign*) — never report one as a proxy or average of the other.
+  - Also reported: mean cosine similarity between consecutive nodes' maps, on the same population — a low number is the falsifiable form of "each step weighs a different region"; a high one would mean the six-step narrative has nothing to show.
+  - **Necessity ceiling, `exact` only** (`return["node_necessity_ceiling"]`): if masking the *whole* box collapses the score to the node's bias alone, flip needs `sign(bias) != sign(score)` — a ceiling `exact`'s ranking can reach once its budget covers the node's whole nonzero support. **Not a bound for `random`**: a partial random subset can flip via unrelated cancellation even where this ceiling is 0 — checked directly on a dense-weight synthetic tree, where it did. Compare `exact`'s flip rate against this ceiling, never against `random`'s — and check `support_fraction` (`return["node"]["exact"][depth]`, the share of the box with any contribution) first: the ceiling is only tight when that's ≤ 0.5 (the masking budget); above it, `exact`'s 50% doesn't reach the whole support and the ceiling doesn't bind.
+  - **Numbers pending a checkpoint re-run** — `run1.pt`/`run2.pt` aren't in the current tree (see §7). Regenerate via `notebooks/04` or `notebooks/06` before citing.
+  - **Not measured, deliberately**: per-node pointing/IoU. That would test whether the region a node weighs sits on the defect — a localization claim this thesis doesn't make (see the table above). Per-node faithfulness tests a different, narrower thing: whether that region decided *that node's own question* — which is what the panels actually claim.
 
-**Exact path attribution — what it is, and what it is not.** §6.5 diagnosed *why* the
-pooled-grid heatmap cannot localize; this is the response. `neurosym/heatmap.py::compute_exact_attribution`
-does not weight or approximate anything. RoI-Align is linear (bilinear sampling + averaging, no
-ReLU), so the SODT path's score decomposes onto the pixels of the FPN level map it was pooled
-from with **no approximation**:
+## 9. Closing
 
-```
-score = Σ_c Σ_ij W[c,i,j] · pooled[c,i,j] = Σ_p Σ_c FPN[c,p] · ∂score/∂FPN[c,p]
-```
-
-`∂score/∂FPN` is just RoI-Align's own linear coefficients, read off with autograd (the backbone
-is never in the graph); `grad · activation`, summed over channels, is the per-pixel
-contribution. The level comes from RoI-Align's `LevelMapper`, not a guess.
-
-- **What is exact:** the whole per-pixel *score* attribution. Verified: `|Σ(map) − score|` is at
-  the floating-point floor (`< 1e-5` over ~1900 RoIs). No gradients estimated, no surrogate, no
-  second network, and — unlike the earlier channel-collapsed heatmap — nothing about `W`
-  discarded: sign, per-cell pattern and activation are all carried.
-- **What is a presentation choice, not exact:** reducing the `(C, Hf, Wf)` contribution to one
-  2-D map via `abs().sum(0)`; and the resolution — exactness reaches the FPN feature map, whose
-  pixels each summarise a wide receptive field, not raw image pixels. So the map is a
-  *region-level* claim.
-- **Localization** (pointing / IoU vs the GT box, low-GT-coverage subset; *dev reference on the
-  current `run1.pt` pair, regenerate alongside §7*): exact **0.48 / 0.25**, leaf-only 0.33 /
-  0.25, random 0.27 / 0.20. Paired tests: exact is statistically tied with the old channel-
-  collapsed map on pointing and beats it on IoU; both the exact map and leaf-only clear random
-  on one axis each, and only the exact map clears it on both. Grad-CAM still scores higher on
-  localization alone (≈ 0.61 / 0.32 on the same subset) — a genuine gap on that axis, conceded
-  rather than argued away. Faithfulness, not localization, is the thesis's stated scope.
-- **Faithfulness, measured with controls, not asserted.** Masking directly in the FPN map and
-  re-pooling (`neurosym/evaluation.py::evaluate_faithfulness_fpn_masking`), necessity flip rate
-  (n=960, dev reference): **exact 0.876**, leaf-only 0.414, random 0.017. §6.1 is an audit
-  finding about a metric that was true by construction, so three controls were run:
-  `activation_only` (rank FPN pixels by activation magnitude, no tree) flips 0.072 — the exact
-  map is not just deleting the brightest pixels; `shuffled_w` (the same weight values, entries
-  permuted) flips 0.651 — the SODT's weight *structure*, not merely its scale, carries a large,
-  significant share of the signal (McNemar p ≈ 1e-37). The one control it does **not** beat is
-  `foreign_exact` (another RoI's path weights, ≈ 0.86, p = 0.13): this test cannot separate one
-  root-to-leaf path from another, most plausibly because every path shares the root node in a
-  depth-5 tree. That is a bound on what the necessity number proves — not on the exactness
-  identity, which is decision-specific by construction.
-- **The caption rule.** Panels are labelled "exact attribution" / "exact path attribution".
-  Because the necessity test measures exactly this — removing the pixels the map ranks highest
-  flips the SODT's prediction 0.876 of the time vs 0.017 for random — the panels *can* be read
-  as showing what the decision used. Still **not** claimed: pixel-level precision (one FPN pixel
-  summarises a wide receptive field), and uniqueness to this exact root-to-leaf path (the
-  `foreign_exact` control above).
-
-## 9. Closing framing
-
-Interpretability here was not purchased with accuracy. The hybrid ties its black-box teacher on
-mAP@0.5:0.95 and, in the pre-audit measurement, exceeded it on precision and F1 — the numbers
-that most directly matter for a quality-control operator deciding whether to trust a flagged
-board. That result removes the standard argument for keeping the black box: if the interpretable
-version costs nothing, "it's less accurate" is no longer an available objection. What replaces
-it is the question this document tries to answer honestly — not "is it interpretable," which
-was true by construction from the start, but "is what it shows you actually true," which
-required finding and fixing three places where the answer had been assumed rather than checked.
+Interpretability cost nothing here: the hybrid ties the teacher on mAP@0.5:0.95 and beat it pre-audit on precision/F1 — the numbers a QC operator trusts a flagged board by. "It's less accurate" is off the table. The remaining question — not "is it interpretable" (true by construction) but "is what it shows actually true" — is what this document tried to answer honestly: three assumed-true spots found and fixed, limits stated where they are.

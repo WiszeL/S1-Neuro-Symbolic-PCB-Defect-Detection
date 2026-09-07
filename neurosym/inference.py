@@ -29,7 +29,7 @@ def load_neurosymbolic_detector(
 ) -> tuple[NeuroSymbolicDetector, dict[str, Any]]:
     resolved_device = select_device(device)
     detector_neuro_config = deepcopy(neuro_config)
-    # The checkpoint supplies trained backbone weights; avoid an ImageNet weight download during inference init.
+    # Weights come from the checkpoint, not a fresh ImageNet download.
     detector_neuro_config["net"]["backbone_pretrained"] = False
     detector_checkpoint = torch.load(
         detector_checkpoint_path,
@@ -74,9 +74,7 @@ def explain_hybrid_detection(
         mode=mode,
     )
 
-    # The exact attribution needs the FPN map and the processed-space box. Only
-    # a real detection from NeuroSymbolicDetector.forward carries them, so
-    # hand-built test dicts fall through without an exact-attribution panel.
+    # Hand-built test dicts lack FPN context, so they skip the exact-attribution panel.
     has_fpn_inputs = "fpn_features" in detection and "featmap_names" in detection
     if has_fpn_inputs:
         level_index = int(detection["symbolic_level_indices"][detection_index])

@@ -1,28 +1,9 @@
-"""Symbolic (SODT) explanation-quality evaluation.
+"""How good the tree's heatmaps are, scored exactly like Grad-CAM's.
 
-Faithfulness perturbation protocol — shared with gradcam/evaluation.py so the
-two sides are directly comparable:
-
-  * unit:    one spatial cell of the pooled RoI-Align grid, ALL channels
-             zeroed/kept together (not a raw per-feature mask)
-  * ranking: each method's own heatmap over every cell in the grid
-  * budget:  identical cell counts and step schedule on both sides
-             (top-50% for sufficiency/necessity; k = s/steps * num_cells
-             for deletion/insertion)
-  * probe:   each explainer's own model — the SODT probes `tree.predict_proba`,
-             Grad-CAM probes the FRCNN box head. This is a self-consistency
-             check ("is the explanation faithful to what THIS model did"),
-             not a cross-model comparison.
-
-Note what this does NOT test: the SODT's decision is exactly reconstructible
-from its path (every node on the path has nonzero weight only inside its own
-feature set), so masking by "the tree's own active path features" would be
-tautologically sufficient/necessary by construction — that structural
-property is real but belongs in the thesis as a proposition, not a measured
-number next to Grad-CAM's. Masking by spatial cell — the same interface both
-the SODT and the FRCNN classifier head consume — avoids that trivially-true
-result and asks the intended question instead: is the *heatmap* (a lossy
-spatial rendering of the tree's decision) a faithful proxy for it.
+- Same test unit both sides: one grid cell, all channels at once.
+- Each side checked against its own model, never the other's.
+- Skipped on purpose: scoring the tree's own active features would always
+  pass by construction, so it would prove nothing.
 """
 
 from __future__ import annotations
@@ -90,7 +71,7 @@ def _ensure_writable_tensor(
     data: Tensor | np.ndarray,
     dtype: torch.dtype = torch.float32,
 ) -> Tensor:
-    """Convert data to tensor, copying numpy arrays to avoid write warnings."""
+    """Copy first so torch never writes into read-only memory."""
     if isinstance(data, np.ndarray):
         data = data.copy()
     return torch.as_tensor(data, dtype=dtype)
@@ -114,10 +95,7 @@ def _build_selected_mask(
 def _row_cell_ranking(
     tree: SparseObliqueDecisionTreeClassifier, feature_row: np.ndarray
 ) -> np.ndarray:
-    """Spatial cells of the pooled grid (flattened H*W index), ranked by
-    descending importance under the tree's own leaf-node heatmap — the same
-    reduction the displayed explanations use (neurosym/heatmap.py's default
-    "leaf_only" mode)."""
+    """Rank grid cells the same way the displayed heatmaps do."""
     grid = feature_row.reshape(tree.feature_shape)
     heatmap = _compute_local_instance_heatmap(tree, grid, mode="leaf_only")
     return importance_ranking(heatmap).cpu().numpy()
@@ -126,9 +104,7 @@ def _row_cell_ranking(
 def _full_channel_flat_indices(
     cells: np.ndarray, feature_shape: tuple[int, int, int]
 ) -> np.ndarray:
-    """Flat feature indices covering ALL channels at the given spatial
-    cells — the perturbation unit (one grid cell, every channel), matching
-    what gradcam/evaluation.py masks on the pooled features."""
+    """One grid cell means every channel — the same unit Grad-CAM masks."""
     channels, height, width = feature_shape
     channel_offsets = (np.arange(channels) * height * width)[:, None]
     return (channel_offsets + cells[None, :]).reshape(-1).astype(np.int64)
@@ -210,7 +186,15 @@ def evaluate_symbolic_model(
     feature_matrix: np.ndarray,
     teacher_labels: np.ndarray,
     class_names: tuple[str, ...],
+    ranking: str = "tree",
+    random_state: int = 42,
+    compute_auc: bool = True,
 ) -> dict[str, Any]:
+    """`ranking="random"` swaps the tree's own cell ranking for a random one,
+    on the identical masking budget — the baseline sufficiency needs to show
+    whether tumbling ~40/49 cells to zero is discriminative at all, or just
+    collapses routing to the bias term regardless of which cells are picked."""
+    rng = np.random.default_rng(random_state)
     features = ensure_float32(feature_matrix)
     labels = np.asarray(teacher_labels, dtype=np.int64)
     if features.ndim != 2:
@@ -226,7 +210,7 @@ def evaluate_symbolic_model(
         int(grid_height * grid_width * _FAITHFULNESS_CELL_BUDGET_FRACTION), 1
     )
 
-    # Pre-allocate output arrays for N samples
+    # Setup
     predictions = np.empty(N, dtype=np.int64)
     necessity_confidence_drop = np.empty(N, dtype=np.float64)
     necessity_prediction_flip = np.empty(N, dtype=np.float64)
@@ -244,24 +228,25 @@ def evaluate_symbolic_model(
         B = end_idx - start_idx
         batch_row_range = np.arange(B, dtype=np.int64)
 
-        # --- batch predict on original features ---
+        # Predict
         probabilities = tree.predict_proba(batch_features)
         batch_preds = probabilities.argmax(axis=1).astype(np.int64)
         batch_conf = probabilities[batch_row_range, batch_preds]
         predictions[start_idx:end_idx] = batch_preds
 
-        # --- rank spatial cells by the tree's own heatmap (same protocol
-        # as gradcam/evaluation.py), then mask the top cell_budget cells
-        # across ALL channels — see the module docstring above ---
+        # Mask the same cells Grad-CAM masks, so scores compare.
         selected_per_row: list[np.ndarray] = []
         for i in range(B):
-            ranking = _row_cell_ranking(tree, batch_features[i])
-            top_cells = ranking[:cell_budget]
+            if ranking == "random":
+                cell_ranking = rng.permutation(grid_height * grid_width)
+            else:
+                cell_ranking = _row_cell_ranking(tree, batch_features[i])
+            top_cells = cell_ranking[:cell_budget]
             selected_per_row.append(
                 _full_channel_flat_indices(top_cells, tree.feature_shape)
             )
 
-        # --- build boolean mask and masked feature matrices ---
+        # Build masks
         selected_mask = _build_selected_mask(B, D, selected_per_row)
 
         necessity_features = batch_features.copy()
@@ -270,7 +255,7 @@ def evaluate_symbolic_model(
         sufficiency_features = np.zeros_like(batch_features)
         sufficiency_features[selected_mask] = batch_features[selected_mask]
 
-        # --- batch predict necessity / sufficiency ---
+        # Score masked
         necessity_probs = tree.predict_proba(necessity_features)
         sufficiency_probs = tree.predict_proba(sufficiency_features)
 
@@ -294,10 +279,13 @@ def evaluate_symbolic_model(
         sufficiency_prediction_preservation[start_idx:end_idx] = batch_suf_pres
         sufficiency_confidence_retention[start_idx:end_idx] = batch_suf_ret
 
-    # --- aggregate ---
-    deletion_auc, insertion_auc = _deletion_insertion_auc(
-        tree, features, predictions, random_state=42
-    )
+    # Aggregate
+    if compute_auc:
+        deletion_auc, insertion_auc = _deletion_insertion_auc(
+            tree, features, predictions, random_state=42
+        )
+    else:
+        deletion_auc = insertion_auc = float("nan")
     return {
         "mimic_accuracy": float((predictions == labels).mean()),
         "macro_f1_vs_teacher": _safe_macro_f1(

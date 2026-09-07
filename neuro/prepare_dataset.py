@@ -88,7 +88,6 @@ def _build_dataset_manifest(
 ) -> list[PCBRecord]:
     samples: list[PCBRecord] = []
 
-    # Get split file
     split_path = dataset_root / split_file
     if not split_path.exists():
         raise FileNotFoundError(f"Split file not found: {split_path}")
@@ -96,7 +95,6 @@ def _build_dataset_manifest(
     for line_number, line in enumerate(
         split_path.read_text(encoding="utf-8").splitlines(), start=1
     ):
-        # Get the image and annots reference from the split file
         if not line.strip():
             continue
         parts = line.split()
@@ -106,7 +104,6 @@ def _build_dataset_manifest(
             )
         image_reference, annotation_reference = parts
 
-        # Image (lazy)
         image_reference = Path(image_reference)
         image_path = (
             dataset_root / image_reference.parent / f"{image_reference.stem}_test.jpg"
@@ -114,7 +111,6 @@ def _build_dataset_manifest(
         if not image_path.exists():
             raise FileNotFoundError(f"Image file not found: {image_path}")
 
-        # Annotations
         annotation_path = dataset_root / annotation_reference
         if not annotation_path.exists():
             raise FileNotFoundError(f"Annotation file not found: {annotation_path}")
@@ -126,7 +122,6 @@ def _build_dataset_manifest(
             canvas_size=image_size,
         )
 
-        # Add
         samples.append(
             PCBRecord(image_path=image_path, boxes=bounding_boxes, labels=labels)
         )
@@ -170,7 +165,6 @@ class PCBDataset(Dataset[PCBItem]):
             )
         sample = self.samples[index]
 
-        # Load Image
         image = Image.open(sample.image_path).convert("RGB")
 
         target = build_pcb_target(index, sample.boxes, sample.labels)
@@ -240,7 +234,7 @@ def _build_inspection(
 
 
 def _print_inspection_summary(split_file: str, inspection: InspectionSummary) -> None:
-    # Keep scalar stats as text so the plots can focus on visual distributions.
+    # Numbers as text so plots stay visual.
     print(f"========== Inspect {split_file} ==========")
     print("DeepPCB dataset inspection")
     print(f"Files: {inspection['sample_count']:,}")
@@ -257,7 +251,7 @@ def _print_inspection_summary(split_file: str, inspection: InspectionSummary) ->
 
 
 def _plot_class_counts(inspection: InspectionSummary) -> None:
-    # Class imbalance is the main dataset-level signal worth plotting.
+    # Imbalance is the dataset's main story.
     class_fig, class_ax = plt.subplots(figsize=(10, 4.8))
     bars = class_ax.bar(
         inspection["class_labels"], inspection["class_counts"], color="#2f6f73"
@@ -277,7 +271,7 @@ def _draw_annotated_sample(
     class_names: tuple[str, ...],
     palette: list[str],
 ) -> None:
-    # Draw directly from the cached manifest record to avoid applying training transforms.
+    # Manifest originals, so inspection sees unmodified images.
     image = Image.open(sample.image_path).convert("RGB")
     ax.imshow(image)
     ax.set_title(
@@ -326,7 +320,7 @@ def _plot_random_samples(
     samples: list[PCBRecord],
     class_names: tuple[str, ...],
 ) -> None:
-    # The caller already chose the random subset so size reporting and plotting match.
+    # Subset pre-chosen by caller, so counts and plots agree.
     n = len(samples)
     plot_columns = 3
     sample_rows = math.ceil(n / plot_columns)

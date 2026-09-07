@@ -13,7 +13,7 @@ LOW_GT_COVERAGE_THRESHOLD = 0.5
 
 
 def normalize_heatmap(heatmap: Tensor | np.ndarray) -> Tensor:
-    """Clamp negatives to zero and rescale so the heatmap sums to 1."""
+    """Common scale so heatmaps from different methods compare fairly."""
     tensor = torch.as_tensor(heatmap, dtype=torch.float32)
     tensor = torch.clamp(tensor, min=0.0)
     total = tensor.sum().item()
@@ -23,7 +23,7 @@ def normalize_heatmap(heatmap: Tensor | np.ndarray) -> Tensor:
 
 
 def pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
-    """1.0 if the heatmap's peak cell falls inside the GT mask, else 0.0."""
+    """1.0 when the hottest cell lands on the defect, else 0.0."""
     peak_index = torch.argmax(heatmap.reshape(-1)).item()
     row_index = peak_index // heatmap.shape[1]
     col_index = peak_index % heatmap.shape[1]
@@ -31,18 +31,13 @@ def pointing_score(heatmap: Tensor, gt_mask: Tensor) -> float:
 
 
 def importance_ranking(heatmap: Tensor | np.ndarray) -> Tensor:
-    """Flattened spatial cell indices, sorted by descending heatmap value.
-
-    Shared by the symbolic and Grad-CAM faithfulness evaluators so both
-    sides rank cells with the exact same rule — see the perturbation
-    protocol docstrings in symbolic/evaluation.py and gradcam/evaluation.py.
-    """
+    """One ranking rule for every method, so the comparison stays fair."""
     tensor = torch.as_tensor(heatmap, dtype=torch.float32)
     return torch.argsort(tensor.reshape(-1), descending=True)
 
 
 def topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
-    """IoU between the GT mask and the top-|GT| highest-activation cells."""
+    """Overlap between the hottest cells and the defect area."""
     target_cells = max(gt_mask.sum().item(), 1)
     flattened = heatmap.reshape(-1)
     topk_indices = torch.topk(flattened, k=min(target_cells, flattened.numel())).indices
@@ -57,9 +52,7 @@ def topk_region_overlap(heatmap: Tensor, gt_mask: Tensor) -> float:
 
 
 def spatial_result(count: int, overlap: float, pointing: float) -> dict[str, Any]:
-    """Shared result shape for pointing/IoU spatial metrics — used by the
-    symbolic, Grad-CAM, and random-baseline evaluators so the three are
-    reported side by side in the same schema."""
+    """One result shape so every method reports side by side."""
     return {
         "evaluated_roi_count": count,
         "box_grounded_roi_overlap": overlap,
@@ -75,12 +68,10 @@ def stratified_spatial_result(
     pointing_scores: list[float],
     gt_coverage: list[float],
 ) -> dict[str, Any]:
-    """Overall spatial metrics plus a ``low_gt_coverage`` breakdown.
+    """Overall scores plus a low-coverage breakdown.
 
-    GT boxes typically cover most of the RoI grid (the proposal is tight on
-    the defect), which saturates pointing/IoU near a random baseline. The
-    low-coverage subset (GT covers < LOW_GT_COVERAGE_THRESHOLD of the grid)
-    is where these metrics still have room to discriminate between methods.
+    Tight proposals saturate these metrics near chance, so the
+    low-coverage subset is the only part that separates methods.
     """
     if not overlap_scores:
         result = dict(_EMPTY_SPATIAL_RESULT)
@@ -117,18 +108,7 @@ def evaluate_random_baseline_spatial_metrics(
     max_proposal_iou: float = 1.0,
     random_state: int = 42,
 ) -> dict[str, Any]:
-    """Uniform-random heatmap baseline, scored on the exact same RoI
-    population and GT projection as the symbolic/Grad-CAM spatial metrics.
-
-    Both real methods can land near this baseline purely because the GT box
-    typically covers most of the grid — this control makes that visible
-    instead of letting a high-looking number pass as a win. See
-    stratified_spatial_result for the low-coverage subset where the metrics
-    can still discriminate. `max_proposal_iou` narrows to loose proposals
-    (e.g. 0.05-0.35) where the GT box covers only part of the grid — at the
-    default min_proposal_iou=0.5 that subset is empty (tight proposals only),
-    which is why the low-coverage table can otherwise report n=0.
-    """
+    """Chance-level reference on the same RoIs, so high-looking scores can't pass as wins."""
     if matched_gt_boxes is None or has_matched_gt is None:
         return stratified_spatial_result([], [], [])
 

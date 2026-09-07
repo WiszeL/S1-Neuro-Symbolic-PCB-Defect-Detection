@@ -1,5 +1,4 @@
-"""Smoke check: SparseObliqueDecisionTreeClassifier state_dict round-trip
-after removing the unused selected_feature_indices/original_input_dim machinery."""
+"""Tree saves and reloads exactly; routing confidence breaks ties without moving routes."""
 
 import numpy as np
 
@@ -46,7 +45,7 @@ def test_routing_confidence_preserves_routing_and_breaks_ties():
     rng = np.random.default_rng(1)
     tree.node_weights[:] = rng.normal(size=tree.node_weights.shape).astype(np.float32)
     tree.node_bias[:] = rng.normal(size=tree.node_bias.shape).astype(np.float32)
-    # Simulate a pruned node: all-zero weights must not affect confidence.
+    # Pruned node: must not move confidence.
     tree.node_weights[2] = 0.0
     tree.node_bias[2] = 0.0
 
@@ -55,13 +54,13 @@ def test_routing_confidence_preserves_routing_and_breaks_ties():
 
     assert np.array_equal(leaves, tree.predict_leaf_indices(features))
     assert np.all(confidence > 0.0) and np.all(confidence <= 1.0)
-    # Samples sharing a leaf get distinct margin-based scores (tie-break).
+    # Same leaf, distinct scores (ties broken).
     for leaf in np.unique(leaves):
         members = confidence[leaves == leaf]
         if len(members) > 1:
             assert len(np.unique(members)) > 1
 
-    # A fully pruned tree contributes no margin factors at all.
+    # Fully pruned tree means confidence 1.0 everywhere.
     tree.node_weights[:] = 0.0
     tree.node_bias[:] = 0.0
     _, pruned_confidence = tree.predict_leaf_indices_and_routing_confidence(features)

@@ -76,7 +76,7 @@ def _class_weights_array(
     class_weights: dict[str, float],
     class_names: tuple[str, ...],
 ) -> np.ndarray:
-    """Map a {class_name: weight} config dict to a per-class-index array."""
+    """Config names to solver array; unknown names fail here, not silently."""
     unknown = set(class_weights) - set(class_names)
     if unknown:
         raise ValueError(
@@ -191,10 +191,7 @@ def evaluate_heldout(
     random_state: int = 42,
     summary_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a trained checkpoint on a full export dump (the single final
-    `test.txt` evaluation). When ``summary_path`` is given, the result dict is
-    also written there as JSON.
-    """
+    """Score once on the held-out dump; nothing trains here."""
     print(f"Loading heldout evaluation data from {export_path}...", flush=True)
     t0 = perf_counter()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
@@ -363,11 +360,8 @@ def train_symbolic_tree(
     raise_if_tree_collapsed(tree)
     metrics = _augment_tree_metrics(tree, {})
 
-    # tree_state already carries feature_shape/class_names/max_depth, and
-    # training_config already carries l1_lambda/sparsity_alpha/tree_depth, so
-    # the checkpoint doesn't repeat them at the top level. summary.json below
-    # keeps them front-and-center since it's meant to be read without loading
-    # the tensor payload.
+    # No repeats up top — tree_state/training_config already carry them.
+    # summary.json repeats them anyway since humans read it without loading tensors.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": metrics,
@@ -437,8 +431,7 @@ def prune_symbolic_tree(
     if export_path is None:
         export_path = str(checkpoint.get("export_path", ""))
     if class_weights is None:
-        # Reuse the weights the tree was trained with so the post-prune leaf
-        # relabel doesn't silently revert weighted leaf decisions.
+        # Keep training weights so pruning can't silently flip weighted leaves.
         stored_weights = checkpoint.get("training_config", {}).get("class_weights")
         if stored_weights is not None:
             class_weights = _class_weights_array(stored_weights, bundle.class_names)
@@ -487,9 +480,7 @@ def prune_symbolic_tree(
     l1_lambda = float(training_config.get("l1_lambda", 0.0))
     sparsity_alpha = float(training_config.get("sparsity_alpha", 0.0))
 
-    # See train_symbolic_tree: tree_state/training_config already carry
-    # feature_shape/class_names/tree_depth/l1_lambda/sparsity_alpha, so the
-    # checkpoint doesn't repeat them at the top level.
+    # Same no-repeat layout as train_symbolic_tree above.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": tree_metrics,

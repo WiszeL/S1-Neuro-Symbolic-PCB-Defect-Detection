@@ -1,9 +1,4 @@
-"""Visualization utilities for Grad-CAM baseline comparison.
-
-Provides functions to:
-1. Run Grad-CAM on Faster R-CNN detections and produce per-RoI heatmaps.
-2. Plot side-by-side comparisons: Grad-CAM vs SODT local evidence heatmaps.
-"""
+"""Side-by-side plots: Grad-CAM vs the tree's heatmaps, per detection."""
 
 from __future__ import annotations
 
@@ -21,7 +16,7 @@ from util.visualization import image_to_array
 
 from .gradcam import GradCAM
 
-# A perceptually uniform "fire" colormap for heatmap overlays.
+# Fire colors for heat overlays.
 _FIRE_CMAP = LinearSegmentedColormap.from_list(
     "fire",
     [
@@ -41,31 +36,12 @@ def gradcam_for_detections(
     score_threshold: float = 0.3,
     output_size: tuple[int, int] = (7, 7),
 ) -> list[dict[str, Any]]:
-    """Generate Grad-CAM heatmaps for all detections above the score threshold.
-
-    Parameters
-    ----------
-    gradcam:
-        Initialized GradCAM instance.
-    image:
-        Image tensor ``[3, H, W]`` in ``[0, 1]`` range.
-    prediction:
-        Faster R-CNN prediction dict with ``boxes``, ``labels``, ``scores``.
-    score_threshold:
-        Minimum detection score to generate a heatmap for.
-    output_size:
-        Spatial size of each output heatmap.
-
-    Returns
-    -------
-    list[dict]
-        Each dict contains ``box``, ``label``, ``score``, and ``heatmap``.
-    """
+    """Heatmaps for detections worth showing (above threshold)."""
     boxes = prediction["boxes"]
     labels = prediction["labels"]
     scores = prediction["scores"]
 
-    # Filter by score.
+    # Filter
     keep = scores >= score_threshold
     boxes = boxes[keep]
     labels = labels[keep]
@@ -99,26 +75,7 @@ def plot_gradcam_comparison(
     figsize_per_detection: tuple[float, float] = (5.5, 4.5),
     save_path: str | Path | None = None,
 ) -> plt.Figure:
-    """Plot Grad-CAM heatmaps (and optionally SODT heatmaps) for each detection.
-
-    Parameters
-    ----------
-    image:
-        Original image (PIL or ``[3, H, W]`` tensor).
-    gradcam_results:
-        Output from :func:`gradcam_for_detections`.
-    class_names:
-        Tuple of defect class names (excluding background).
-    sodt_heatmaps:
-        Optional SODT local evidence heatmaps, one per detection, matching
-        the ordering of ``gradcam_results``.
-    max_detections:
-        Maximum number of detections to plot.
-    figsize_per_detection:
-        Figure width/height multiplier per row.
-    save_path:
-        If provided, save the figure to this path.
-    """
+    """One row per detection: box, Grad-CAM, tree heatmap."""
     if isinstance(image, Tensor):
         image_np = image_to_array(image)
     else:
@@ -176,7 +133,7 @@ def plot_gradcam_comparison(
         x1, y1, x2, y2 = box.tolist()
         w, h = x2 - x1, y2 - y1
 
-        # --- Column 0: Detection on image ---
+        # Detection
         ax_det = axes[row_idx][0]
         ax_det.imshow(image_np)
         rect = patches.Rectangle(
@@ -192,9 +149,9 @@ def plot_gradcam_comparison(
         )
         ax_det.axis("off")
 
-        # --- Column 1: Grad-CAM heatmap cropped to detection ---
+        # Grad-CAM
         ax_cam = axes[row_idx][1]
-        # Crop the original image to the detection region.
+        # Crop
         crop_x1 = max(0, int(x1))
         crop_y1 = max(0, int(y1))
         crop_x2 = min(image_np.shape[1], int(x2))
@@ -207,7 +164,7 @@ def plot_gradcam_comparison(
             continue
 
         ax_cam.imshow(crop)
-        # Resize heatmap to match the crop.
+        # Resize
         heatmap_np = heatmap.detach().cpu().numpy()
         heatmap_resized = (
             np.array(
@@ -222,7 +179,7 @@ def plot_gradcam_comparison(
         ax_cam.set_title("Grad-CAM", fontsize=11, loc="left", fontweight="bold")
         ax_cam.axis("off")
 
-        # --- Column 2: SODT heatmap (if available) ---
+        # Tree heatmap
         if has_sodt:
             ax_sodt = axes[row_idx][2]
             sodt_hm = sodt_heatmaps[row_idx].detach().cpu().numpy()

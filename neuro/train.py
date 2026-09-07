@@ -21,7 +21,7 @@ def set_scheduled_learning_rate(
     global_step: int,
     train_config: NeuroTrainConfig,
 ) -> float:
-    """Apply warmup plus step/milestone decay for the current train step."""
+    """Current LR for this step: warmup first, then decay."""
 
     train_settings = train_config["train"]
     milestones = train_settings["sch_milestones"]
@@ -62,7 +62,7 @@ def train_one_epoch(
     base_lrs: list[float],
     train_config: NeuroTrainConfig,
 ) -> dict[str, float]:
-    """Train a Faster R-CNN model for exactly one epoch."""
+    """One training epoch, summarized for the notebook."""
 
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -145,12 +145,7 @@ def train_model(
     device: torch.device,
     train_config: NeuroTrainConfig,
 ) -> list[dict[str, float]]:
-    """Train for multiple epochs and return notebook-friendly history.
-
-    The notebook still owns model/dataloader creation, checkpointing, and plots.
-    This function only owns the repeated training calls and reads training
-    hyperparameters from NeuroTrainConfig.
-    """
+    """Repeated epoch calls; the notebook still owns checkpoints and plots."""
 
     base_lrs = [
         float(parameter_group["lr"]) for parameter_group in optimizer.param_groups
@@ -188,11 +183,10 @@ def _greedy_match_within_label(
     target_boxes: Tensor,
     iou_threshold: float,
 ) -> tuple[int, int, int]:
-    """Greedily match one label's predictions (highest score first) to
-    unclaimed target boxes above iou_threshold. Returns (true_positives,
-    false_positives, false_negatives) for just these boxes — the shared
-    core of count_detection_matches and _confusion_and_per_class, which
-    differ only in how they aggregate this result across labels."""
+    """Best-score-first matching for one label; each target claimed once.
+
+    Shared by the precision/recall counter and the confusion-matrix builder.
+    """
     if predicted_boxes.numel() == 0:
         return 0, 0, target_boxes.shape[0]
     if target_boxes.numel() == 0:
@@ -227,7 +221,7 @@ def count_detection_matches(
     iou_threshold: float,
     score_threshold: float,
 ) -> tuple[int, int, int]:
-    """Count simple class-aware TP/FP/FN matches for precision and recall."""
+    """TP/FP/FN per label, for precision and recall."""
 
     mask = prediction["scores"] >= score_threshold
     filtered_prediction = {
@@ -267,11 +261,9 @@ def _global_confusion_matrix(
     score_threshold: float,
     num_classes: int,
 ) -> Tensor:
-    """Row = ground-truth class, column = predicted class (0 = background).
+    """Confusion matrix where wrong-class matches land off-diagonal.
 
-    Unlike per-label matching, this matches every kept prediction against
-    every ground-truth box regardless of class, so a wrong-class match lands
-    off-diagonal instead of being counted as an independent FP + FN.
+    Row = truth, column = prediction, 0 = background.
     """
     mask = prediction["scores"] >= score_threshold
     pred_boxes = prediction["boxes"][mask]
@@ -359,7 +351,7 @@ def evaluate_model(
     device: torch.device,
     train_config: NeuroTrainConfig,
 ) -> dict[str, Any]:
-    """Evaluate Faster R-CNN detections over an existing dataloader."""
+    """Detection scores over a notebook-built dataloader."""
 
     evaluation_config = train_config["evaluation"]
     class_names = train_config["dataset"]["class_names"]

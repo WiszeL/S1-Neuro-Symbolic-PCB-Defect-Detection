@@ -49,20 +49,7 @@ def _positive_all_neg_ratio_indices(
     random_state: int,
     background_label: int = 0,
 ) -> Tensor:
-    """Select ALL positive (non-background) RoIs and N× background RoIs.
-
-    This mirrors the common object detection sampling strategy (e.g. Faster R-CNN
-    RPN uses 1:1, but 1:3 is standard for the second stage).  The tree sees every
-    single defect example, and the ``random_state`` controls only which background
-    RoIs are sampled.
-
-    Args:
-        labels: 1-D tensor of integer class labels.
-        neg_ratio: How many background RoIs per total positive count.
-                   e.g. 3.0 means ``num_bg = 3 * num_positive``.
-        random_state: Seed for the background random shuffle.
-        background_label: Which label value is "background" (default 0).
-    """
+    """Keep every defect; sample background so the tree isn't drowned in it."""
     positive_mask = labels != background_label
     negative_mask = labels == background_label
 
@@ -92,7 +79,6 @@ def _selected_indices_from_metadata(
     labels = metadata["teacher_labels"]
 
     if neg_ratio is not None:
-        # ALL positive RoIs + neg_ratio × background RoIs.
         keep = _positive_all_neg_ratio_indices(
             labels,
             neg_ratio=neg_ratio,
@@ -101,7 +87,7 @@ def _selected_indices_from_metadata(
     else:
         keep = torch.arange(labels.shape[0], dtype=torch.int64)
 
-    # Sort indices for efficient sequential memmap access
+    # Sorted reads stay fast on disk.
     return torch.sort(keep).values
 
 

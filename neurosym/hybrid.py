@@ -40,7 +40,7 @@ class NeuroSymbolicDetector(nn.Module):
             .numpy()
             .astype(np.float32)
         )
-        # Use uncalibrated probabilities as secondary leakage is controlled by the argmax mask.
+        # Raw leaf histograms are fine — the argmax mask below kills the leakage.
         if self.use_routing_margin:
             leaf_indices, routing_confidence = (
                 self.symbolic_tree.predict_leaf_indices_and_routing_confidence(
@@ -56,17 +56,7 @@ class NeuroSymbolicDetector(nn.Module):
             dtype=pooled_features.dtype,
         )
 
-        # The SODT is a hard classifier (decision tree): it routes each sample
-        # down a single path to a single leaf.  The leaf distribution is an
-        # empirical histogram, NOT a calibrated softmax — secondary classes
-        # retain significant probability mass (e.g. 0.08–0.12), which the
-        # per-class NMS postprocessing treats as real candidate detections.
-        # This creates ~3× more false positives than the neural classifier.
-        #
-        # Fix: keep only the tree's chosen class (argmax) and zero out the
-        # rest.  This matches the tree's hard-decision semantics and
-        # eliminates the false-positive leakage without changing any
-        # classification decision.
+        # Leaf histograms leak mass into other classes, which NMS reads as real detections — mask to the tree's own choice.
         argmax_classes = probability_tensor.argmax(dim=-1)
         mask = torch.zeros_like(probability_tensor)
         mask[torch.arange(len(argmax_classes), device=self.device), argmax_classes] = (
@@ -74,12 +64,7 @@ class NeuroSymbolicDetector(nn.Module):
         )
         probability_tensor = probability_tensor * mask
 
-        # Leaf distributions are piecewise-constant (one value per leaf), so
-        # every detection routed to the same leaf ties in score.  Ties collapse
-        # the AP ranking and leave Soft-NMS unable to order overlapping boxes.
-        # Modulate the leaf score by the routing-margin confidence (product of
-        # sigmoid(|node score|) along the path): purely tree-derived, monotone
-        # within a leaf, and it changes no routing/label/explanation.
+        # Same leaf means tied scores, which breaks ranking — scale by routing margin (tree's own numbers, no decision changes).
         if routing_confidence is not None:
             probability_tensor = probability_tensor * torch.from_numpy(
                 routing_confidence
@@ -103,11 +88,7 @@ class NeuroSymbolicDetector(nn.Module):
             images_list.image_sizes,
         )
 
-        # The exact attribution map (see neurosym/heatmap.py) needs the
-        # pre-pooling FPN level each proposal was actually pooled from — reuse
-        # the same LevelMapper MultiScaleRoIAlign uses internally so the map
-        # never targets the wrong level. `pool.map_levels` is populated on the
-        # first forward call above.
+        # Same level RoI-Align pooled from, so the map never targets the wrong one.
         roi_level_indices = self.detector.roi_align.pool.map_levels(proposals)
         featmap_names = list(self.detector.roi_align.pool.featmap_names)
         roi_representations = self.detector.box_head(pooled_features)
@@ -148,11 +129,7 @@ class NeuroSymbolicDetector(nn.Module):
                     "scores": result["scores"].detach().cpu(),
                     "labels": result["labels"].detach().cpu(),
                     "proposal_boxes": proposals_dict["boxes"].detach().cpu(),
-                    # Proposal boxes in the *processed* (resized/padded) image
-                    # space the FPN feature maps below live in — the exact
-                    # attribution map must crop against these, not the
-                    # original-image "proposal_boxes" above (see
-                    # neurosym/heatmap.py::compute_exact_attribution).
+                    # Processed-space boxes — the map crops against these, not the original-image ones.
                     "proposal_boxes_processed": result["proposal_boxes"].detach().cpu(),
                     "pooled_features": result["pooled_features"].detach().cpu(),
                     "symbolic_probabilities": result["symbolic_probabilities"]
@@ -164,9 +141,7 @@ class NeuroSymbolicDetector(nn.Module):
                     "symbolic_level_indices": result["symbolic_level_indices"]
                     .detach()
                     .cpu(),
-                    # Shared per-image context the exact attribution map needs
-                    # to rebuild itself from a single stored detection dict
-                    # without a second backbone forward pass.
+                    # Stash FPN context so the map rebuilds without a second backbone pass.
                     "fpn_features": {
                         name: level_map[image_index].detach().cpu()
                         for name, level_map in features.items()

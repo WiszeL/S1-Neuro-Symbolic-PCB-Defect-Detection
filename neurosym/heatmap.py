@@ -104,9 +104,7 @@ def compute_node_local_evidence_maps(
                 ),
                 "node_heatmap": node_heatmap,
                 "raw_node_heatmap": positive_evidence,
-                # Signed, so it sums exactly to the node's score minus bias
-                # (the positive-only map above does not). Checked in
-                # tests/test_exact_attribution.py.
+                # Signed, so it sums back to the node's score (tested).
                 "signed_evidence_map": signed_local.sum(axis=0).astype(np.float32),
                 "top_local_cells": _top_grid_cells(node_heatmap, top_k=8),
                 "top_positive_local_channels": _top_channels(
@@ -126,13 +124,10 @@ def compute_symbolic_heatmap(
 ) -> dict[str, Any]:
     grid = _as_feature_grid(feature_grid)
     feature_vector = grid.reshape(-1)
-    # tree.decision_path is never empty here: SparseObliqueDecisionTreeClassifier
-    # rejects max_depth <= 0 at construction, so num_internal_nodes >= 1 always.
+    # Path never empty — depth always >= 1 by construction.
     path = tree.decision_path(feature_vector)
 
-    # ---------------------------------------------------------------------
-    # Gather the actual path weights in the original pooled-feature lattice
-    # ---------------------------------------------------------------------
+    # Gather weights
     weight_grids = np.stack(
         [tree.node_weight_grid(step.node_index) for step in path], axis=0
     )
@@ -141,9 +136,7 @@ def compute_symbolic_heatmap(
         dtype=np.float32,
     ).reshape(-1, 1, 1, 1)
 
-    # ---------------------------------------------------------------------
-    # Build structural and local evidence maps from the symbolic path itself
-    # ---------------------------------------------------------------------
+    # Build maps
     local_signed_contributions = path_directions * weight_grids * grid[None, ...]
     structural_density_map = np.sum(np.abs(weight_grids), axis=(0, 1)).astype(
         np.float32
@@ -241,9 +234,7 @@ def _fpn_box_bounds(
     feature_hw: tuple[int, int],
     margin: int = 0,
 ) -> tuple[int, int, int, int]:
-    """The proposal box as integer index bounds on an FPN level map. `margin`
-    widens the crop, since RoI-Align samples a little outside the box.
-    """
+    """Box bounds on an FPN level map; margin covers RoI-Align's sampling spill."""
     feature_h, feature_w = feature_hw
     padded_h, padded_w = padded_size
     scale_x = feature_w / padded_w
@@ -261,10 +252,7 @@ def path_weight_grid(
     feature_grid: Tensor | np.ndarray,
     path: list[Any] | None = None,
 ) -> np.ndarray:
-    """The path's node weights summed, signed by which way each split routed
-    (`+1` left, `-1` right). `path=None` walks the full root-to-leaf path; a
-    one-step list gives one node's grid.
-    """
+    """Path weights summed with routing signs; None walks the whole path."""
     grid = _as_feature_grid(feature_grid)
     if path is None:
         path = tree.decision_path(grid.reshape(-1))
@@ -286,12 +274,10 @@ def exact_fpn_contribution(
     path: list[Any] | None = None,
     weight_grid_override: np.ndarray | None = None,  # controls only (permuted/foreign weights)
 ) -> Tensor:
-    """Split the path's score exactly across the FPN pixels it was pooled from,
-    `(C, Hf, Wf)`.
+    """Path score split exactly across the FPN pixels it came from.
 
-    RoI-Align is linear, so `grad(score, FPN) * FPN` sums back to the score with
-    no approximation — autograd here just reads RoI-Align's coefficients. The
-    sum identity is checked in tests/test_exact_attribution.py.
+    RoI-Align is linear, so this sums back to the score with no
+    approximation — autograd just reads RoI-Align's own coefficients.
     """
     weights = (
         weight_grid_override
@@ -299,7 +285,7 @@ def exact_fpn_contribution(
         else path_weight_grid(tree, feature_grid, path=path)
     )
     with torch.enable_grad():
-        # numpy round-trip: escape inference-mode so autograd can run on the map
+        # Escape inference-mode so autograd can run.
         feats = {
             name: torch.from_numpy(
                 np.ascontiguousarray(level.detach().cpu().numpy())
@@ -329,11 +315,10 @@ def compute_exact_attribution(
     path: list[Any] | None = None,
     margin: int = 0,
 ) -> np.ndarray:
-    """2-D heatmap from `exact_fpn_contribution`, cropped to the proposal box.
+    """Exact map as a 2-D picture, cropped to the box.
 
-    Two limits to be honest about: `abs().sum(0)` over channels is a display
-    choice, not part of the exact claim; and the map lives on the FPN grid, not
-    image pixels, so it points at a region, not a pixel.
+    Honest limits: channel-collapsing is a display choice, and FPN
+    pixels are regions, not image pixels.
     """
     contribution = exact_fpn_contribution(
         tree,

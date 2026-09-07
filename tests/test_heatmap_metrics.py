@@ -1,4 +1,4 @@
-"""Smoke check: shared heatmap metric helpers (util/heatmap_metrics.py)."""
+"""Shared heatmap helpers behave."""
 
 import torch
 
@@ -58,18 +58,17 @@ def test_stratified_spatial_result_empty_input_is_nan():
 def test_stratified_spatial_result_splits_by_coverage_threshold():
     overlap = [1.0, 0.0, 0.5]
     pointing = [1.0, 0.0, 1.0]
-    coverage = [0.1, 0.9, LOW_GT_COVERAGE_THRESHOLD]  # 0.1 < thresh, 0.9 and thresh itself are not
+    coverage = [0.1, 0.9, LOW_GT_COVERAGE_THRESHOLD]
     result = stratified_spatial_result(overlap, pointing, coverage)
     assert result["evaluated_roi_count"] == 3
-    # Only the coverage=0.1 row is strictly below LOW_GT_COVERAGE_THRESHOLD.
+    # Only the 0.1 row lands in the low stratum.
     assert result["low_gt_coverage"]["evaluated_roi_count"] == 1
     assert result["low_gt_coverage"]["box_grounded_roi_overlap"] == 1.0
     assert result["low_gt_coverage"]["pointing_score"] == 1.0
 
 
 def _full_coverage_roi_population(n: int):
-    # Proposal == GT box -> the GT mask covers the entire 7x7 grid, so
-    # pointing/overlap are 1.0 regardless of the random heatmap's values.
+    # Full mask means chance scores perfectly.
     proposal_boxes = torch.tensor([[0.0, 0.0, 10.0, 10.0]] * n)
     matched_gt_boxes = proposal_boxes.clone()
     has_matched_gt = torch.ones(n, dtype=torch.bool)
@@ -87,7 +86,7 @@ def test_random_baseline_full_coverage_always_scores_perfectly():
     assert result["evaluated_roi_count"] == 20
     assert result["pointing_score"] == 1.0
     assert result["box_grounded_roi_overlap"] == 1.0
-    # Full-coverage RoIs never fall in the low-coverage stratum.
+    # Full coverage never lands in the low stratum.
     assert result["low_gt_coverage"]["evaluated_roi_count"] == 0
 
 
