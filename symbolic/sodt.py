@@ -52,9 +52,7 @@ class SparseObliqueDecisionTreeClassifier:
             dtype=np.float32,
         )
 
-    # ---------------------------------------------------------------------
-    # Tree structure helpers
-    # ---------------------------------------------------------------------
+    # Structure
 
     def left_child(self, node_index: int) -> int:
         return (2 * node_index) + 1
@@ -70,13 +68,10 @@ class SparseObliqueDecisionTreeClassifier:
             raise ValueError("leaf_position can only be called on a leaf node.")
         return node_index - self.num_internal_nodes
 
-    # ---------------------------------------------------------------------
-    # Prediction and path inspection
-    # ---------------------------------------------------------------------
+    # Predict
 
     def _prepare_features(self, features: np.ndarray) -> np.ndarray:
-        # ensure_float32 preserves memmap arrays when dtype already matches,
-        # avoiding materialising the entire dataset (~3 GB) into RAM.
+        # Keep big files on disk instead of loading them into RAM.
         prepared = ensure_float32(features)
         if prepared.ndim == 1:
             prepared = prepared.reshape(1, -1)
@@ -122,18 +117,12 @@ class SparseObliqueDecisionTreeClassifier:
     def predict_leaf_indices_and_routing_confidence(
         self,
         features: np.ndarray,
-        temperature: float = 1.0,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Traverse the tree, returning leaf indices plus a routing confidence.
+        """Confidence per sample, read off the tree's own margins.
 
-        The confidence is the product of sigmoid(|node score| / temperature)
-        over the *active* nodes (nonzero weights) on each sample's path — the
-        margin to each decision hyperplane. Pruned nodes always score exactly
-        zero and would apply a uniform 0.5 factor to every sample, so they are
-        excluded. Routing decisions are identical to predict_leaf_indices.
+        Pruned nodes skipped — they score zero for everyone, so they'd
+        shrink every sample equally. Routing itself untouched.
         """
-        if temperature <= 0.0:
-            raise ValueError("temperature must be positive.")
 
         features = self._prepare_features(features)
         leaf_indices = np.empty((features.shape[0],), dtype=np.int64)
@@ -150,9 +139,7 @@ class SparseObliqueDecisionTreeClassifier:
                 scores = self._score_features_by_node_indices(
                     chunk_features, node_indices
                 )
-                margin_confidence = 1.0 / (
-                    1.0 + np.exp(-np.abs(scores) / temperature)
-                )
+                margin_confidence = 1.0 / (1.0 + np.exp(-np.abs(scores)))
                 confidence *= np.where(
                     active_nodes[node_indices], margin_confidence, 1.0
                 )
@@ -230,9 +217,7 @@ class SparseObliqueDecisionTreeClassifier:
         feature = self._prepare_features(feature)
         return int(self.predict_leaf_indices(feature)[0])
 
-    # ---------------------------------------------------------------------
-    # Introspection and persistence
-    # ---------------------------------------------------------------------
+    # Inspect
 
     def node_feature_indices(self, node_index: int) -> np.ndarray:
         return np.flatnonzero(self.node_weights[node_index]).astype(np.int64)

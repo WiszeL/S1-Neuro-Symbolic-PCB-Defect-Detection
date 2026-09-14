@@ -18,9 +18,9 @@ from .visualization import (
     draw_ground_truth_boxes,
     lookup_ground_truth,
     heatmap_to_array,
-    image_to_array,
     zoom_axis_to_box,
 )
+from util.visualization import image_to_array
 
 __all__ = [
     "NeuroSymbolicDetector",

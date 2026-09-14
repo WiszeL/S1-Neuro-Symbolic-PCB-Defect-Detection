@@ -21,7 +21,7 @@ def set_scheduled_learning_rate(
     global_step: int,
     train_config: NeuroTrainConfig,
 ) -> float:
-    """Apply warmup plus step/milestone decay for the current train step."""
+    """Current LR for this step: warmup first, then decay."""
 
     train_settings = train_config["train"]
     milestones = train_settings["sch_milestones"]
@@ -62,7 +62,7 @@ def train_one_epoch(
     base_lrs: list[float],
     train_config: NeuroTrainConfig,
 ) -> dict[str, float]:
-    """Train a Faster R-CNN model for exactly one epoch."""
+    """One training epoch, summarized for the notebook."""
 
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -145,12 +145,7 @@ def train_model(
     device: torch.device,
     train_config: NeuroTrainConfig,
 ) -> list[dict[str, float]]:
-    """Train for multiple epochs and return notebook-friendly history.
-
-    The notebook still owns model/dataloader creation, checkpointing, and plots.
-    This function only owns the repeated training calls and reads training
-    hyperparameters from NeuroTrainConfig.
-    """
+    """Repeated epoch calls; the notebook still owns checkpoints and plots."""
 
     base_lrs = [
         float(parameter_group["lr"]) for parameter_group in optimizer.param_groups
@@ -182,13 +177,51 @@ def train_model(
     return history
 
 
+def _greedy_match_within_label(
+    predicted_boxes: Tensor,
+    prediction_scores: Tensor,
+    target_boxes: Tensor,
+    iou_threshold: float,
+) -> tuple[int, int, int]:
+    """Best-score-first matching for one label; each target claimed once.
+
+    Shared by the precision/recall counter and the confusion-matrix builder.
+    """
+    if predicted_boxes.numel() == 0:
+        return 0, 0, target_boxes.shape[0]
+    if target_boxes.numel() == 0:
+        return 0, predicted_boxes.shape[0], 0
+
+    predicted_boxes = predicted_boxes[
+        torch.argsort(prediction_scores, descending=True)
+    ]
+    ious = box_iou(predicted_boxes, target_boxes)
+    matched_targets: set[int] = set()
+    true_positives = 0
+    false_positives = 0
+
+    for row_index in range(predicted_boxes.shape[0]):
+        best_iou, best_target_index = ious[row_index].max(dim=0)
+        if (
+            best_iou.item() >= iou_threshold
+            and int(best_target_index) not in matched_targets
+        ):
+            matched_targets.add(int(best_target_index))
+            true_positives += 1
+        else:
+            false_positives += 1
+
+    false_negatives = target_boxes.shape[0] - len(matched_targets)
+    return true_positives, false_positives, false_negatives
+
+
 def count_detection_matches(
     prediction: dict[str, Tensor],
     target: dict[str, Tensor],
     iou_threshold: float,
     score_threshold: float,
 ) -> tuple[int, int, int]:
-    """Count simple class-aware TP/FP/FN matches for precision and recall."""
+    """TP/FP/FN per label, for precision and recall."""
 
     mask = prediction["scores"] >= score_threshold
     filtered_prediction = {
@@ -208,35 +241,15 @@ def count_detection_matches(
         prediction_indices = torch.where(filtered_prediction["labels"] == label)[0]
         target_indices = torch.where(target["labels"] == label)[0]
 
-        predicted_boxes = filtered_prediction["boxes"][prediction_indices]
-        target_boxes = target["boxes"][target_indices]
-
-        if predicted_boxes.numel() == 0:
-            false_negatives += target_boxes.shape[0]
-            continue
-        if target_boxes.numel() == 0:
-            false_positives += predicted_boxes.shape[0]
-            continue
-
-        prediction_scores = filtered_prediction["scores"][prediction_indices]
-        predicted_boxes = predicted_boxes[
-            torch.argsort(prediction_scores, descending=True)
-        ]
-        ious = box_iou(predicted_boxes, target_boxes)
-        matched_targets: set[int] = set()
-
-        for row_index in range(predicted_boxes.shape[0]):
-            best_iou, best_target_index = ious[row_index].max(dim=0)
-            if (
-                best_iou.item() >= iou_threshold
-                and int(best_target_index) not in matched_targets
-            ):
-                matched_targets.add(int(best_target_index))
-                true_positives += 1
-            else:
-                false_positives += 1
-
-        false_negatives += target_boxes.shape[0] - len(matched_targets)
+        tp, fp, fn = _greedy_match_within_label(
+            filtered_prediction["boxes"][prediction_indices],
+            filtered_prediction["scores"][prediction_indices],
+            target["boxes"][target_indices],
+            iou_threshold,
+        )
+        true_positives += tp
+        false_positives += fp
+        false_negatives += fn
 
     return true_positives, false_positives, false_negatives
 
@@ -248,11 +261,9 @@ def _global_confusion_matrix(
     score_threshold: float,
     num_classes: int,
 ) -> Tensor:
-    """Row = ground-truth class, column = predicted class (0 = background).
+    """Confusion matrix where wrong-class matches land off-diagonal.
 
-    Unlike per-label matching, this matches every kept prediction against
-    every ground-truth box regardless of class, so a wrong-class match lands
-    off-diagonal instead of being counted as an independent FP + FN.
+    Row = truth, column = prediction, 0 = background.
     """
     mask = prediction["scores"] >= score_threshold
     pred_boxes = prediction["boxes"][mask]
@@ -316,32 +327,15 @@ def _confusion_and_per_class(
         label = int(label)
         pred_idx = torch.where(filtered["labels"] == label)[0]
         tgt_idx = torch.where(target["labels"] == label)[0]
-        pred_boxes = filtered["boxes"][pred_idx]
-        tgt_boxes = target["boxes"][tgt_idx]
 
-        if pred_boxes.numel() == 0:
-            cfn[label] = tgt_boxes.shape[0]
-            continue
-
-        if tgt_boxes.numel() == 0:
-            cfp[label] = pred_boxes.shape[0]
-            continue
-
-        scores = filtered["scores"][pred_idx]
-        srt = torch.argsort(scores, descending=True)
-        pred_boxes = pred_boxes[srt]
-        ious = box_iou(pred_boxes, tgt_boxes)
-        matched = set()
-
-        for r in range(pred_boxes.shape[0]):
-            best_iou, best_tgt = ious[r].max(dim=0)
-            if best_iou.item() >= iou_threshold and best_tgt.item() not in matched:
-                matched.add(best_tgt.item())
-                cp[label] += 1
-            else:
-                cfp[label] += 1
-
-        fn = tgt_boxes.shape[0] - len(matched)
+        tp, fp, fn = _greedy_match_within_label(
+            filtered["boxes"][pred_idx],
+            filtered["scores"][pred_idx],
+            target["boxes"][tgt_idx],
+            iou_threshold,
+        )
+        cp[label] = tp
+        cfp[label] = fp
         cfn[label] = fn
 
     conf = _global_confusion_matrix(
@@ -357,7 +351,7 @@ def evaluate_model(
     device: torch.device,
     train_config: NeuroTrainConfig,
 ) -> dict[str, Any]:
-    """Evaluate Faster R-CNN detections over an existing dataloader."""
+    """Detection scores over a notebook-built dataloader."""
 
     evaluation_config = train_config["evaluation"]
     class_names = train_config["dataset"]["class_names"]

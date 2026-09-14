@@ -25,22 +25,7 @@ SoftNMSMethod = Literal["linear", "gaussian", "hard"]
 
 
 class ResNet50Extractor(nn.Module):
-    """ResNet-50 stage extractor.
-
-    The SF-PSPyramid neck needs four ResNet feature stages:
-
-    - c2 from layer1: high resolution, low-level spatial detail
-    - c3 from layer2: medium spatial detail
-    - c4 from layer3: stronger semantic features
-    - c5 from layer4: strongest semantic features, lowest resolution
-
-    For a 640x640 input, the approximate feature sizes are:
-
-    - c2: 160x160, 256 channels
-    - c3: 80x80, 512 channels
-    - c4: 40x40, 1024 channels
-    - c5: 20x20, 2048 channels
-    """
+    """Four ResNet stages (c2-c5) feeding the neck."""
 
     def __init__(
         self,
@@ -54,7 +39,6 @@ class ResNet50Extractor(nn.Module):
         if freeze_batch_norm:
             self.replace_batch_norm_with_frozen_batch_norm(backbone)
 
-        # Keep only the ResNet stages that the paper feeds into SF-PSPyramid.
         self.body = IntermediateLayerGetter(
             backbone,
             return_layers={
@@ -72,12 +56,7 @@ class ResNet50Extractor(nn.Module):
 
     @staticmethod
     def replace_batch_norm_with_frozen_batch_norm(module: nn.Module) -> None:
-        """Replace BatchNorm with FrozenBatchNorm for detection training.
-
-        Faster R-CNN is usually trained with small batch sizes. Frozen BatchNorm
-        keeps the backbone normalization stable instead of updating noisy batch
-        statistics from only a few PCB images.
-        """
+        """Frozen norms stay stable on tiny detection batches."""
 
         for name, child in module.named_children():
             if isinstance(child, nn.BatchNorm2d):
@@ -93,25 +72,10 @@ class ResNet50Extractor(nn.Module):
 
 
 class SFPSPyramid(nn.Module):
-    """Selective Feature Pixel Shuffle Pyramid from Fung et al.
-
-    Purpose:
-    - Keep high semantic information from deep ResNet stages.
-    - Rebuild high-resolution maps with pixel shuffle for tiny PCB defects.
-    - Fuse semantic-rich maps and spatial-rich maps with selective attention.
-
-    Input contract:
-    - c2: [N, 256, H/4, W/4]
-    - c3: [N, 512, H/8, W/8]
-    - c4: [N, 1024, H/16, W/16]
-    - c5: [N, 2048, H/32, W/32]
-
-    Output contract:
-    - p2, p3, p4, p5, p6: all 256 channels, ordered for RoI Align.
-    """
+    """Neck: deep meaning rebuilt at high resolution for tiny defects."""
 
     class MConv(nn.Module):
-        """Project a ResNet stage into the shared pyramid channel width."""
+        """One stage squeezed into the shared channel width."""
 
         def __init__(self, in_channels: int, out_channels: int) -> None:
             super().__init__()
@@ -137,11 +101,7 @@ class SFPSPyramid(nn.Module):
             return feature
 
     class CPBlock(nn.Module):
-        """Convolution plus pixel shuffle upsampling.
-
-        The convolution learns semantic channels first. Pixel shuffle then
-        rearranges those channels into a feature map with 2x spatial resolution.
-        """
+        """Learn channels first, then shuffle them into 2x resolution."""
 
         def __init__(self, in_channels: int, out_channels: int) -> None:
             super().__init__()
@@ -160,23 +120,15 @@ class SFPSPyramid(nn.Module):
             return self.pixel_shuffle(feature)
 
     class SFAttention(nn.Module):
-        """Selectively fuse semantic and spatial feature maps.
+        """Blend deep meaning into detailed maps, per channel."""
 
-        The first input is treated as the semantic-rich branch. It is resized to
-        the second input when needed, then the module learns two channel-wise
-        weights: one for semantic content and one for spatial detail.
-        """
+        # Paper never sizes this bottleneck, so fixed at 32.
+        HIDDEN_CHANNELS = 32
 
-        def __init__(
-            self,
-            channels: int,
-            reduction: int = 16,
-            min_hidden_channels: int = 32,
-        ) -> None:
+        def __init__(self, channels: int) -> None:
             super().__init__()
-            hidden_channels = max(channels // reduction, min_hidden_channels)
-            self.compress = nn.Linear(channels, hidden_channels)
-            self.expand = nn.Linear(hidden_channels, channels * 2)
+            self.compress = nn.Linear(channels, self.HIDDEN_CHANNELS)
+            self.expand = nn.Linear(self.HIDDEN_CHANNELS, channels * 2)
             self.activation = nn.ReLU(inplace=True)
 
         def forward(self, semantic_feature: Tensor, spatial_feature: Tensor) -> Tensor:
@@ -200,11 +152,10 @@ class SFPSPyramid(nn.Module):
 
             return weights[:, 0] * semantic_feature + weights[:, 1] * spatial_feature
 
-    # Fixed to match BoxHead.POOLED_CHANNELS, which assumes 64-channel
-    # pooled RoI features; the two must change together.
+    # Keep in step with BoxHead.POOLED_CHANNELS.
     OUT_CHANNELS = 64
 
-    def __init__(self, attention_reduction: int = 16) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.out_channels = self.OUT_CHANNELS
 
@@ -215,14 +166,8 @@ class SFPSPyramid(nn.Module):
         self.c4_to_p3 = self.CPBlock(1024, self.OUT_CHANNELS)
         self.c3_to_p2 = self.CPBlock(512, self.OUT_CHANNELS)
 
-        self.p3_attention = self.SFAttention(
-            self.OUT_CHANNELS,
-            reduction=attention_reduction,
-        )
-        self.p2_attention = self.SFAttention(
-            self.OUT_CHANNELS,
-            reduction=attention_reduction,
-        )
+        self.p3_attention = self.SFAttention(self.OUT_CHANNELS)
+        self.p2_attention = self.SFAttention(self.OUT_CHANNELS)
 
     def forward(self, stages: dict[str, Tensor]) -> FeatureMap:
         """Build p2-p6 exactly from the c2-c5 ResNet stage maps."""
@@ -232,17 +177,17 @@ class SFPSPyramid(nn.Module):
         c4 = stages["c4"]
         c5 = stages["c5"]
 
-        # Deep semantic branch: p5 and p6 keep low-resolution context.
+        # Context
         p5 = self.c5_to_p5(c5)
         p6 = F.max_pool2d(p5, kernel_size=1, stride=2)
 
-        # Pixel-shuffle branch: rebuild larger maps from deeper stages.
+        # Detail
         p4 = self.c5_to_p4(c5)
         p3 = self.c4_to_p3(c4)
         p2 = self.c3_to_p2(c3)
         p1 = self.c2_to_p1(c2)
 
-        # Selective attention injects deep semantics into high-resolution maps.
+        # Fuse
         p3_prime = self.p3_attention(p4, p3)
         p2_prime = self.p2_attention(p3_prime, p1 + p2)
 
@@ -258,26 +203,19 @@ class SFPSPyramid(nn.Module):
 
 
 class BackboneWithNeck(nn.Module):
-    """Complete Faster R-CNN feature backbone.
-
-    This is the module passed to torchvision Faster R-CNN. It combines:
-
-    - ResNet50Extractor: produces c2-c5 stage features.
-    - SFPSPyramid: converts c2-c5 into p2-p6 pyramid features.
-    """
+    """Backbone plus neck, as one torchvision-ready module."""
 
     def __init__(
         self,
         pretrained: bool = True,
         freeze_batch_norm: bool = True,
-        attention_reduction: int = 16,
     ) -> None:
         super().__init__()
         self.extractor = ResNet50Extractor(
             pretrained=pretrained,
             freeze_batch_norm=freeze_batch_norm,
         )
-        self.neck = SFPSPyramid(attention_reduction=attention_reduction)
+        self.neck = SFPSPyramid()
         self.out_channels = self.neck.out_channels
 
     def forward(self, images: Tensor) -> FeatureMap:
@@ -289,17 +227,9 @@ class BackboneWithNeck(nn.Module):
 
 
 class L1RegionProposalNetwork(RegionProposalNetwork):
-    """Region Proposal Network with L1 box regression.
+    """RPN with plain L1 box loss — tighter boxes on PCB."""
 
-    Modern Faster R-CNN trains the RPN with objectness classification plus box
-    regression. Torchvision uses Smooth L1 by default; Fung et al. report better
-    high-IoU PCB localization with plain L1 regression. This class changes only
-    the regression loss while keeping the standard RPN proposal flow.
-    """
-
-    # RPN defaults not covered by the project YAML (which provides anchor
-    # sizes, ratios, and IoU thresholds): sampler size, proposal counts,
-    # NMS threshold, and score threshold.
+    # YAML covers anchors and thresholds; these extras stay hardcoded.
     BATCH_SIZE_PER_IMAGE = 256
     POSITIVE_FRACTION = 0.5
     PRE_NMS_TOP_N_TRAIN = 2000
@@ -385,13 +315,7 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
 
 
 class RoIAlign(nn.Module):
-    """RoI Align wrapper for extracting SODT-ready proposal features.
-
-    This is the strict neuro-symbolic feature cut:
-    - input: p2-p6 feature maps and RPN proposal boxes
-    - output: pooled RoI feature grids
-    - flattened output: vector z = F(x, proposal) for SODT/TAO
-    """
+    """The feature cut: pooled grids the tree trains on."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -436,15 +360,9 @@ class RoIAlign(nn.Module):
 
 
 class BoxHead(nn.Module):
-    """Two-FC head after RoI Align.
+    """Two FC layers turning each grid into one vector."""
 
-    Fung uses two fully connected layers after RoI Align. This module converts
-    each pooled RoI grid into the shared representation used by both final
-    classification and bounding-box regression.
-    """
-
-    # pooled_channels must match SFPSPyramid.OUT_CHANNELS (64): BoxHead consumes
-    # RoI-Align-pooled 64-channel, 7x7 feature grids from the backbone neck.
+    # Keep in step with SFPSPyramid.OUT_CHANNELS.
     POOLED_CHANNELS = 64
     POOLED_SIZE = 7
     REPRESENTATION_SIZE = 1024
@@ -466,12 +384,7 @@ class BoxHead(nn.Module):
 
 
 class BoxPredictor(nn.Module):
-    """Final Faster R-CNN classification and box-regression outputs.
-
-    The classifier predicts defect class logits including background. The box
-    regressor predicts one 4-value box delta per class, matching Faster R-CNN's
-    class-specific regression design.
-    """
+    """Final scores and box fixes, one set per class."""
 
     def __init__(self, representation_size: int, num_classes: int) -> None:
         super().__init__()
@@ -492,12 +405,7 @@ def fast_rcnn_l1_loss(
     labels: list[Tensor],
     regression_targets: list[Tensor],
 ) -> tuple[Tensor, Tensor]:
-    """Fast R-CNN head loss aligned with Fung's PCB detector.
-
-    Fung keeps the standard Faster R-CNN classification objective
-    cross-entropy, but uses L1 loss for bounding-box regression instead of
-    torchvision's default Smooth L1.
-    """
+    """Same as torchvision, but plain L1 for tighter boxes."""
 
     labels_tensor = torch.cat(labels, dim=0)
     regression_targets_tensor = torch.cat(regression_targets, dim=0)
@@ -524,18 +432,9 @@ def fast_rcnn_l1_loss(
 
 
 class NeuroFasterRCNN(nn.Module):
-    """Faster R-CNN detector for the neuro side of the thesis.
+    """The full detector, wired from the blocks above."""
 
-    This class wires the readable building blocks in this file:
-    BackboneWithNeck -> L1 RPN -> RoI Align -> BoxHead -> BoxPredictor.
-
-    The public model input is the project config pair:
-    - NeuroConfig: architecture, anchors, proposal thresholds, Soft-NMS
-    - NeuroTrainConfig: class names and RCNN preprocessing
-    """
-
-    # Standard Fast R-CNN sampling/postprocessing defaults. These are not
-    # separate constructor knobs; YAML remains the project-facing config.
+    # The rest stay hardcoded; YAML is the only config surface.
     BOX_FG_IOU_THRESH = 0.5
     BOX_BG_IOU_THRESH = 0.5
     BOX_BATCH_SIZE_PER_IMAGE = 512
@@ -561,7 +460,6 @@ class NeuroFasterRCNN(nn.Module):
         self.backbone = BackboneWithNeck(
             pretrained=neuro_config["net"]["backbone_pretrained"],
             freeze_batch_norm=neuro_config["net"]["backbone_freeze_batch_norm"],
-            attention_reduction=neuro_config["net"]["neck_attention_reduction"],
         )
         self.rpn = L1RegionProposalNetwork.build(
             self.backbone.out_channels,
@@ -837,8 +735,7 @@ class NeuroFasterRCNN(nn.Module):
                 scores = updated_scores
                 labels = labels[keep]
             else:
-                # Hard NMS fallback reuses soft_nms.iou_thresh from the config
-                # as its IoU threshold; there is no separate hard-NMS knob.
+                # No separate hard-NMS knob — reuses the Soft-NMS threshold.
                 keep = box_ops.batched_nms(
                     boxes,
                     scores,
@@ -859,11 +756,7 @@ class NeuroFasterRCNN(nn.Module):
         images: list[Tensor],
         targets: list[PCBTarget] | None = None,
     ) -> dict[str, Tensor] | list[dict[str, Tensor]]:
-        """Run training losses or inference detections.
-
-        Training mode returns a loss dictionary for `train_eval.py`.
-        Evaluation mode returns final detections for each image.
-        """
+        """Losses when training, detections when evaluating."""
 
         if self.training and targets is None:
             raise ValueError(
@@ -937,7 +830,7 @@ class NeuroFasterRCNN(nn.Module):
         images: list[Tensor],
         targets: list[PCBTarget] | None = None,
     ) -> list[dict[str, Tensor]]:
-        """Collect proposal geometry and RoI Align outputs before box-head postprocessing."""
+        """Proposals plus pooled grids, before the box head sees them."""
 
         self.eval()
         original_image_sizes = [tuple(image.shape[-2:]) for image in images]
@@ -977,7 +870,7 @@ class NeuroFasterRCNN(nn.Module):
         images: list[Tensor],
         targets: list[PCBTarget] | None = None,
     ) -> list[dict[str, Tensor]]:
-        """Export per-RoI pooled grids and teacher classifier outputs on the same proposals."""
+        """Teacher labels for the same proposals the tree trains on."""
 
         records = self._extract_proposal_feature_records(images, targets)
         pooled_features = torch.cat(

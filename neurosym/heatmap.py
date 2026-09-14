@@ -104,6 +104,8 @@ def compute_node_local_evidence_maps(
                 ),
                 "node_heatmap": node_heatmap,
                 "raw_node_heatmap": positive_evidence,
+                # Signed, so it sums back to the node's score (tested).
+                "signed_evidence_map": signed_local.sum(axis=0).astype(np.float32),
                 "top_local_cells": _top_grid_cells(node_heatmap, top_k=8),
                 "top_positive_local_channels": _top_channels(
                     np.maximum(signed_local, 0.0).sum(axis=(1, 2)),
@@ -122,43 +124,10 @@ def compute_symbolic_heatmap(
 ) -> dict[str, Any]:
     grid = _as_feature_grid(feature_grid)
     feature_vector = grid.reshape(-1)
+    # Path never empty — depth always >= 1 by construction.
     path = tree.decision_path(feature_vector)
 
-    if not path:
-        zero_heatmap = np.zeros(grid.shape[-2:], dtype=np.float32)
-        return {
-            "heatmap": zero_heatmap,
-            "path": path,
-            "leaf_index": tree.leaf_index_for_feature(feature_vector),
-            "global_or_structural_density_map": zero_heatmap,
-            "local_instance_evidence_map": zero_heatmap,
-            "negative_local_evidence_map": zero_heatmap,
-            "signed_local_evidence_map": zero_heatmap,
-            "combined_local_evidence_map": zero_heatmap,
-            "reasoning_summary": {
-                "path_length": 0,
-                "active_path_original_feature_count": 0,
-                "mean_active_original_features_per_node": 0.0,
-                "map_types": {
-                    "global_or_structural_density_map": (
-                        "Intrinsic structural view of what the active symbolic path weights use in general."
-                    ),
-                    "local_instance_evidence_map": (
-                        "Intrinsic per-instance symbolic evidence for this RoI using the actual pooled feature values."
-                    ),
-                },
-            },
-            "node_summaries": [],
-            "top_positive_contributing_features": [],
-            "top_negative_contributing_features": [],
-            "top_structural_channels": [],
-            "top_positive_local_channels": [],
-            "top_negative_local_channels": [],
-        }
-
-    # ---------------------------------------------------------------------
-    # Gather the actual path weights in the original pooled-feature lattice
-    # ---------------------------------------------------------------------
+    # Gather weights
     weight_grids = np.stack(
         [tree.node_weight_grid(step.node_index) for step in path], axis=0
     )
@@ -167,9 +136,7 @@ def compute_symbolic_heatmap(
         dtype=np.float32,
     ).reshape(-1, 1, 1, 1)
 
-    # ---------------------------------------------------------------------
-    # Build structural and local evidence maps from the symbolic path itself
-    # ---------------------------------------------------------------------
+    # Build maps
     local_signed_contributions = path_directions * weight_grids * grid[None, ...]
     structural_density_map = np.sum(np.abs(weight_grids), axis=(0, 1)).astype(
         np.float32
@@ -207,16 +174,16 @@ def compute_symbolic_heatmap(
         "signed_local_evidence_map": signed_local_evidence_map,
         "combined_local_evidence_map": combined_local_evidence_map,
     }
-    selected_mode = mode if mode in maps else "local_instance_evidence_map"
+    if mode not in maps:
+        raise ValueError(
+            f"Unknown symbolic heatmap mode {mode!r}. Expected one of {sorted(maps)}."
+        )
     path_summary = tree.summarize_path(feature_vector, path=path)
     path_trace = [
         {
             "node_index": int(step.node_index),
             "score": float(step.score),
             "went_left": bool(step.went_left),
-            "active_retained_feature_count": int(
-                tree.node_feature_indices(step.node_index).size
-            ),
             "active_original_feature_count": int(
                 tree.node_feature_indices(step.node_index).size
             ),
@@ -230,7 +197,7 @@ def compute_symbolic_heatmap(
     top_positive_local_channels = _top_channels(positive_local_channel_scores, top_k=8)
     top_negative_local_channels = _top_channels(negative_local_channel_scores, top_k=8)
     return {
-        "heatmap": maps[selected_mode],
+        "heatmap": maps[mode],
         "path": path,
         "path_trace": path_trace,
         "leaf_index": tree.leaf_index_for_feature(feature_vector),
@@ -259,6 +226,118 @@ def compute_symbolic_heatmap(
         "top_negative_local_channels": top_negative_local_channels,
         **maps,
     }
+
+
+def _fpn_box_bounds(
+    box_processed: Tensor,
+    padded_size: tuple[int, int],
+    feature_hw: tuple[int, int],
+    margin: int = 0,
+) -> tuple[int, int, int, int]:
+    """Box bounds on an FPN level map; margin covers RoI-Align's sampling spill."""
+    feature_h, feature_w = feature_hw
+    padded_h, padded_w = padded_size
+    scale_x = feature_w / padded_w
+    scale_y = feature_h / padded_h
+    x1, y1, x2, y2 = box_processed.detach().cpu().tolist()
+    fx1 = max(0, int(np.floor(x1 * scale_x)) - margin)
+    fy1 = max(0, int(np.floor(y1 * scale_y)) - margin)
+    fx2 = min(feature_w, int(np.ceil(x2 * scale_x)) + margin)
+    fy2 = min(feature_h, int(np.ceil(y2 * scale_y)) + margin)
+    return fx1, fy1, fx2, fy2
+
+
+def path_weight_grid(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    path: list[Any] | None = None,
+) -> np.ndarray:
+    """Path weights summed with routing signs; None walks the whole path."""
+    grid = _as_feature_grid(feature_grid)
+    if path is None:
+        path = tree.decision_path(grid.reshape(-1))
+    total = np.zeros(tree.feature_shape, dtype=np.float32)
+    for step in path:
+        direction = 1.0 if step.went_left else -1.0
+        total += direction * tree.node_weight_grid(step.node_index)
+    return total
+
+
+def exact_fpn_contribution(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    roi_align: Any,
+    fpn_features: dict[str, Tensor],
+    level_name: str,
+    box_processed: Tensor,
+    processed_image_size: tuple[int, int],
+    path: list[Any] | None = None,
+    weight_grid_override: np.ndarray | None = None,  # controls only (permuted/foreign weights)
+) -> Tensor:
+    """Path score split exactly across the FPN pixels it came from.
+
+    RoI-Align is linear, so this sums back to the score with no
+    approximation — autograd just reads RoI-Align's own coefficients.
+    """
+    weights = (
+        weight_grid_override
+        if weight_grid_override is not None
+        else path_weight_grid(tree, feature_grid, path=path)
+    )
+    with torch.enable_grad():
+        # Escape inference-mode so autograd can run.
+        feats = {
+            name: torch.from_numpy(
+                np.ascontiguousarray(level.detach().cpu().numpy())
+            ).unsqueeze(0)
+            for name, level in fpn_features.items()
+        }
+        feats[level_name].requires_grad_(True)
+        pooled = roi_align(
+            feats,
+            [box_processed.detach().cpu().unsqueeze(0)],
+            [tuple(processed_image_size)],
+        )[0]
+        score = (torch.as_tensor(weights, dtype=torch.float32) * pooled).sum()
+        (grad,) = torch.autograd.grad(score, feats[level_name])
+    return (grad[0] * feats[level_name][0]).detach()
+
+
+def compute_exact_attribution(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    roi_align: Any,
+    fpn_features: dict[str, Tensor],
+    level_name: str,
+    box_processed: Tensor,
+    processed_image_size: tuple[int, int],
+    padded_size: tuple[int, int],
+    path: list[Any] | None = None,
+    margin: int = 0,
+) -> np.ndarray:
+    """Exact map as a 2-D picture, cropped to the box.
+
+    Honest limits: channel-collapsing is a display choice, and FPN
+    pixels are regions, not image pixels.
+    """
+    contribution = exact_fpn_contribution(
+        tree,
+        feature_grid,
+        roi_align,
+        fpn_features,
+        level_name,
+        box_processed,
+        processed_image_size,
+        path=path,
+    )
+    heatmap = contribution.abs().sum(0).cpu().numpy().astype(np.float32)
+
+    fx1, fy1, fx2, fy2 = _fpn_box_bounds(
+        box_processed, padded_size, heatmap.shape, margin=margin
+    )
+    if fx2 <= fx1 or fy2 <= fy1:
+        return np.zeros((1, 1), dtype=np.float32)
+    return _normalize_heatmap_array(heatmap[fy1:fy2, fx1:fx2])
 
 
 def resize_heatmap_to_box(

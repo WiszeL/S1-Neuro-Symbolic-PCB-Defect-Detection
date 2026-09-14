@@ -1,26 +1,7 @@
-"""Standalone Grad-CAM explanation-quality evaluation.
+"""Grad-CAM's report card, scored exactly like the tree's.
 
-Computes the same five explanation metrics used for the SODT, but adapted
-for Grad-CAM heatmaps:
-
-1. **Sufficiency** (prediction preservation) — keeping only the spatial
-   positions with the highest Grad-CAM activation preserves the neural
-   classifier's predicted class.
-2. **Necessity** (prediction flip rate) — zeroing out the high-activation
-   positions causes the classifier to change its prediction.
-3. **Deletion AUC** — as features are removed in order of decreasing
-   Grad-CAM importance, the classifier confidence for the predicted class
-   should drop quickly (lower AUC = better).
-4. **Insertion AUC** — as features are added in order of decreasing
-   importance, confidence should rise quickly (higher AUC = better).
-5. **Pointing Game** — the peak of the Grad-CAM heatmap falls inside the
-   ground-truth defect region.
-6. **IoU Heatmap** (box-grounded ROI overlap) — the top-k heatmap cells
-   (k = number of GT cells) overlap with the ground-truth region.
-
-All feature-level metrics use the *neural* classifier's probabilities on
-masked/unmasked pooled features, ensuring the metrics measure how well the
-Grad-CAM heatmap explains the *same* model that produced it.
+- Same test unit both sides: one grid cell, all channels.
+- Each side checked against its own model, never the other's.
 """
 
 from __future__ import annotations
@@ -37,7 +18,13 @@ from tqdm import tqdm
 
 from neuro.faster_rcnn import NeuroFasterRCNN
 from util.geometry import project_gt_box_to_roi_grid
-from util.heatmap_metrics import normalize_heatmap, pointing_score, topk_region_overlap
+from util.heatmap_metrics import (
+    importance_ranking,
+    normalize_heatmap,
+    pointing_score,
+    stratified_spatial_result,
+    topk_region_overlap,
+)
 
 from .gradcam import GradCAM
 
@@ -45,19 +32,14 @@ _NAN = float("nan")
 _ROI_GRID = (7, 7)
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Internal helpers
-# ──────────────────────────────────────────────────────────────────────
+# Helpers
 
 
 def _neural_probs(
     model: NeuroFasterRCNN,
     pooled_features: Tensor,
 ) -> Tensor:
-    """Run pooled features through the neural classifier head.
-
-    Returns softmax probabilities ``[N, num_classes]``.
-    """
+    """Neural head's answer for pooled features."""
     with torch.no_grad():
         roi_repr = model.box_head(pooled_features.to(next(model.parameters()).device))
         logits = model.box_predictor.classifier(roi_repr)
@@ -68,10 +50,7 @@ def _match_proposals_to_gt(
     proposal_boxes: Tensor,
     gt_boxes: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    """Match each proposal to its best-overlapping GT box.
-
-    Returns ``(matched_gt_boxes, has_matched, matched_iou)``.
-    """
+    """Each proposal's best-overlapping truth box."""
     if gt_boxes.numel() == 0 or proposal_boxes.numel() == 0:
         n = proposal_boxes.shape[0]
         return (
@@ -89,14 +68,7 @@ def _match_proposals_to_gt(
     return matched_boxes, has_match, matched_iou
 
 
-def _importance_ranking(heatmap: Tensor) -> Tensor:
-    """Return spatial indices (0..48) sorted by descending heatmap value."""
-    return torch.argsort(heatmap.reshape(-1), descending=True)
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Public API
-# ──────────────────────────────────────────────────────────────────────
+# Evaluate
 
 
 def evaluate_gradcam(
@@ -104,47 +76,17 @@ def evaluate_gradcam(
     gradcam: GradCAM,
     images: list[Tensor],
     targets: list[dict[str, Tensor]],
-    class_names: tuple[str, ...],
     score_threshold: float = 0.3,
     num_images: int | None = None,
     num_samples: int = 2000,
     deletion_insertion_steps: int = 10,
     random_state: int = 42,
+    min_proposal_iou: float = 0.0,
+    max_proposal_iou: float = 1.0,
 ) -> dict[str, Any]:
-    """Evaluate Grad-CAM explanation quality over a set of images.
+    """Grad-CAM scores over a set of images.
 
-    Parameters
-    ----------
-    model:
-        Trained ``NeuroFasterRCNN`` in eval mode.
-    gradcam:
-        Initialized ``GradCAM`` instance.
-    images:
-        List of preprocessed image tensors ``[3, H, W]``.
-    targets:
-        Corresponding annotation dicts with ``boxes`` and ``labels``.
-    class_names:
-        Tuple of class names (excluding background).
-    score_threshold:
-        Minimum detection score to include a detection in evaluation.
-    num_images:
-        Maximum number of images to evaluate. ``None`` uses all images.
-        50 is a good speed/accuracy trade-off (~500 ROIs).
-    num_samples:
-        Maximum detections to use for deletion/insertion AUC.
-    deletion_insertion_steps:
-        Number of intermediate steps for the deletion/insertion curves.
-    random_state:
-        Seed for the subsampling RNG.
-
-    Returns
-    -------
-    dict
-        Keys: ``sufficiency_prediction_preservation``,
-        ``necessity_prediction_flip_rate``,
-        ``deletion_auc``, ``insertion_auc``,
-        ``pointing_score``, ``box_grounded_roi_overlap``,
-        ``evaluated_roi_count``, ``total_detections``.
+    Pass the same min_proposal_iou as the tree side so both cover the same population.
     """
     rng_img = np.random.default_rng(random_state)
     if num_images is not None and num_images < len(images):
@@ -156,12 +98,13 @@ def evaluate_gradcam(
 
     device = next(model.parameters()).device
 
-    # ── Collect detections, heatmaps, and pooled features ────────
+    # Collect
     all_pooled: list[Tensor] = []
     all_heatmaps: list[Tensor] = []
     all_det_boxes: list[Tensor] = []
     all_matched_gt: list[Tensor] = []
     all_has_gt: list[Tensor] = []
+    all_matched_iou: list[Tensor] = []
     per_image_times: list[float] = []
 
     n_images = len(images)
@@ -170,7 +113,7 @@ def evaluate_gradcam(
         image = images[img_idx]
         target = targets[img_idx]
 
-        # ── Step 1: real FRCNN detections (box decode + NMS) ─────────────
+        # Detect
         try:
             with torch.inference_mode():
                 preds = model([image.to(device)])
@@ -191,17 +134,17 @@ def evaluate_gradcam(
                 continue
             raise
 
-        # ── Step 2: backbone (enable_grad) + RoI Align + GradCAM ─────────
+        # Heatmaps
         try:
             img_tensor = image.to(device).unsqueeze(0)
             images_list, _ = model.transform(img_tensor, None)
 
             with torch.inference_mode(False), torch.enable_grad():
-                # Clone input tensor inside normal autograd mode to ensure it's not an inference tensor.
+                # Fresh tensor — inference tensors can't carry gradients.
                 input_tensor = images_list.tensors.clone()
                 features = model.backbone(input_tensor)
 
-                # Scale detection boxes from original to transformed coords
+                # Boxes must follow the image into preprocessed space.
                 original_h, original_w = image.shape[-2:]
                 processed_h, processed_w = images_list.image_sizes[0]
                 scale_x = processed_w / original_w
@@ -211,14 +154,14 @@ def evaluate_gradcam(
                 scaled_boxes[:, [0, 2]] *= scale_x
                 scaled_boxes[:, [1, 3]] *= scale_y
 
-                # RoI Align on detection boxes → pooled features (for faithfulness)
+                # Pool
                 pooled = model.roi_align(
                     features, [scaled_boxes], images_list.image_sizes
                 )
                 roi_repr = model.box_head(pooled)
                 class_logits = model.box_predictor.classifier(roi_repr)
 
-                # ── Grad-CAM backward per detection ───────────────────────────
+                # Backward per detection
                 activations = gradcam._activations  # captured by forward hook
                 heatmaps: list[Tensor] = []
                 padded_h, padded_w = images_list.tensors.shape[-2:]
@@ -286,30 +229,30 @@ def evaluate_gradcam(
                 continue
             raise
 
-        # Match detection boxes to GT.
+        # Match
         gt_boxes = target["boxes"]
-        matched_gt, has_gt, _ = _match_proposals_to_gt(det_boxes, gt_boxes)
+        matched_gt, has_gt, matched_iou = _match_proposals_to_gt(det_boxes, gt_boxes)
 
         all_pooled.append(pooled.detach().cpu())
+        all_matched_iou.append(matched_iou)
         all_heatmaps.extend(heatmaps)
         all_det_boxes.append(det_boxes)
         all_matched_gt.append(matched_gt)
         all_has_gt.append(has_gt)
         per_image_times.append(time.perf_counter() - t_img)
 
-        # Free GPU memory between images.
+        # Spare the GPU between images.
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     if not all_pooled:
+        empty_spatial = stratified_spatial_result([], [], [])
         return {
             "sufficiency_prediction_preservation": _NAN,
             "necessity_prediction_flip_rate": _NAN,
             "deletion_auc": _NAN,
             "insertion_auc": _NAN,
-            "pointing_score": _NAN,
-            "box_grounded_roi_overlap": _NAN,
-            "evaluated_roi_count": 0,
+            **empty_spatial,
             "total_detections": 0,
             "inference_time_ms_avg": 0.0,
             "inference_time_ms_min": 0.0,
@@ -320,32 +263,33 @@ def evaluate_gradcam(
     det_boxes_all = torch.cat(all_det_boxes, dim=0)
     matched_gt_all = torch.cat(all_matched_gt, dim=0)
     has_gt_all = torch.cat(all_has_gt, dim=0)
+    matched_iou_all = torch.cat(all_matched_iou, dim=0)
     N = pooled_all.shape[0]
 
-    # Full (unmasked) neural classifier predictions.
+    # Baseline
     full_probs = _neural_probs(model, pooled_all)
     full_preds = full_probs.argmax(dim=1)
     full_conf = full_probs[torch.arange(N), full_preds]
 
-    # ── Faithfulness: sufficiency & necessity ─────────────────────
+    # Sufficiency + necessity
     suf_preservation = np.empty(N, dtype=np.float64)
     nec_flip = np.empty(N, dtype=np.float64)
 
     for i in range(N):
         heatmap = all_heatmaps[i]
-        ranking = _importance_ranking(heatmap)
+        ranking = importance_ranking(heatmap)
         grid_h, grid_w = _ROI_GRID
-        # Threshold: top half of spatial positions are "important".
+        # Top half counts as important.
         threshold = max(int(grid_h * grid_w * 0.5), 1)
         important_positions = ranking[:threshold]
 
-        # Necessity: zero out important positions.
+        # Necessity
         nec_feat = pooled_all[i].clone()
         for pos in important_positions:
             r, col = pos.item() // grid_w, pos.item() % grid_w
             nec_feat[:, r, col] = 0.0
 
-        # Sufficiency: keep only important positions.
+        # Sufficiency
         suf_feat = torch.zeros_like(pooled_all[i])
         for pos in important_positions:
             r, col = pos.item() // grid_w, pos.item() % grid_w
@@ -360,7 +304,7 @@ def evaluate_gradcam(
         nec_flip[i] = float(nec_pred != full_preds[i].item())
         suf_preservation[i] = float(suf_pred == full_preds[i].item())
 
-    # ── Faithfulness: deletion / insertion AUC ────────────────────
+    # Curves
     steps = deletion_insertion_steps
     rng = np.random.default_rng(random_state)
     auc_indices = (
@@ -374,25 +318,30 @@ def evaluate_gradcam(
     insertion_curves = np.zeros((n_auc, steps + 1))
     num_positions = _ROI_GRID[0] * _ROI_GRID[1]
 
+    # Real empty-input confidence — a hardcoded 0.0 floor biased this low.
+    # One forward pass covers every row; only the readout class varies.
+    empty_probs = _neural_probs(model, torch.zeros((1, *pooled_all.shape[1:])))[0]
+
     for ai, idx in enumerate(auc_indices):
         heatmap = all_heatmaps[idx]
-        ranking = _importance_ranking(heatmap)
+        ranking = importance_ranking(heatmap)
         pred_cls = full_preds[idx].item()
 
-        # Step 0: full confidence.
+        # Baselines
         deletion_curves[ai, 0] = full_conf[idx].item()
+        insertion_curves[ai, 0] = empty_probs[pred_cls].item()
 
         for s in range(1, steps + 1):
             k = int(s / steps * num_positions)
             top_k = ranking[:k]
 
-            # Deletion: start from full, remove top-k.
+            # Delete
             del_feat = pooled_all[idx].clone()
             for pos in top_k:
                 r, col = pos.item() // _ROI_GRID[1], pos.item() % _ROI_GRID[1]
                 del_feat[:, r, col] = 0.0
 
-            # Insertion: start from zero, add top-k.
+            # Insert
             ins_feat = torch.zeros_like(pooled_all[idx])
             for pos in top_k:
                 r, col = pos.item() // _ROI_GRID[1], pos.item() % _ROI_GRID[1]
@@ -408,12 +357,15 @@ def evaluate_gradcam(
     deletion_auc = float(np.trapz(deletion_curves, dx=dx, axis=1).mean())
     insertion_auc = float(np.trapz(insertion_curves, dx=dx, axis=1).mean())
 
-    # ── Spatial: pointing game & IoU heatmap overlap ──────────────
+    # Spatial (same truth filter as the tree side, so populations match).
     overlap_scores: list[float] = []
     pointing_scores: list[float] = []
+    gt_coverage: list[float] = []
 
     for i in range(N):
         if not bool(has_gt_all[i]):
+            continue
+        if not (min_proposal_iou <= float(matched_iou_all[i]) <= max_proposal_iou):
             continue
 
         heatmap = all_heatmaps[i]
@@ -428,9 +380,11 @@ def evaluate_gradcam(
 
         overlap_scores.append(topk_region_overlap(norm_hm, gt_mask))
         pointing_scores.append(pointing_score(norm_hm, gt_mask))
+        gt_coverage.append(float(gt_mask.float().mean().item()))
 
-    spatial_overlap = float(np.mean(overlap_scores)) if overlap_scores else _NAN
-    spatial_pointing = float(np.mean(pointing_scores)) if pointing_scores else _NAN
+    spatial_metrics = stratified_spatial_result(
+        overlap_scores, pointing_scores, gt_coverage
+    )
 
     times_arr = np.array(per_image_times) if per_image_times else np.array([0.0])
     return {
@@ -438,9 +392,7 @@ def evaluate_gradcam(
         "necessity_prediction_flip_rate": float(nec_flip.mean()),
         "deletion_auc": deletion_auc,
         "insertion_auc": insertion_auc,
-        "pointing_score": spatial_pointing,
-        "box_grounded_roi_overlap": spatial_overlap,
-        "evaluated_roi_count": len(overlap_scores),
+        **spatial_metrics,
         "total_detections": N,
         "inference_time_ms_avg": float(times_arr.mean()) * 1000,
         "inference_time_ms_min": float(times_arr.min()) * 1000,

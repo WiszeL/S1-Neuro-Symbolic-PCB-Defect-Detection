@@ -19,13 +19,11 @@ class NeuroSymbolicDetector(nn.Module):
         symbolic_tree: SparseObliqueDecisionTreeClassifier,
         device: str | None = None,
         use_routing_margin: bool = True,
-        routing_margin_temperature: float = 1.0,
     ) -> None:
         super().__init__()
         self.detector = detector
         self.symbolic_tree = symbolic_tree
         self.use_routing_margin = use_routing_margin
-        self.routing_margin_temperature = routing_margin_temperature
         self.device = select_device(device)
         if self.symbolic_tree.num_classes != self.detector.num_classes:
             raise ValueError(
@@ -42,12 +40,11 @@ class NeuroSymbolicDetector(nn.Module):
             .numpy()
             .astype(np.float32)
         )
-        # Use uncalibrated probabilities as secondary leakage is controlled by the argmax mask.
+        # Raw leaf histograms are fine — the argmax mask below kills the leakage.
         if self.use_routing_margin:
             leaf_indices, routing_confidence = (
                 self.symbolic_tree.predict_leaf_indices_and_routing_confidence(
                     feature_vectors,
-                    temperature=self.routing_margin_temperature,
                 )
             )
         else:
@@ -59,17 +56,7 @@ class NeuroSymbolicDetector(nn.Module):
             dtype=pooled_features.dtype,
         )
 
-        # The SODT is a hard classifier (decision tree): it routes each sample
-        # down a single path to a single leaf.  The leaf distribution is an
-        # empirical histogram, NOT a calibrated softmax — secondary classes
-        # retain significant probability mass (e.g. 0.08–0.12), which the
-        # per-class NMS postprocessing treats as real candidate detections.
-        # This creates ~3× more false positives than the neural classifier.
-        #
-        # Fix: keep only the tree's chosen class (argmax) and zero out the
-        # rest.  This matches the tree's hard-decision semantics and
-        # eliminates the false-positive leakage without changing any
-        # classification decision.
+        # Leaf histograms leak mass into other classes, which NMS reads as real detections — mask to the tree's own choice.
         argmax_classes = probability_tensor.argmax(dim=-1)
         mask = torch.zeros_like(probability_tensor)
         mask[torch.arange(len(argmax_classes), device=self.device), argmax_classes] = (
@@ -77,12 +64,7 @@ class NeuroSymbolicDetector(nn.Module):
         )
         probability_tensor = probability_tensor * mask
 
-        # Leaf distributions are piecewise-constant (one value per leaf), so
-        # every detection routed to the same leaf ties in score.  Ties collapse
-        # the AP ranking and leave Soft-NMS unable to order overlapping boxes.
-        # Modulate the leaf score by the routing-margin confidence (product of
-        # sigmoid(|node score|) along the path): purely tree-derived, monotone
-        # within a leaf, and it changes no routing/label/explanation.
+        # Same leaf means tied scores, which breaks ranking — scale by routing margin (tree's own numbers, no decision changes).
         if routing_confidence is not None:
             probability_tensor = probability_tensor * torch.from_numpy(
                 routing_confidence
@@ -105,6 +87,10 @@ class NeuroSymbolicDetector(nn.Module):
             proposals,
             images_list.image_sizes,
         )
+
+        # Same level RoI-Align pooled from, so the map never targets the wrong one.
+        roi_level_indices = self.detector.roi_align.pool.map_levels(proposals)
+        featmap_names = list(self.detector.roi_align.pool.featmap_names)
         roi_representations = self.detector.box_head(pooled_features)
         box_regression = self.detector.box_predictor.box_regressor(roi_representations)
         symbolic_probabilities, symbolic_leaf_indices = self._symbolic_predict(
@@ -119,6 +105,7 @@ class NeuroSymbolicDetector(nn.Module):
             pooled_features=pooled_features,
             proposal_probabilities=symbolic_probabilities,
             proposal_leaf_indices=symbolic_leaf_indices,
+            proposal_level_indices=roi_level_indices,
         )
 
         postprocessed_boxes = self.detector.transform.postprocess(
@@ -133,8 +120,8 @@ class NeuroSymbolicDetector(nn.Module):
         )
 
         outputs: list[dict[str, Tensor]] = []
-        for result, boxes_dict, proposals_dict in zip(
-            results, postprocessed_boxes, postprocessed_proposals
+        for image_index, (result, boxes_dict, proposals_dict, processed_size) in enumerate(
+            zip(results, postprocessed_boxes, postprocessed_proposals, images_list.image_sizes)
         ):
             outputs.append(
                 {
@@ -142,6 +129,8 @@ class NeuroSymbolicDetector(nn.Module):
                     "scores": result["scores"].detach().cpu(),
                     "labels": result["labels"].detach().cpu(),
                     "proposal_boxes": proposals_dict["boxes"].detach().cpu(),
+                    # Processed-space boxes — the map crops against these, not the original-image ones.
+                    "proposal_boxes_processed": result["proposal_boxes"].detach().cpu(),
                     "pooled_features": result["pooled_features"].detach().cpu(),
                     "symbolic_probabilities": result["symbolic_probabilities"]
                     .detach()
@@ -149,6 +138,18 @@ class NeuroSymbolicDetector(nn.Module):
                     "symbolic_leaf_indices": result["symbolic_leaf_indices"]
                     .detach()
                     .cpu(),
+                    "symbolic_level_indices": result["symbolic_level_indices"]
+                    .detach()
+                    .cpu(),
+                    # Stash FPN context so the map rebuilds without a second backbone pass.
+                    "fpn_features": {
+                        name: level_map[image_index].detach().cpu()
+                        for name, level_map in features.items()
+                        if name in featmap_names
+                    },
+                    "featmap_names": featmap_names,
+                    "padded_image_size": tuple(images_list.tensors.shape[-2:]),
+                    "processed_image_size": tuple(processed_size),
                 }
             )
 

@@ -13,7 +13,7 @@ from .config import SymbolicTrainConfig
 from .evaluation import evaluate_symbolic_model as evaluate_symbolic_metrics
 from .evaluation import evaluate_symbolic_spatial_metrics
 from .sodt import SparseObliqueDecisionTreeClassifier
-from .tao import fit_tree_with_tao, postprocess_tree
+from .tao import fit_tree_with_tao, postprocess_tree, raise_if_tree_collapsed
 from util.io import ensure_dir, save_json
 
 
@@ -76,7 +76,7 @@ def _class_weights_array(
     class_weights: dict[str, float],
     class_names: tuple[str, ...],
 ) -> np.ndarray:
-    """Map a {class_name: weight} config dict to a per-class-index array."""
+    """Config names to solver array; unknown names fail here, not silently."""
     unknown = set(class_weights) - set(class_names)
     if unknown:
         raise ValueError(
@@ -180,6 +180,7 @@ def _evaluate_trained_model_on_bundle(
         "tree_depth": tree.max_depth,
         "l1_lambda": float(training_config.get("l1_lambda", 0.0)),
         "sparsity_alpha": float(training_config.get("sparsity_alpha", 0.0)),
+        "class_weights": training_config.get("class_weights"),
         "metrics": metrics,
     }
 
@@ -188,7 +189,9 @@ def evaluate_heldout(
     export_path: str | Path,
     checkpoint_path: str | Path,
     random_state: int = 42,
+    summary_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    """Score once on the held-out dump; nothing trains here."""
     print(f"Loading heldout evaluation data from {export_path}...", flush=True)
     t0 = perf_counter()
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
@@ -210,7 +213,7 @@ def evaluate_heldout(
         labels=labels,
     )
 
-    return {
+    result = {
         "export_path": str(export_path),
         "sample_count": feature_matrix.shape[0],
         "class_names": bundle.class_names,
@@ -218,8 +221,13 @@ def evaluate_heldout(
         "tree_depth": heldout_model["tree_depth"],
         "l1_lambda": heldout_model["l1_lambda"],
         "sparsity_alpha": heldout_model["sparsity_alpha"],
+        "class_weights": heldout_model["class_weights"],
         "metrics": heldout_model["metrics"],
     }
+    if summary_path is not None:
+        ensure_dir(Path(summary_path).parent)
+        save_json(result, summary_path)
+    return result
 
 
 def train_symbolic_tree(
@@ -313,24 +321,6 @@ def train_symbolic_tree(
         tree_depth=sodt_config["tree_depth"],
     )
 
-    # Optional confidence-weighted TAO: downweights samples where the
-    # teacher's softmax was uncertain. Off by default — the ablation showed
-    # class weighting + routing-margin scoring carry the result; kept as a
-    # fallback switch.
-    use_teacher_weighting = bool(config["search"].get("use_teacher_weighting", False))
-    teacher_confidence_np: np.ndarray | None = None
-    if use_teacher_weighting and bundle.teacher_confidence is not None:
-        teacher_confidence_np = (
-            bundle.teacher_confidence.detach().cpu().numpy().astype(np.float32)
-        )
-        print(
-            f"Teacher confidence weighting enabled: "
-            f"mean={teacher_confidence_np.mean():.4f}, "
-            f"min={teacher_confidence_np.min():.4f}, "
-            f"max={teacher_confidence_np.max():.4f}",
-            flush=True,
-        )
-
     class_weights_config = config["search"].get("class_weights")
     class_weights_np: np.ndarray | None = None
     if class_weights_config:
@@ -361,20 +351,17 @@ def train_symbolic_tree(
         show_progress=False,
         progress_callback=_on_iteration,
         node_progress_callback=_on_node,
-        teacher_confidence=teacher_confidence_np,
         class_weights=class_weights_np,
     )
 
     if current_node_bar is not None:
         current_node_bar.close()
 
+    raise_if_tree_collapsed(tree)
     metrics = _augment_tree_metrics(tree, {})
 
-    # tree_state already carries feature_shape/class_names/max_depth, and
-    # training_config already carries l1_lambda/sparsity_alpha/tree_depth, so
-    # the checkpoint doesn't repeat them at the top level. summary.json below
-    # keeps them front-and-center since it's meant to be read without loading
-    # the tensor payload.
+    # No repeats up top — tree_state/training_config already carry them.
+    # summary.json repeats them anyway since humans read it without loading tensors.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": metrics,
@@ -383,7 +370,6 @@ def train_symbolic_tree(
         "training_config": {
             **sodt_config,
             "neg_ratio": data_config.get("neg_ratio"),
-            "use_teacher_weighting": use_teacher_weighting,
             "class_weights": dict(class_weights_config)
             if class_weights_config
             else None,
@@ -404,6 +390,7 @@ def train_symbolic_tree(
         "tree_depth": int(sodt_config["tree_depth"]),
         "l1_lambda": float(sodt_config["l1_lambda"]),
         "sparsity_alpha": float(sodt_config["sparsity_alpha"]),
+        "class_weights": artifact["training_config"]["class_weights"],
         "training_config": artifact["training_config"],
     }
     if summary_path is not None:
@@ -444,8 +431,7 @@ def prune_symbolic_tree(
     if export_path is None:
         export_path = str(checkpoint.get("export_path", ""))
     if class_weights is None:
-        # Reuse the weights the tree was trained with so the post-prune leaf
-        # relabel doesn't silently revert weighted leaf decisions.
+        # Keep training weights so pruning can't silently flip weighted leaves.
         stored_weights = checkpoint.get("training_config", {}).get("class_weights")
         if stored_weights is not None:
             class_weights = _class_weights_array(stored_weights, bundle.class_names)
@@ -471,6 +457,7 @@ def prune_symbolic_tree(
         f"Pruning complete — {pruned_count} nodes removed, "
         f"{active_nodes} remain active ({_format_duration(perf_counter() - t0)})"
     )
+    raise_if_tree_collapsed(tree)
 
     print()
     tree_metrics = _augment_tree_metrics(tree, {})
@@ -493,9 +480,7 @@ def prune_symbolic_tree(
     l1_lambda = float(training_config.get("l1_lambda", 0.0))
     sparsity_alpha = float(training_config.get("sparsity_alpha", 0.0))
 
-    # See train_symbolic_tree: tree_state/training_config already carry
-    # feature_shape/class_names/tree_depth/l1_lambda/sparsity_alpha, so the
-    # checkpoint doesn't repeat them at the top level.
+    # Same no-repeat layout as train_symbolic_tree above.
     artifact = {
         "tree_state": tree.to_state_dict(),
         "metrics": tree_metrics,
@@ -506,26 +491,7 @@ def prune_symbolic_tree(
     torch.save(artifact, checkpoint_path)
     print("Saving checkpoint... done")
 
-    if summary_path is not None:
-        ensure_dir(Path(summary_path).parent)
-        save_json(
-            {
-                "export_path": str(export_path),
-                "output_path": str(checkpoint_path),
-                "metrics": tree_metrics,
-                "history": history,
-                "class_names": bundle.class_names,
-                "feature_shape": bundle.feature_shape,
-                "tree_depth": tree_depth,
-                "l1_lambda": l1_lambda,
-                "sparsity_alpha": sparsity_alpha,
-                "training_config": training_config,
-            },
-            summary_path,
-        )
-        print("Saving metrics... done")
-
-    return {
+    summary = {
         "export_path": str(export_path),
         "output_path": str(checkpoint_path),
         "metrics": tree_metrics,
@@ -535,5 +501,13 @@ def prune_symbolic_tree(
         "tree_depth": tree_depth,
         "l1_lambda": l1_lambda,
         "sparsity_alpha": sparsity_alpha,
+        "class_weights": training_config.get("class_weights"),
         "training_config": training_config,
     }
+
+    if summary_path is not None:
+        ensure_dir(Path(summary_path).parent)
+        save_json(summary, summary_path)
+        print("Saving metrics... done")
+
+    return summary

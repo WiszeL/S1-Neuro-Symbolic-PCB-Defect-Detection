@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import matplotlib.gridspec as gridspec
 import matplotlib.patches as patches
@@ -20,8 +20,7 @@ def heatmap_to_array(heatmap: torch.Tensor) -> np.ndarray:
 
     rgba = plt.get_cmap("jet")(arr_norm)
 
-    # Remove noise entirely, but make the active area VERY opaque and bright
-    # arr_norm ** 2.0 strongly suppresses background noise to yield sharp heatmaps.
+    # Hide noise, keep hot spots bright.
     alpha = np.where(arr_norm > 0.15, arr_norm, 0.0)
     rgba[..., 3] = alpha
     return rgba
@@ -64,11 +63,11 @@ def draw_numbered_detections(
     display_numbers: list[int] | None = None,
 ) -> None:
     axis.imshow(image_to_array(image_tensor))
-    # Add a separate black dimmer layer over the image so it doesn't corrupt the heatmap colors
+    # Dimmer on its own layer so heat colors stay true.
     dimmer = np.zeros(
         (image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32
     )
-    dimmer[..., 3] = 0.35  # 40% perfect black dimmer
+    dimmer[..., 3] = 0.35
     axis.imshow(dimmer)
     axis.axis("off")
 
@@ -113,17 +112,13 @@ def draw_ground_truth_boxes(
     gt_labels: torch.Tensor,
     class_names: tuple[str, ...],
 ) -> None:
-    """Draw ground truth bounding boxes on the given axes.
-
-    Uses a distinctive green-dashed style so they are clearly
-    distinguishable from model detections.
-    """
+    """Truth boxes in green dashes, unlike detections."""
     axis.imshow(image_to_array(image_tensor))
-    # Add a slight dimmer to keep consistency with detection panels
+    # Match detection panels.
     dimmer = np.zeros(
         (image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32
     )
-    dimmer[..., 3] = 0.15  # Light dimmer for ground truth panel
+    dimmer[..., 3] = 0.15
     axis.imshow(dimmer)
     axis.axis("off")
 
@@ -175,21 +170,8 @@ def lookup_ground_truth(
     dataset: Any,
     image_name: str,
 ) -> tuple[torch.Tensor, torch.Tensor] | None:
-    """Look up ground truth boxes and labels from a PCBDataset by image filename.
-
-    Parameters
-    ----------
-    dataset : PCBDataset
-        The dataset whose ``.samples`` list will be searched.
-    image_name : str
-        The uploaded image filename (e.g. ``"00041200_test.jpg"``).
-
-    Returns
-    -------
-    tuple[Tensor, Tensor] | None
-        ``(boxes, labels)`` if a match is found, otherwise ``None``.
-    """
-    # Normalise the search key: strip extension, compare stems
+    """Truth boxes for one image, by filename; None if missing."""
+    # Match on filename stem, not extension.
     search_stem = Path(image_name).stem
 
     for sample in dataset.samples:
@@ -197,6 +179,173 @@ def lookup_ground_truth(
             return sample.boxes, sample.labels
 
     return None
+
+
+_SODT_HEATMAP_FOOTNOTE = (
+    "Positions are exact (RoI-Align's own coefficients); each cell's value pools a receptive "
+    "field far larger than the box (~360x350px vs ~33x29px mean proposal) — region-level, "
+    "not pixel-level.  Color: red=dominant, yellow=large, green=~half, cyan=small, "
+    "dark=no contribution (maps are non-negative, each panel normalized to its own peak — "
+    "don't compare brightness across panels).  Sign is not shown — a node's LEFT/RIGHT "
+    "direction is in its title, not the color."
+)
+
+
+def _is_ancestor(ancestor: int, descendant: int) -> bool:
+    """Heap-indexed tree: ancestry is a parent walk up from `descendant`."""
+    while descendant > ancestor:
+        descendant = (descendant - 1) // 2
+    return descendant == ancestor
+
+
+class _TreeLayout(NamedTuple):
+    active_nodes: dict[int, dict[str, Any]]
+    num_internal: int
+    leaf_node: int
+    visible_nodes: set[int]
+    visible_edges: list[tuple[int, int, str]]
+    leaf_override: dict[int, str]
+    coords: dict[int, tuple[float, float]]
+
+
+def _pruned_tree_layout(
+    explanation: dict[str, Any],
+    symbolic_tree: Any,
+    class_names: tuple[str, ...],
+) -> _TreeLayout:
+    """Path + immediate off-path siblings, laid out top-to-bottom.
+
+    Path stays in a fixed column, one dangling leaf per level at a fixed
+    offset — spacing never shrinks with depth (see `coords` below).
+    """
+    active_nodes = {n["node_index"]: n for n in explanation["node_explanations"]}
+    tree_depth = symbolic_tree.max_depth
+    num_internal = (2**tree_depth) - 1
+    leaf_node = explanation["symbolic_leaf_index"] + num_internal
+
+    # Pruned = all-zero weights and bias.
+    pruned_nodes = set()
+    for idx in range(num_internal):
+        if (
+            np.all(symbolic_tree.node_weights[idx] == 0.0)
+            and symbolic_tree.node_bias[idx] == 0.0
+        ):
+            pruned_nodes.add(idx)
+
+    visible_nodes = set()
+    visible_edges = []
+    leaf_override = {}
+    path_node_indices = set(active_nodes.keys())
+
+    def build_pruned_tree(node):
+        visible_nodes.add(node)
+        if node >= num_internal:
+            return
+        if node in pruned_nodes:
+            # Collapsed pure subtree shows one label.
+            curr = node
+            while curr < num_internal:
+                curr = curr * 2 + 1
+            leaf_offset = curr - num_internal
+            label_idx = int(symbolic_tree.leaf_labels[leaf_offset])
+            # Tree names include background (7); detector names don't (6) — index carefully.
+            if symbolic_tree.class_names is not None:
+                leaf_override[node] = symbolic_tree.class_names[label_idx]
+            else:
+                leaf_override[node] = class_names[label_idx - 1]
+            return
+        if node not in path_node_indices:
+            # Off-path branch, not pruned but not walked either — collapse
+            # without recursing, so it doesn't drag its own subtree in.
+            leaf_override[node] = "…"
+            return
+
+        left = node * 2 + 1
+        right = node * 2 + 2
+        visible_edges.append((node, left, "left"))
+        visible_edges.append((node, right, "right"))
+        build_pruned_tree(left)
+        build_pruned_tree(right)
+
+    build_pruned_tree(0)
+
+    # This tree is always a straight line with one dangling leaf per level
+    # (never two live subtrees) — a generic "x = average of children" layout
+    # squeezes that shape, since a deep node's position keeps averaging back
+    # toward its own narrowing subtree. Keep the path in a fixed column
+    # instead and hang each level's dangling side at a fixed offset, so
+    # spacing never shrinks no matter how deep the path goes.
+    coords: dict[int, tuple[float, float]] = {}
+    y_step, x_step = 2.5, 40.0
+    node, depth = 0, 0
+    while node < num_internal:
+        coords[node] = (0.0, -depth * y_step)
+        left, right = node * 2 + 1, node * 2 + 2
+        taken = left if _is_ancestor(left, leaf_node) else right
+        dangling = right if taken == left else left
+        coords[dangling] = (
+            -x_step if dangling == left else x_step,
+            -(depth + 1) * y_step,
+        )
+        node, depth = taken, depth + 1
+    coords[node] = (0.0, -depth * y_step)  # final leaf, still on the path
+
+    return _TreeLayout(
+        active_nodes=active_nodes,
+        num_internal=num_internal,
+        leaf_node=leaf_node,
+        visible_nodes=visible_nodes,
+        visible_edges=visible_edges,
+        leaf_override=leaf_override,
+        coords=coords,
+    )
+
+
+def _union_box(proposal_box: torch.Tensor, detection_box: torch.Tensor) -> torch.Tensor:
+    """Smallest box containing both — frames the zoom so edge heat survives."""
+    return torch.tensor(
+        [
+            min(proposal_box[0], detection_box[0]),
+            min(proposal_box[1], detection_box[1]),
+            max(proposal_box[2], detection_box[2]),
+            max(proposal_box[3], detection_box[3]),
+        ]
+    )
+
+
+def _draw_heatmap_panel(
+    axis: plt.Axes,
+    image_tensor: torch.Tensor,
+    heatmap: torch.Tensor,
+    proposal_box: torch.Tensor,
+    detection_box: torch.Tensor,
+) -> None:
+    """Image + dimmer + heatmap + both boxes + zoom, off — one node panel's worth.
+
+    Shared by the matplotlib per-node loop, the path panel, and the HTML
+    exporter, so the three can't quietly drift out of matching styles.
+    """
+    axis.imshow(image_to_array(image_tensor))
+    dimmer = np.zeros((image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32)
+    dimmer[..., 3] = 0.4
+    axis.imshow(dimmer)
+    axis.imshow(heatmap_to_array(heatmap), cmap="jet", vmin=0.0, vmax=1.0)
+
+    x1, y1, x2, y2 = proposal_box.tolist()
+    axis.add_patch(
+        patches.Rectangle(
+            (x1, y1), x2 - x1, y2 - y1, linewidth=2, edgecolor="cyan", facecolor="none"
+        )
+    )
+    dx1, dy1, dx2, dy2 = detection_box.tolist()
+    axis.add_patch(
+        patches.Rectangle(
+            (dx1, dy1), dx2 - dx1, dy2 - dy1,
+            linewidth=1.5, edgecolor="lime", linestyle="--", facecolor="none",
+        )
+    )
+    zoom_axis_to_box(axis, _union_box(proposal_box, detection_box), tuple(image_tensor.shape[-2:]))
+    axis.axis("off")
 
 
 def draw_neurosymbolic_explanation(
@@ -208,6 +357,7 @@ def draw_neurosymbolic_explanation(
     symbolic_tree: Any,
     selected_number: int = 1,
     extra_panel_func: Any = None,
+    show_path_panel: bool = False,
 ) -> None:
     label_name = class_names[explanation["label"] - 1]
 
@@ -220,100 +370,23 @@ def draw_neurosymbolic_explanation(
         plt.figure(figsize=(15, max(8, 4 * node_count)))
         gs = gridspec.GridSpec(1, 2, width_ratios=[1.5, 1], wspace=0.15)
 
-    # 1. LEFT SIDE: Pruned SODT Tree
+    # Tree panel
     ax_tree = plt.subplot(gs[0])
     ax_tree.axis("off")
     ax_tree.set_title("Pruned SODT Tree", fontsize=16, weight="bold")
 
-    active_nodes = {n["node_index"]: n for n in explanation["node_explanations"]}
-    tree_depth = symbolic_tree.max_depth
-    num_internal = (2**tree_depth) - 1
-
-    leaf_node = explanation["symbolic_leaf_index"] + num_internal
-
-    # Identify structurally pruned internal nodes (weights and bias are zero)
-    pruned_nodes = set()
-    for idx in range(num_internal):
-        if (
-            np.all(symbolic_tree.node_weights[idx] == 0.0)
-            and symbolic_tree.node_bias[idx] == 0.0
-        ):
-            pruned_nodes.add(idx)
-
-    # Build the structurally visible pruned tree
-    visible_nodes = set()
-    visible_edges = []
-    leaf_override = {}
-
-    def build_pruned_tree(node, depth):
-        visible_nodes.add(node)
-        if node >= num_internal:
-            return
-        if node in pruned_nodes:
-            # Find leftmost leaf class index in the pure collapsed subtree
-            curr = node
-            while curr < num_internal:
-                curr = curr * 2 + 1
-            leaf_offset = curr - num_internal
-            label_idx = symbolic_tree.leaf_labels[leaf_offset]
-            leaf_override[node] = class_names[int(label_idx) - 1]
-            return
-
-        left = node * 2 + 1
-        right = node * 2 + 2
-        visible_edges.append((node, left, "left"))
-        visible_edges.append((node, right, "right"))
-        build_pruned_tree(left, depth + 1)
-        build_pruned_tree(right, depth + 1)
-
-    build_pruned_tree(0, 0)
-
-    # --- NEW PRETTY LAYOUT ALGORITHM ---
-    # 1. Build parent-child relationships
-    children_map = {node: [] for node in visible_nodes}
-    for p, c, _ in visible_edges:
-        children_map[p].append(c)
-
-    coords = {}
-    leaf_x_counter = [0]
-
-    def assign_coords(node, depth):
-        # Sort children to maintain left-to-right order (left child index < right child index)
-        children = sorted(children_map[node])
-        if not children:
-            # Terminal node (spaced evenly)
-            coords[node] = (leaf_x_counter[0], -depth * 2.5)
-            leaf_x_counter[0] += 40  # Give plenty of horizontal spacing between leaves
-        else:
-            child_x_sum = 0
-            for c in children:
-                assign_coords(c, depth + 1)
-                child_x_sum += coords[c][0]
-            coords[node] = (child_x_sum / len(children), -depth * 2.5)
-
-    assign_coords(0, 0)
-
-    # 2. Center the tree around x=0
-    min_x_coord = min(x for x, y in coords.values())
-    max_x_coord = max(x for x, y in coords.values())
-    center_offset = (max_x_coord + min_x_coord) / 2.0
-    for node in coords:
-        x, y = coords[node]
-        coords[node] = (x - center_offset, y)
-
-    # Helper to check if ancestor reaches leaf_node
-    def is_ancestor(ancestor, descendent):
-        if ancestor == descendent:
-            return True
-        if ancestor >= num_internal:
-            return False
-        return is_ancestor(ancestor * 2 + 1, descendent) or is_ancestor(
-            ancestor * 2 + 2, descendent
-        )
+    layout = _pruned_tree_layout(explanation, symbolic_tree, class_names)
+    active_nodes = layout.active_nodes
+    num_internal = layout.num_internal
+    leaf_node = layout.leaf_node
+    visible_nodes = layout.visible_nodes
+    visible_edges = layout.visible_edges
+    leaf_override = layout.leaf_override
+    coords = layout.coords
 
     for parent, child, side in visible_edges:
         is_active_parent = parent in active_nodes
-        child_active = is_active_parent and is_ancestor(child, leaf_node)
+        child_active = is_active_parent and _is_ancestor(child, leaf_node)
 
         color = (
             "#388e3c"
@@ -336,21 +409,13 @@ def draw_neurosymbolic_explanation(
         is_active = (
             (node in active_nodes)
             or (node == leaf_node)
-            or (node in leaf_override and is_ancestor(node, leaf_node))
+            or (node in leaf_override and _is_ancestor(node, leaf_node))
         )
 
-        alpha = 1.0 if is_active else 0.5  # Slightly more opaque for unselected nodes
-        fc = "#e1f5fe" if not is_leaf else "#c8e6c9"
-        ec = "black" if is_active else "#9e9e9e"  # Slightly darker grey edge
-        if not is_active:
-            fc = "#f5f5f5"
+        alpha = 1.0 if is_active else 0.5
+        ec = "black" if is_active else "#9e9e9e"
         lw = 2 if is_active else 1
-
-        # --- MAKE UNSELECTED NODES BIGGER ---
-        internal_font_active = 11
-        internal_font_inactive = 9
-        leaf_font_active = 11
-        leaf_font_inactive = 9
+        font_size = 11 if is_active else 9
 
         if is_leaf:
             if node in leaf_override:
@@ -360,25 +425,16 @@ def draw_neurosymbolic_explanation(
                     f"{label_name}" if node == leaf_node else f"L{node - num_internal}"
                 )
 
-            leaf_active = (node == leaf_node) or (
-                node in leaf_override and is_ancestor(node, leaf_node)
-            )
-            if leaf_active:
-                fc = "#4caf50"
+            # A leaf is never on `active_nodes` (only internal path nodes
+            # carry a score), so "landed on this leaf" and `is_active` agree.
+            fc = "#4caf50" if is_active else "#f5f5f5"
+            if is_active:
                 ec = "#1b5e20"
             bbox = dict(boxstyle="round,pad=0.3", fc=fc, ec=ec, lw=lw, alpha=alpha)
             ax_tree.text(
-                x,
-                y,
-                label,
-                ha="center",
-                va="center",
-                fontsize=leaf_font_active if is_active else leaf_font_inactive,
-                weight="bold" if is_active else "normal",
-                bbox=bbox,
-                zorder=3,
-                rotation=90,
-                rotation_mode="anchor",
+                x, y, label, ha="center", va="center",
+                fontsize=font_size, weight="bold" if is_active else "normal",
+                bbox=bbox, zorder=3, rotation=90, rotation_mode="anchor",
             )
         else:
             label = (
@@ -386,67 +442,74 @@ def draw_neurosymbolic_explanation(
                 if node in active_nodes
                 else f"N{node}"
             )
+            fc = "#e1f5fe" if is_active else "#f5f5f5"
             bbox = dict(boxstyle="circle,pad=0.2", fc=fc, ec=ec, lw=lw, alpha=alpha)
             ax_tree.text(
-                x,
-                y,
-                label,
-                ha="center",
-                va="center",
-                fontsize=internal_font_active if is_active else internal_font_inactive,
-                weight="bold" if is_active else "normal",
-                bbox=bbox,
-                zorder=3,
+                x, y, label, ha="center", va="center",
+                fontsize=font_size, weight="bold" if is_active else "normal",
+                bbox=bbox, zorder=3,
             )
 
-    # Dynamically scale axis limits so the text never overlaps the edge
+    # Fit to the tree actually drawn, not a fixed depth.
     min_final_x = min(x for x, y in coords.values())
     max_final_x = max(x for x, y in coords.values())
+    min_final_y = min(y for x, y in coords.values())
     ax_tree.set_xlim(min_final_x - 8, max_final_x + 8)
-    ax_tree.set_ylim(-tree_depth * 2.5 - 1.0, 1.0)
+    ax_tree.set_ylim(min_final_y - 1.0, 1.0)
 
-    # 2. RIGHT SIDE: Vertical Heatmaps
-    gs_right = gridspec.GridSpecFromSubplotSpec(
-        node_count, 1, subplot_spec=gs[1], hspace=0.4
+    # Heatmap panel
+    has_exact = (
+        "projected_exact_attribution_on_proposal_box"
+        in explanation["node_explanations"][0]
     )
-    for axis_index, node in enumerate(explanation["node_explanations"]):
-        axis = plt.subplot(gs_right[axis_index])
-        axis.imshow(image_to_array(image_tensor))
-        # Add a separate black dimmer layer over the image so it doesn't corrupt the heatmap colors
-        dimmer = np.zeros(
-            (image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32
-        )
-        dimmer[..., 3] = 0.4  # 40% perfect black dimmer
-        axis.imshow(dimmer)
-        axis.imshow(
-            heatmap_to_array(node["projected_node_heatmap_on_proposal_box"]),
-            cmap="jet",
-            vmin=0.0,
-            vmax=1.0,
-        )
-        x1, y1, x2, y2 = explanation["detection_box"].tolist()
-        axis.add_patch(
-            patches.Rectangle(
-                (x1, y1),
-                x2 - x1,
-                y2 - y1,
-                linewidth=2,
-                edgecolor="cyan",
-                facecolor="none",
-            )
-        )
-        zoom_axis_to_box(
-            axis, explanation["detection_box"], tuple(image_tensor.shape[-2:])
+    show_path_panel = show_path_panel and has_exact
+    panel_count = node_count + (1 if show_path_panel else 0)
+    gs_right = gridspec.GridSpecFromSubplotSpec(
+        panel_count, 1, subplot_spec=gs[1], hspace=0.4
+    )
+
+    proposal_box = explanation["proposal_box"]
+    detection_box = explanation["detection_box"]
+
+    panel_offset = 0
+    if show_path_panel:
+        axis = plt.subplot(gs_right[0])
+        _draw_heatmap_panel(
+            axis, image_tensor,
+            explanation["projected_path_exact_attribution_on_proposal_box"],
+            proposal_box, detection_box,
         )
         axis.set_title(
-            f"Depth {node['depth'] + 1} | Node {node['node_index']} Features\n"
-            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}"
+            f"SODT heatmap — full path total ({node_count} nodes, "
+            f"{explanation.get('exact_attribution_level', '?')})\n"
+            "cyan=proposal (heat frame)  lime=detection box  "
+            "— validated in Table A, not the per-step story"
         )
-        axis.axis("off")
+        panel_offset = 1
+
+    for axis_index, node in enumerate(explanation["node_explanations"]):
+        axis = plt.subplot(gs_right[axis_index + panel_offset])
+        heatmap_key = (
+            "projected_exact_attribution_on_proposal_box"
+            if has_exact
+            else "projected_node_heatmap_on_proposal_box"
+        )
+        _draw_heatmap_panel(axis, image_tensor, node[heatmap_key], proposal_box, detection_box)
+        evidence = node.get("positive_evidence_sum", 0.0)
+        title_prefix = "SODT heatmap" if has_exact else "SODT heatmap (pooled-grid, no FPN context)"
+        axis.set_title(
+            f"{title_prefix} — Depth {node['depth'] + 1} | Node {node['node_index']}\n"
+            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()} "
+            f"(evidence {evidence:.2f})"
+        )
 
     if extra_panel_func is not None:
         ax_extra = plt.subplot(gs[2])
         extra_panel_func(ax_extra)
 
+    if has_exact:
+        plt.figtext(0.5, 0.0, _SODT_HEATMAP_FOOTNOTE, ha="center", va="bottom", fontsize=7, wrap=True)
+
     plt.show()
     plt.close("all")
+

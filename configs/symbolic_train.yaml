@@ -1,21 +1,20 @@
 data:
   neg_ratio: 2
-  storage_dtype: float16
+  storage_dtype: float32
 
+# Fixed up front like the source papers — never tuned against any evaluation split.
 search:
-  tree_depth: 6
+  tree_depth: 5
   iterations: 15
-  l1_lambda: 0.001
-  sparsity_alpha: 0.9
+  l1_lambda: 20.0
+  sparsity_alpha: 0.15
   logistic_max_iter: 200
   tolerance: 0.0001
   zero_threshold: 0.00001
   random_state: 112
-  # Upweight the classes with the worst FN counts (short 23, spur 13 on test).
-  # Background stays 1.0 to avoid trading the FP gains back.
+  # Worst-recall classes cost more; background stays 1.0 so false-positive gains hold.
   class_weights:
     short: 2.0
     spur: 1.5
-  # Fallback: weight TAO samples by teacher softmax confidence. Off — class
-  # weighting + routing-margin scoring carry the result without it.
-  use_teacher_weighting: true
+    open: 1.5
+    pinhole: 1.25

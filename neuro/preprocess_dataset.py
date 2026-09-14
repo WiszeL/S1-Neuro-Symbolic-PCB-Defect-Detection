@@ -26,10 +26,10 @@ Palette = list[str]
 def train_preprocess(horizontal_flip_prob: float = 0.5) -> PCBPreprocess:
     return v2.Compose(
         [
-            # Pixel standardization: convert PIL image to tensor and scale 0-255 to 0-1.
+            # Standardize
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            # Training augmentation: updates image and BoundingBoxes
+            # Augment
             v2.RandomHorizontalFlip(p=horizontal_flip_prob),
         ]
     )
@@ -38,7 +38,7 @@ def train_preprocess(horizontal_flip_prob: float = 0.5) -> PCBPreprocess:
 def test_preprocess() -> PCBPreprocess:
     return v2.Compose(
         [
-            # Pixel standardization: convert PIL image to tensor and scale 0-255 to 0-1.
+            # Standardize
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
         ]
@@ -290,8 +290,7 @@ class RCNNPreprocessing(GeneralizedRCNNTransform):
         train_min_sizes = preprocessing_config["train_min_sizes"]
         eval_min_size = preprocessing_config["test_min_size"]
 
-        # Mean/std normalization and max-size limiting are handled by
-        # torchvision's GeneralizedRCNNTransform during the model forward pass.
+        # Normalization and size limits happen inside torchvision's transform.
         super().__init__(
             min_size=train_min_sizes,
             max_size=preprocessing_config["max_size"],
@@ -307,8 +306,7 @@ class RCNNPreprocessing(GeneralizedRCNNTransform):
         target: PCBTarget | None = None,
     ) -> tuple[Tensor, PCBTarget | None]:
         original_min_size = self.min_size
-        # Multi-scale resizing: training samples one configured min size,
-        # while evaluation uses a fixed min size.
+        # Train samples a size per image; eval uses one fixed size.
         self.min_size = self.train_min_sizes if self.training else (self.eval_min_size,)
         image, target = super().resize(image, target)
         self.min_size = original_min_size

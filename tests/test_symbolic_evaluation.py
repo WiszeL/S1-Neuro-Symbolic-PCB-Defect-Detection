@@ -1,5 +1,4 @@
-"""Smoke check: _deletion_insertion_auc's insertion curve starts from the
-tree's actual all-zero-input prediction, not a hardcoded 0.0."""
+"""Insertion starts from the tree's real zero-input answer, not a hardcoded 0.0."""
 
 import numpy as np
 
@@ -8,7 +7,9 @@ from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 
 
 def test_insertion_step0_uses_real_zero_input_confidence():
-    tree = SparseObliqueDecisionTreeClassifier(max_depth=1, num_classes=2, input_dim=4)
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=1, num_classes=2, input_dim=4, feature_shape=(1, 2, 2)
+    )
     tree.node_weights[0] = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32)
     tree.leaf_distributions[0] = np.array([0.1, 0.9], dtype=np.float32)
     tree.leaf_distributions[1] = np.array([0.9, 0.1], dtype=np.float32)
@@ -25,15 +26,16 @@ def test_insertion_step0_uses_real_zero_input_confidence():
     zero_probs = tree.predict_proba(np.zeros((5, 4), dtype=np.float32))
     expected = float(zero_probs[np.arange(5), preds].mean())
 
-    # A flat curve at the true zero-input confidence should score close to
-    # that confidence, not be dragged toward 0 by a fake floor.
+    # Flat curves must sit at the true zero-input confidence, not a fake floor.
     assert insertion_auc > 0.85
     assert abs(insertion_auc - expected) < 1e-4
     assert abs(deletion_auc - expected) < 1e-4
 
 
 def test_degenerate_all_zero_tree_stays_flat():
-    tree = SparseObliqueDecisionTreeClassifier(max_depth=1, num_classes=2, input_dim=4)
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=1, num_classes=2, input_dim=4, feature_shape=(1, 2, 2)
+    )
     features = np.random.default_rng(1).random((5, 4)).astype(np.float32)
     preds = tree.predict(features)
 

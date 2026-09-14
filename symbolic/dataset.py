@@ -21,7 +21,6 @@ class SymbolicArrayBundle:
     gt_iou: Tensor | None
     feature_shape: tuple[int, int, int]
     class_names: tuple[str, ...]
-    teacher_confidence: Tensor | None = None
 
 
 def _numpy_dtype(storage_dtype: str) -> np.dtype[Any]:
@@ -50,20 +49,7 @@ def _positive_all_neg_ratio_indices(
     random_state: int,
     background_label: int = 0,
 ) -> Tensor:
-    """Select ALL positive (non-background) RoIs and N× background RoIs.
-
-    This mirrors the common object detection sampling strategy (e.g. Faster R-CNN
-    RPN uses 1:1, but 1:3 is standard for the second stage).  The tree sees every
-    single defect example, and the ``random_state`` controls only which background
-    RoIs are sampled.
-
-    Args:
-        labels: 1-D tensor of integer class labels.
-        neg_ratio: How many background RoIs per total positive count.
-                   e.g. 3.0 means ``num_bg = 3 * num_positive``.
-        random_state: Seed for the background random shuffle.
-        background_label: Which label value is "background" (default 0).
-    """
+    """Keep every defect; sample background so the tree isn't drowned in it."""
     positive_mask = labels != background_label
     negative_mask = labels == background_label
 
@@ -93,17 +79,16 @@ def _selected_indices_from_metadata(
     labels = metadata["teacher_labels"]
 
     if neg_ratio is not None:
-        # ALL positive RoIs + neg_ratio × background RoIs
         keep = _positive_all_neg_ratio_indices(
             labels,
             neg_ratio=neg_ratio,
             random_state=random_state,
         )
-        # Sort indices for efficient sequential memmap access
-        keep = torch.sort(keep).values
-        return keep
+    else:
+        keep = torch.arange(labels.shape[0], dtype=torch.int64)
 
-    return torch.arange(labels.shape[0], dtype=torch.int64)
+    # Sorted reads stay fast on disk.
+    return torch.sort(keep).values
 
 
 def _index_optional_tensor(tensor: Tensor | None, indices: Tensor) -> Tensor | None:
@@ -225,6 +210,7 @@ def open_exported_symbolic_array_payload(
 
     metadata_path = _resolve_artifact_path(payload["metadata_path"])
     metadata = torch.load(metadata_path, map_location="cpu", weights_only=True)
+
     keep = _selected_indices_from_metadata(
         metadata,
         random_state=random_state,
@@ -238,13 +224,6 @@ def open_exported_symbolic_array_payload(
         cache_chunk_size=cache_chunk_size,
     )
 
-    # Compute teacher confidence as max softmax probability per RoI.
-    # Used to downweight noisy teacher labels during TAO training.
-    teacher_scores = metadata.get("teacher_scores")
-    teacher_confidence: Tensor | None = None
-    if teacher_scores is not None:
-        teacher_confidence = teacher_scores[keep].max(dim=-1).values
-
     return SymbolicArrayBundle(
         feature_grids=feature_grids,
         feature_vectors=feature_grids.reshape(feature_grids.shape[0], -1),
@@ -255,5 +234,4 @@ def open_exported_symbolic_array_payload(
         gt_iou=_index_optional_tensor(metadata.get("gt_iou"), keep),
         feature_shape=tuple(int(value) for value in payload["feature_shape"]),
         class_names=tuple(payload["class_names"]),
-        teacher_confidence=teacher_confidence,
     )

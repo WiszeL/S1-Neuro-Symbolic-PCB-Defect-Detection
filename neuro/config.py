@@ -6,7 +6,6 @@ from typing import Literal, TypedDict
 class NetConfig(TypedDict):
     backbone_pretrained: bool
     backbone_freeze_batch_norm: bool
-    neck_attention_reduction: int
 
 
 class AnchorConfig(TypedDict):
