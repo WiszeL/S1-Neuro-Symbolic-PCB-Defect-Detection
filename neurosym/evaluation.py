@@ -248,7 +248,7 @@ def evaluate_faithfulness_fpn_masking(
                 continue
 
             pooled_grid = pooled[row].detach().cpu().numpy().astype(np.float32)
-            base_pred = int(tree.predict_proba(pooled_grid.reshape(1, -1)).argmax())
+            base_pred = int(tree.predict(pooled_grid.reshape(1, -1))[0])
 
             n_pos = (fy2 - fy1) * (fx2 - fx1)
             budget = max(int(n_pos * budget_fraction), 1)
@@ -290,9 +290,9 @@ def evaluate_faithfulness_fpn_masking(
                     nec_fpn, [box_processed.unsqueeze(0)], [processed_size]
                 )[0]
                 nec_pred = int(
-                    tree.predict_proba(
+                    tree.predict(
                         nec_grid.detach().cpu().numpy().astype(np.float32).reshape(1, -1)
-                    ).argmax()
+                    )[0]
                 )
                 path_results[name].append(float(nec_pred != base_pred))
 

@@ -37,7 +37,7 @@ Two disclosed deviations:
 
 Early hybrid tied the teacher per-decision but scored mAP@0.5 = 0.877, precision = 0.847.
 
-- **Cause: score quantization.** A tree routes each RoI to exactly one leaf, and the pruned depth-6 tree has 64 leaves with only a handful carrying defects (`open`/`mouse_bite`: one leaf each, `short`: two). Every `open` detection in the test set got the literally identical score (leaf purity). Two systems broke on the ties:
+- **Cause: score quantization.** A tree routes each RoI to exactly one leaf, and the pruned depth-6 tree has 64 leaves with only a handful carrying defects (`open`/`mouse_bite`: one leaf each, `short`: two). Every `open` detection in the test set got the literally identical score — the leaf's Laplace-smoothed class histogram, since removed; leaves now hold a label only (§5). Two systems broke on the ties:
   - **AP is a ranking metric** — true/false positives can't separate; per-class AP collapses to one operating point.
   - **Soft-NMS needs ordering** — survivor picks among overlaps turned arbitrary, sometimes killing the well-localized box.
 
@@ -45,12 +45,13 @@ Early hybrid tied the teacher per-decision but scored mAP@0.5 = 0.877, precision
 
 **Routing-margin scoring (inference) — the main fix:**
 
-$$\text{score}(x) = p_{\text{leaf}}(c) \times \prod_{i \,\in\, \text{path}(x),\; w_i \neq 0} \sigma\!\left(\lvert w_i^\top x + b_i \rvert\right)$$
+$$\text{score}(x) = \prod_{i \,\in\, \text{path}(x),\; w_i \neq 0} \sigma\!\left(\lvert w_i^\top x + b_i \rvert\right) \quad\text{at class } c = \text{leaf label}(x)$$
 
-- Product over *active* path nodes only (pruned all-zero nodes skipped — they'd shrink every sample equally). $p_{\text{leaf}}(c)$ is leaf purity.
+- Product over *active* path nodes only (pruned all-zero nodes skipped — they'd shrink every sample equally). Leaves hold a single class label, never a distribution (Hada §3, Kairgeldin §4) — the score is entirely routing margin, nothing from the leaf itself.
 - Each factor is that node's routing reliability; the product is a conjunction — a prediction is only as trustworthy as its weakest routing call.
 - **Changes zero decisions.** Same path, leaf, label, heatmaps — only the attached confidence turns continuous. Everything read off the tree itself: no neural head, no calibrator, no teacher peeking.
 - Alone (before class weighting): mAP@0.5 0.877 → 0.968, precision 0.847 → 0.912, background FPs −20%, recall flat.
+- Turning the margin off (`use_routing_margin=False`) reproduces this section's tie collapse cleanly — every detection of a class scores exactly 1.0. Kept as the ablation.
 
 **Class weighting (training):** misrouting costs more for weak-recall classes — `short` 2.0×, `spur`/`open` 1.5×, `pinhole` 1.25× — in every node's problem and in the leaf argmax. Hyperplanes lean away from background without touching its weight (which would hand back the FP gains).
 

@@ -26,7 +26,6 @@ class SparseObliqueDecisionTreeClassifier:
         input_dim: int,
         feature_shape: tuple[int, int, int] | None = None,
         class_names: tuple[str, ...] | None = None,
-        leaf_smoothing: float = 1.0,
     ) -> None:
         if max_depth <= 0:
             raise ValueError("max_depth must be positive.")
@@ -36,7 +35,6 @@ class SparseObliqueDecisionTreeClassifier:
         self.input_dim = input_dim
         self.feature_shape = feature_shape
         self.class_names = class_names
-        self.leaf_smoothing = float(leaf_smoothing)
 
         self.num_internal_nodes = (2**max_depth) - 1
         self.num_leaves = 2**max_depth
@@ -46,11 +44,6 @@ class SparseObliqueDecisionTreeClassifier:
         )
         self.node_bias = np.zeros((self.num_internal_nodes,), dtype=np.float32)
         self.leaf_labels = np.zeros((self.num_leaves,), dtype=np.int64)
-        self.leaf_distributions = np.full(
-            (self.num_leaves, num_classes),
-            fill_value=1.0 / max(num_classes, 1),
-            dtype=np.float32,
-        )
 
     # Structure
 
@@ -157,9 +150,41 @@ class SparseObliqueDecisionTreeClassifier:
         leaf_indices = self.predict_leaf_indices(features)
         return self.leaf_labels[leaf_indices]
 
-    def predict_proba(self, features: np.ndarray) -> np.ndarray:
-        leaf_indices = self.predict_leaf_indices(features)
-        return self.leaf_distributions[leaf_indices]
+    def scores_from_leaves(
+        self,
+        leaf_indices: np.ndarray,
+        confidence: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """A leaf holds one class label, never a distribution.
+
+        Hada §3, Kairgeldin §4. Shape `[N, num_classes]`, float32.
+        """
+        scores = np.zeros((leaf_indices.shape[0], self.num_classes), dtype=np.float32)
+        scores[np.arange(leaf_indices.shape[0]), self.leaf_labels[leaf_indices]] = (
+            1.0 if confidence is None else confidence
+        )
+        return scores
+
+    def route(
+        self,
+        features: np.ndarray,
+        routing_margin: bool = True,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """Where each sample lands, and how confident that call was.
+
+        Turn `routing_margin` off for the ablation: confidence comes back `None`.
+        """
+        if routing_margin:
+            return self.predict_leaf_indices_and_routing_confidence(features)
+        return self.predict_leaf_indices(features), None
+
+    def predict_scores(
+        self,
+        features: np.ndarray,
+        routing_margin: bool = True,
+    ) -> np.ndarray:
+        """Gives detections something to be ranked by, from the tree alone."""
+        return self.scores_from_leaves(*self.route(features, routing_margin))
 
     def predict_from_node(self, features: np.ndarray, node_index: int) -> np.ndarray:
         features = self._prepare_features(features)
@@ -270,11 +295,9 @@ class SparseObliqueDecisionTreeClassifier:
             "input_dim": self.input_dim,
             "feature_shape": self.feature_shape,
             "class_names": self.class_names,
-            "leaf_smoothing": self.leaf_smoothing,
             "node_weights": torch.from_numpy(self.node_weights.copy()),
             "node_bias": torch.from_numpy(self.node_bias.copy()),
             "leaf_labels": torch.from_numpy(self.leaf_labels.copy()),
-            "leaf_distributions": torch.from_numpy(self.leaf_distributions.copy()),
         }
 
     @classmethod
@@ -291,7 +314,6 @@ class SparseObliqueDecisionTreeClassifier:
             class_names=tuple(state_dict["class_names"])
             if state_dict["class_names"] is not None
             else None,
-            leaf_smoothing=float(state_dict.get("leaf_smoothing", 1.0)),
         )
         tree.node_weights = (
             state_dict["node_weights"].detach().cpu().numpy().astype(np.float32)
@@ -301,8 +323,5 @@ class SparseObliqueDecisionTreeClassifier:
         )
         tree.leaf_labels = (
             state_dict["leaf_labels"].detach().cpu().numpy().astype(np.int64)
-        )
-        tree.leaf_distributions = (
-            state_dict["leaf_distributions"].detach().cpu().numpy().astype(np.float32)
         )
         return tree
