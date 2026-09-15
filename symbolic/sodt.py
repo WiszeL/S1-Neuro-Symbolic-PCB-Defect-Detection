@@ -165,22 +165,26 @@ class SparseObliqueDecisionTreeClassifier:
         )
         return scores
 
+    def route(
+        self,
+        features: np.ndarray,
+        routing_margin: bool = True,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """Where each sample lands, and how confident that call was.
+
+        Turn `routing_margin` off for the ablation: confidence comes back `None`.
+        """
+        if routing_margin:
+            return self.predict_leaf_indices_and_routing_confidence(features)
+        return self.predict_leaf_indices(features), None
+
     def predict_scores(
         self,
         features: np.ndarray,
         routing_margin: bool = True,
     ) -> np.ndarray:
-        """Gives detections something to be ranked by, from the tree alone.
-
-        Turn `routing_margin` off for the ablation: every prediction ties at 1.0.
-        """
-        if routing_margin:
-            leaf_indices, confidence = self.predict_leaf_indices_and_routing_confidence(
-                features
-            )
-        else:
-            leaf_indices, confidence = self.predict_leaf_indices(features), None
-        return self.scores_from_leaves(leaf_indices, confidence)
+        """Gives detections something to be ranked by, from the tree alone."""
+        return self.scores_from_leaves(*self.route(features, routing_margin))
 
     def predict_from_node(self, features: np.ndarray, node_index: int) -> np.ndarray:
         features = self._prepare_features(features)

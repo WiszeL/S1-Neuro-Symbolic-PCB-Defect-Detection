@@ -40,17 +40,9 @@ class NeuroSymbolicDetector(nn.Module):
             .numpy()
             .astype(np.float32)
         )
-        if self.use_routing_margin:
-            leaf_indices, confidence = (
-                self.symbolic_tree.predict_leaf_indices_and_routing_confidence(
-                    feature_vectors,
-                )
-            )
-        else:
-            leaf_indices, confidence = (
-                self.symbolic_tree.predict_leaf_indices(feature_vectors),
-                None,
-            )
+        leaf_indices, confidence = self.symbolic_tree.route(
+            feature_vectors, self.use_routing_margin
+        )
         probability_tensor = torch.from_numpy(
             self.symbolic_tree.scores_from_leaves(leaf_indices, confidence)
         ).to(self.device, dtype=pooled_features.dtype)
