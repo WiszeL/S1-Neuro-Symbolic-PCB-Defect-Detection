@@ -146,13 +146,10 @@ def update_leaf_predictions(
         counts = np.bincount(labels[node_indices], minlength=tree.num_classes).astype(
             np.float32
         )
-        # Weighting after counting is exact, and keeps label and distribution in agreement.
+        # Weighting after counting is exact.
         if class_weights is not None:
             counts = counts * class_weights.astype(np.float32)
         tree.leaf_labels[leaf_offset] = int(counts.argmax())
-        tree.leaf_distributions[leaf_offset] = (counts + tree.leaf_smoothing) / (
-            counts.sum() + (tree.leaf_smoothing * tree.num_classes)
-        )
 
 
 def _prepare_reduced_problem_batch(
@@ -352,6 +349,12 @@ def postprocess_tree(
 ) -> int:
     reduced_sets = compute_reduced_sets(tree, features)
     update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
+
+    # Nothing ever reaches this leaf, so don't let it guess.
+    for leaf_offset in range(tree.num_leaves):
+        leaf_node = tree.num_internal_nodes + leaf_offset
+        if reduced_sets.get(leaf_node, np.zeros((0,), dtype=np.int64)).size == 0:
+            tree.leaf_labels[leaf_offset] = 0
 
     if verbose:
         print(f"Walking {tree.num_internal_nodes} internal nodes (reverse BFS)...")

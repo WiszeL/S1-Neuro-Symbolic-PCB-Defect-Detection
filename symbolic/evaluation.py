@@ -145,12 +145,12 @@ def _deletion_insertion_auc(
     for batch_start in range(0, n, batch_size):
         batch_end = min(batch_start + batch_size, n)
         B = batch_end - batch_start
-        full_probs = tree.predict_proba(auc_features[batch_start:batch_end])
-        empty_probs = tree.predict_proba(np.zeros((B, D), dtype=np.float32))
+        full_scores = tree.predict_scores(auc_features[batch_start:batch_end])
+        empty_scores = tree.predict_scores(np.zeros((B, D), dtype=np.float32))
         for bi in range(B):
             gi = batch_start + bi
-            deletion_curves[gi, 0] = full_probs[bi, auc_preds[gi]]
-            insertion_curves[gi, 0] = empty_probs[bi, auc_preds[gi]]
+            deletion_curves[gi, 0] = full_scores[bi, auc_preds[gi]]
+            insertion_curves[gi, 0] = empty_scores[bi, auc_preds[gi]]
 
         del_batch = auc_features[batch_start:batch_end].copy()
         ins_batch = np.zeros_like(del_batch)
@@ -168,12 +168,12 @@ def _deletion_insertion_auc(
                 ins_batch[bi] = 0.0
                 ins_batch[bi, flat_indices] = auc_features[gi, flat_indices]
 
-            del_probs = tree.predict_proba(del_batch)
-            ins_probs = tree.predict_proba(ins_batch)
+            del_scores = tree.predict_scores(del_batch)
+            ins_scores = tree.predict_scores(ins_batch)
             for bi in range(B):
                 gi = batch_start + bi
-                deletion_curves[gi, s] = del_probs[bi, auc_preds[gi]]
-                insertion_curves[gi, s] = ins_probs[bi, auc_preds[gi]]
+                deletion_curves[gi, s] = del_scores[bi, auc_preds[gi]]
+                insertion_curves[gi, s] = ins_scores[bi, auc_preds[gi]]
 
     dx = 1.0 / steps
     return float(np.trapz(deletion_curves, dx=dx, axis=1).mean()), float(
@@ -193,7 +193,13 @@ def evaluate_symbolic_model(
     """`ranking="random"` swaps the tree's own cell ranking for a random one,
     on the identical masking budget — the baseline sufficiency needs to show
     whether tumbling ~40/49 cells to zero is discriminative at all, or just
-    collapses routing to the bias term regardless of which cells are picked."""
+    collapses routing to the bias term regardless of which cells are picked.
+
+    Deletion/insertion curves read the tree's routing-margin product at the
+    predicted leaf, not a class probability — leaves hold a label, not a
+    distribution. Interpret them against the `ranking="random"` control,
+    never alone.
+    """
     rng = np.random.default_rng(random_state)
     features = ensure_float32(feature_matrix)
     labels = np.asarray(teacher_labels, dtype=np.int64)
@@ -212,10 +218,8 @@ def evaluate_symbolic_model(
 
     # Setup
     predictions = np.empty(N, dtype=np.int64)
-    necessity_confidence_drop = np.empty(N, dtype=np.float64)
     necessity_prediction_flip = np.empty(N, dtype=np.float64)
     sufficiency_prediction_preservation = np.empty(N, dtype=np.float64)
-    sufficiency_confidence_retention = np.empty(N, dtype=np.float64)
 
     batch_size = 1024
     for start_idx in tqdm(
@@ -226,12 +230,9 @@ def evaluate_symbolic_model(
         end_idx = min(start_idx + batch_size, N)
         batch_features = features[start_idx:end_idx]
         B = end_idx - start_idx
-        batch_row_range = np.arange(B, dtype=np.int64)
 
         # Predict
-        probabilities = tree.predict_proba(batch_features)
-        batch_preds = probabilities.argmax(axis=1).astype(np.int64)
-        batch_conf = probabilities[batch_row_range, batch_preds]
+        batch_preds = tree.predict(batch_features)
         predictions[start_idx:end_idx] = batch_preds
 
         # Mask the same cells Grad-CAM masks, so scores compare.
@@ -256,28 +257,14 @@ def evaluate_symbolic_model(
         sufficiency_features[selected_mask] = batch_features[selected_mask]
 
         # Score masked
-        necessity_probs = tree.predict_proba(necessity_features)
-        sufficiency_probs = tree.predict_proba(sufficiency_features)
+        necessity_labels = tree.predict(necessity_features)
+        sufficiency_labels = tree.predict(sufficiency_features)
 
-        necessity_labels = necessity_probs.argmax(axis=1).astype(np.int64)
-        necessity_confidences = necessity_probs[batch_row_range, batch_preds]
-        batch_nec_drop = np.maximum(batch_conf - necessity_confidences, 0.0).astype(
-            np.float64
-        )
         batch_nec_flip = (necessity_labels != batch_preds).astype(np.float64)
-
-        necessity_confidence_drop[start_idx:end_idx] = batch_nec_drop
         necessity_prediction_flip[start_idx:end_idx] = batch_nec_flip
 
-        sufficiency_labels = sufficiency_probs.argmax(axis=1).astype(np.int64)
-        sufficiency_confidences = sufficiency_probs[batch_row_range, batch_preds]
         batch_suf_pres = (sufficiency_labels == batch_preds).astype(np.float64)
-        batch_suf_ret = (sufficiency_confidences / np.maximum(batch_conf, 1e-8)).astype(
-            np.float64
-        )
-
         sufficiency_prediction_preservation[start_idx:end_idx] = batch_suf_pres
-        sufficiency_confidence_retention[start_idx:end_idx] = batch_suf_ret
 
     # Aggregate
     if compute_auc:
@@ -294,13 +281,9 @@ def evaluate_symbolic_model(
         "per_class_agreement_vs_teacher": _per_class_agreement(
             labels, predictions, class_names
         ),
-        "necessity_confidence_drop": float(necessity_confidence_drop.mean()),
         "necessity_prediction_flip_rate": float(necessity_prediction_flip.mean()),
         "sufficiency_prediction_preservation": float(
             sufficiency_prediction_preservation.mean()
-        ),
-        "sufficiency_confidence_retention": float(
-            sufficiency_confidence_retention.mean()
         ),
         "deletion_auc": deletion_auc,
         "insertion_auc": insertion_auc,

@@ -40,35 +40,20 @@ class NeuroSymbolicDetector(nn.Module):
             .numpy()
             .astype(np.float32)
         )
-        # Raw leaf histograms are fine — the argmax mask below kills the leakage.
         if self.use_routing_margin:
-            leaf_indices, routing_confidence = (
+            leaf_indices, confidence = (
                 self.symbolic_tree.predict_leaf_indices_and_routing_confidence(
                     feature_vectors,
                 )
             )
         else:
-            leaf_indices = self.symbolic_tree.predict_leaf_indices(feature_vectors)
-            routing_confidence = None
-        probabilities = self.symbolic_tree.leaf_distributions[leaf_indices]
-        probability_tensor = torch.from_numpy(probabilities).to(
-            self.device,
-            dtype=pooled_features.dtype,
-        )
-
-        # Leaf histograms leak mass into other classes, which NMS reads as real detections — mask to the tree's own choice.
-        argmax_classes = probability_tensor.argmax(dim=-1)
-        mask = torch.zeros_like(probability_tensor)
-        mask[torch.arange(len(argmax_classes), device=self.device), argmax_classes] = (
-            1.0
-        )
-        probability_tensor = probability_tensor * mask
-
-        # Same leaf means tied scores, which breaks ranking — scale by routing margin (tree's own numbers, no decision changes).
-        if routing_confidence is not None:
-            probability_tensor = probability_tensor * torch.from_numpy(
-                routing_confidence
-            ).to(self.device, dtype=probability_tensor.dtype).unsqueeze(-1)
+            leaf_indices, confidence = (
+                self.symbolic_tree.predict_leaf_indices(feature_vectors),
+                None,
+            )
+        probability_tensor = torch.from_numpy(
+            self.symbolic_tree.scores_from_leaves(leaf_indices, confidence)
+        ).to(self.device, dtype=pooled_features.dtype)
 
         leaf_tensor = torch.from_numpy(leaf_indices).to(self.device, dtype=torch.int64)
         return probability_tensor, leaf_tensor
