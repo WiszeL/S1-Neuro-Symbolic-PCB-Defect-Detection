@@ -21,7 +21,7 @@ from util.heatmap_metrics import (
     topk_region_overlap,
 )
 
-from .heatmap import _fpn_box_bounds, exact_fpn_contribution, path_weight_grid
+from .heatmap import _fpn_box_bounds, exact_fpn_contribution, path_fpn_map, path_weight_grid
 from .hybrid import NeuroSymbolicDetector
 from .inference import explain_hybrid_detection
 
@@ -184,9 +184,10 @@ def evaluate_faithfulness_fpn_masking(
     for a finer-resolution map. Two things are measured, at the SAME
     `rankings`/`budget_fraction`:
 
-    - **Path-level** (`return["path"]`): mask the path-level map, re-pool,
-      check whether the FINAL LABEL flips. "Does the decomposition as a
-      whole matter to the decision."
+    - **Path-level** (`return["path"]`): mask the path-level map (the
+      per-node panels stacked, Σ|node map| — `heatmap.path_fpn_map`), re-pool,
+      check whether the FINAL LABEL flips. "Do the regions the steps weigh,
+      together, matter to the decision" — the head-to-head vs Grad-CAM.
     - **Per-node** (`return["node"]`, `per_node=True`, `name in {"exact",
       "random"}`): for each node on the path, mask that NODE'S OWN map,
       re-pool, check whether that NODE'S OWN routing sign
@@ -256,20 +257,26 @@ def evaluate_faithfulness_fpn_masking(
             # ── Path-level (unchanged): does the final label flip? ──
             fpn_maps: dict[str, Tensor] = {}
             if map_rankings & set(rankings):
-                base_weights = path_weight_grid(tree, pooled_grid)
+                # Path map = stacked per-node panels (Σ|node map|), never a signed sum.
+                path_steps = tree.decision_path(pooled_grid.reshape(-1))
                 if "exact" in rankings:
-                    fpn_maps["exact"] = exact_fpn_contribution(
+                    fpn_maps["exact"] = path_fpn_map(
                         tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                        level_name, box_processed, processed_size,
-                    ).abs().sum(0)
+                        level_name, box_processed, processed_size, path=path_steps,
+                    )
                 if "shuffled_w" in rankings:
-                    shuffled = base_weights.reshape(-1).copy()
-                    rng.shuffle(shuffled)
-                    fpn_maps["shuffled_w"] = exact_fpn_contribution(
+                    # Same stacking, each node's own weights shuffled in place.
+                    shuffled_grids = []
+                    for step in path_steps:
+                        node_grid = path_weight_grid(tree, pooled_grid, path=[step])
+                        flat = node_grid.reshape(-1).copy()
+                        rng.shuffle(flat)
+                        shuffled_grids.append(flat.reshape(node_grid.shape))
+                    fpn_maps["shuffled_w"] = path_fpn_map(
                         tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                        level_name, box_processed, processed_size,
-                        weight_grid_override=shuffled.reshape(base_weights.shape),
-                    ).abs().sum(0)
+                        level_name, box_processed, processed_size, path=path_steps,
+                        node_weight_grids=shuffled_grids,
+                    )
                 if "activation_only" in rankings:
                     fpn_maps["activation_only"] = level_map.detach().abs().sum(0)
 

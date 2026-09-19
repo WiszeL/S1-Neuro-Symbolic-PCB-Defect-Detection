@@ -303,6 +303,42 @@ def exact_fpn_contribution(
     return (grad[0] * feats[level_name][0]).detach()
 
 
+def path_fpn_map(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    roi_align: Any,
+    fpn_features: dict[str, Tensor],
+    level_name: str,
+    box_processed: Tensor,
+    processed_image_size: tuple[int, int],
+    path: list[Any] | None = None,
+    node_weight_grids: list[np.ndarray] | None = None,  # controls only, one per step
+) -> Tensor:
+    """Stacked per-node panels: sum of each node's |map|; nodes never cancel.
+
+    Exact per node, not per path — the tree has no single path score.
+    """
+    if path is None:
+        path = tree.decision_path(_as_feature_grid(feature_grid).reshape(-1))
+    total = None
+    for index, step in enumerate(path):
+        node_map = exact_fpn_contribution(
+            tree,
+            feature_grid,
+            roi_align,
+            fpn_features,
+            level_name,
+            box_processed,
+            processed_image_size,
+            path=[step],
+            weight_grid_override=None
+            if node_weight_grids is None
+            else node_weight_grids[index],
+        ).abs().sum(0)
+        total = node_map if total is None else total + node_map
+    return total
+
+
 def compute_exact_attribution(
     tree: SparseObliqueDecisionTreeClassifier,
     feature_grid: Tensor | np.ndarray,
@@ -317,20 +353,25 @@ def compute_exact_attribution(
 ) -> np.ndarray:
     """Exact map as a 2-D picture, cropped to the box.
 
+    One step = that node's panel; several = their panels stacked.
     Honest limits: channel-collapsing is a display choice, and FPN
     pixels are regions, not image pixels.
     """
-    contribution = exact_fpn_contribution(
-        tree,
-        feature_grid,
-        roi_align,
-        fpn_features,
-        level_name,
-        box_processed,
-        processed_image_size,
-        path=path,
+    heatmap = (
+        path_fpn_map(
+            tree,
+            feature_grid,
+            roi_align,
+            fpn_features,
+            level_name,
+            box_processed,
+            processed_image_size,
+            path=path,
+        )
+        .cpu()
+        .numpy()
+        .astype(np.float32)
     )
-    heatmap = contribution.abs().sum(0).cpu().numpy().astype(np.float32)
 
     fx1, fy1, fx2, fy2 = _fpn_box_bounds(
         box_processed, padded_size, heatmap.shape, margin=margin

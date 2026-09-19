@@ -8,6 +8,7 @@ from neurosym.heatmap import (
     compute_exact_attribution,
     compute_node_local_evidence_maps,
     exact_fpn_contribution,
+    path_fpn_map,
     path_weight_grid,
 )
 from neurosym.inference import explain_hybrid_detection
@@ -168,6 +169,70 @@ def test_exact_fpn_contribution_sums_to_each_node_score_not_just_the_path():
     assert torch.allclose(summed_nodes, path_contribution, atol=1e-4)
 
 
+def _two_opposing_nodes_tree(feature_shape: tuple[int, int, int]) -> SparseObliqueDecisionTreeClassifier:
+    """Root goes left (+x), its left child goes right (-x), same cell: signed sum cancels."""
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=2, num_classes=2, input_dim=int(np.prod(feature_shape)),
+        feature_shape=feature_shape,
+    )
+    tree.node_weights[0, 0] = 1.0
+    tree.node_weights[1, 0] = 1.0
+    tree.node_bias[1] = -100.0
+    return tree
+
+
+def _grid(roi_align, fpn, box) -> np.ndarray:
+    return roi_align(
+        {k: v.unsqueeze(0) for k, v in fpn.items()}, [box.unsqueeze(0)], [PROCESSED_SIZE]
+    )[0].numpy().astype(np.float32)
+
+
+def test_path_map_is_the_per_node_panels_stacked():
+    rng = np.random.default_rng(2)
+    feature_shape = (3, 4, 4)
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=3, num_classes=2, input_dim=int(np.prod(feature_shape)),
+        feature_shape=feature_shape,
+    )
+    tree.node_weights[:] = rng.normal(size=tree.node_weights.shape).astype(np.float32)
+    roi_align = _roi_align(feature_shape)
+    fpn = _fpn(3, 16)
+    fpn["p2"][:, 2:10, 2:10] = torch.rand(3, 8, 8) + 0.5
+    box = torch.tensor([4.0, 4.0, 20.0, 20.0])
+    grid = _grid(roi_align, fpn, box)
+
+    path = tree.decision_path(grid.reshape(-1))
+    panels = sum(
+        exact_fpn_contribution(
+            tree, grid, roi_align, fpn, "p2", box, PROCESSED_SIZE, path=[step]
+        ).abs().sum(0)
+        for step in path
+    )
+    stacked = path_fpn_map(tree, grid, roi_align, fpn, "p2", box, PROCESSED_SIZE)
+    assert torch.allclose(stacked, panels, atol=1e-5)
+
+
+def test_opposing_nodes_do_not_cancel_in_the_path_map():
+    feature_shape = (1, 4, 4)
+    tree = _two_opposing_nodes_tree(feature_shape)
+    roi_align = _roi_align(feature_shape)
+    fpn = _fpn(1, 16)
+    fpn["p2"][0, 2:10, 2:10] = 2.0
+    box = torch.tensor([4.0, 4.0, 20.0, 20.0])
+    grid = _grid(roi_align, fpn, box)
+
+    path = tree.decision_path(grid.reshape(-1))
+    assert [step.went_left for step in path] == [True, False]
+
+    signed = exact_fpn_contribution(
+        tree, grid, roi_align, fpn, "p2", box, PROCESSED_SIZE, path=path
+    )
+    assert float(signed.abs().sum()) < 1e-5  # the old signed sum loses the cell
+
+    stacked = path_fpn_map(tree, grid, roi_align, fpn, "p2", box, PROCESSED_SIZE)
+    assert float(stacked.sum()) > 0.0
+
+
 class _FakeModel:
     def __init__(self, tree: SparseObliqueDecisionTreeClassifier, roi_align) -> None:
         self.symbolic_tree = tree
@@ -228,5 +293,7 @@ if __name__ == "__main__":
     test_map_crops_to_the_processed_box()
     test_signed_evidence_map_sums_to_the_node_score_exactly()
     test_exact_fpn_contribution_sums_to_each_node_score_not_just_the_path()
+    test_path_map_is_the_per_node_panels_stacked()
+    test_opposing_nodes_do_not_cancel_in_the_path_map()
     test_explain_hybrid_detection_projects_attribution_from_processed_box()
     print("OK")

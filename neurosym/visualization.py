@@ -480,7 +480,7 @@ def draw_neurosymbolic_explanation(
             proposal_box, detection_box,
         )
         axis.set_title(
-            f"SODT heatmap — full path total ({node_count} nodes, "
+            f"SODT heatmap — per-node maps stacked, Σ|node map| ({node_count} nodes, "
             f"{explanation.get('exact_attribution_level', '?')})\n"
             "cyan=proposal (heat frame)  lime=detection box  "
             "— validated in Table A, not the per-step story"
