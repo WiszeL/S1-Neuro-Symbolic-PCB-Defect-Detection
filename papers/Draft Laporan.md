@@ -225,13 +225,9 @@ $$
 
 dengan ${p}_{i}$ probabilitas kelas ke-*i*, ${z}_{i}$ *logit* kelas ke-*i*, dan $C$ jumlah kelas.
 
-**Peta Fitur, *Stride*, dan *Receptive Field***
+Lapisan konvolusi dan *pooling* di atas menghasilkan peta fitur (*feature map*), yaitu tensor berukuran $C\times H\times W$. Setiap kanal merupakan hasil satu filter dan merespons satu jenis pola, sedangkan posisi $\left(h,w\right)$ menyatakan lokasi pola tersebut (Goodfellow et al., 2016). Karena lapisan-lapisan tersebut juga memperkecil ukuran spasial, satu posisi pada peta fitur tidak lagi mewakili satu piksel citra. Hubungan keduanya dijelaskan melalui *stride* dan *receptive field*.
 
-Keluaran lapisan konvolusi disebut peta fitur (*feature map*), yaitu tensor berukuran $C\times H\times W$. Setiap kanal ($C$) merupakan hasil satu filter dan merespons satu jenis pola, sedangkan posisi $\left(h,w\right)$ menyatakan lokasi pola tersebut (Goodfellow et al., 2016). Hubungan antara posisi pada peta fitur dan posisi pada citra dijelaskan oleh dua konsep berikut.
-
-a. *Stride*
-
-*Stride* adalah besar langkah pergeseran filter. Lapisan dengan *stride* lebih dari satu, misalnya *pooling*, memperkecil peta fitur, sehingga satu sel pada lapisan dalam mewakili daerah citra yang makin luas. *Stride* total lapisan ke-*l* dinyatakan pada Persamaan 2.5, dan posisi citra yang berkorespondensi dengan sel $\left(h,w\right)$ dinyatakan pada Persamaan 2.6 (Goodfellow et al., 2016).
+*Stride* adalah besar langkah pergeseran filter. Setiap lapisan dengan *stride* lebih dari satu, misalnya *pooling*, memperkecil peta fitur, sehingga satu sel pada lapisan yang lebih dalam mewakili daerah citra yang makin luas. *Stride* total lapisan ke-*l* dinyatakan pada Persamaan 2.5, sedangkan posisi citra yang berkorespondensi dengan sel $\left(h,w\right)$ dinyatakan pada Persamaan 2.6 (Goodfellow et al., 2016).
 
 $$
 {S}_{l}=\prod_{i=1}^{l}{{s}_{i}}
@@ -245,11 +241,9 @@ $$
 
 (2.6)
 
-dengan ${S}_{l}$ *stride* total lapisan ke-*l*, ${s}_{i}$ *stride* lapisan ke-*i*, $\left(h,w\right)$ indeks baris dan kolom pada peta fitur, dan $\left(u,v\right)$ koordinat pada citra. Dengan demikian, satu sel peta fitur menempati petak ${S}_{l}\times {S}_{l}$ piksel pada citra.
+dengan ${S}_{l}$ *stride* total lapisan ke-*l*, ${s}_{i}$ *stride* lapisan ke-*i*, $\left(h,w\right)$ indeks baris dan kolom pada peta fitur, dan $\left(u,v\right)$ koordinat pada citra. Dengan kata lain, satu sel peta fitur menempati petak ${S}_{l}\times {S}_{l}$ piksel pada citra.
 
-b. *Receptive Field*
-
-*Receptive field* adalah daerah citra yang memengaruhi nilai satu sel peta fitur (Goodfellow et al., 2016; Luo et al., 2016). Ukurannya membesar seiring kedalaman jaringan, sebagaimana dinyatakan pada Persamaan 2.7.
+Namun, nilai sel tersebut tidak hanya dipengaruhi oleh petak itu. Daerah citra yang memengaruhi nilai satu sel disebut *receptive field* (Goodfellow et al., 2016; Luo et al., 2016). Karena setiap lapisan konvolusi menggabungkan beberapa sel bertetangga dari lapisan sebelumnya, ukurannya membesar seiring kedalaman jaringan, sebagaimana dinyatakan pada Persamaan 2.7.
 
 $$
 {r}_{l}={r}_{l-1}+\left({k}_{l}-1\right)\prod_{i=1}^{l-1}{{s}_{i}},\quad {r}_{0}=1
@@ -257,13 +251,13 @@ $$
 
 (2.7)
 
-dengan ${r}_{l}$ ukuran *receptive field* lapisan ke-*l* dalam piksel, ${k}_{l}$ ukuran kernel lapisan ke-*l*, dan ${s}_{i}$ *stride* lapisan ke-*i*. Pengaruh piksel di dalam *receptive field* terpusat di tengah dan melemah ke arah tepi (Luo et al., 2016). Ilustrasi kedua konsep ditunjukkan pada Gambar 2.6.
+dengan ${r}_{l}$ ukuran *receptive field* lapisan ke-*l* dalam piksel, ${k}_{l}$ ukuran kernel lapisan ke-*l*, dan ${s}_{i}$ *stride* lapisan ke-*i*. Pengaruh piksel di dalam *receptive field* terpusat di tengah dan melemah ke arah tepi (Luo et al., 2016). Ilustrasi *stride* dan *receptive field* ditunjukkan pada Gambar 2.6.
 
 [SISIPKAN GAMBAR: satu sel peta fitur menempati petak ${S}_{l}\times {S}_{l}$ piksel pada citra, sedangkan *receptive field*-nya mencakup daerah citra yang lebih luas dan tumpang-tindih dengan *receptive field* sel tetangga]
 
 Gambar 2.6 Ilustrasi *Stride* dan *Receptive Field*
 
-Karena *receptive field* jauh lebih besar daripada petak ${S}_{l}\times {S}_{l}$ dan saling tumpang-tindih, satu sel peta fitur merangkum suatu daerah (*region*) citra, bukan satu piksel. Akibatnya, penjelasan yang dihitung pada peta fitur memiliki ketelitian spasial pada tingkat daerah.
+Karena *receptive field* jauh lebih besar daripada petak ${S}_{l}\times {S}_{l}$ dan saling tumpang-tindih antarsel, satu sel peta fitur merangkum suatu daerah (*region*) citra, bukan satu piksel. Akibatnya, penjelasan yang dihitung pada peta fitur memiliki ketelitian spasial pada tingkat daerah.
 
 ### 2.1.5 *Faster* R-CNN
 
@@ -357,7 +351,7 @@ $$
 
 dengan $j$ merentang pada komponen $x$, $y$, $w$, dan $h$.
 
-**4. *RoI Align* dan *RoI Head***
+**4. *RoI Align***
 
 *RoI Align* menyeragamkan setiap usulan area menjadi tensor berukuran tetap tanpa pembulatan koordinat (He et al., 2017). Nilai peta fitur pada koordinat pecahan diperoleh dengan interpolasi bilinear pada Persamaan 2.16. Rumus yang sama juga dapat dipakai untuk memperbesar peta kecil ke ukuran tertentu.
 
@@ -397,11 +391,13 @@ $$
 
 dengan $k$ tingkat terpilih, ${k}_{0}=4$ tingkat acuan untuk usulan area 224×224 piksel, serta $w,h$ lebar dan tinggi usulan area.
 
-*RoI Head* adalah MLP yang menerima tensor tersebut dan menghasilkan skor kelas melalui *softmax* (Persamaan 2.4) serta koordinat *bounding box* akhir (Persamaan 2.10 sampai 2.13). Sifat *black-box* *Faster* R-CNN terpusat pada komponen ini, sehingga *RoI Head* menjadi sasaran penggantian oleh model simbolik.
+**5. *Box Head* (Klasifikasi dan Regresi *Bounding Box*)**
 
-**5. *Soft*-NMS**
+Keluaran *RoI Align* setiap usulan area diratakan menjadi vektor, lalu diproses oleh *box head* berupa MLP dengan dua lapisan terhubung penuh yang menghasilkan representasi RoI. Representasi ini diteruskan ke dua lapisan keluaran yang bekerja berdampingan (*two sibling output layers*) (Girshick, 2015; Ren et al., 2015). Cabang pertama adalah *classifier* yang menghasilkan skor untuk $C+1$ kelas (termasuk *background*) melalui *softmax* (Persamaan 2.4) dan dilatih dengan *cross-entropy* (Persamaan 2.2). Cabang kedua adalah *regressor* yang menghasilkan empat nilai koreksi koordinat untuk setiap kelas (Persamaan 2.10 sampai 2.13) dan dilatih dengan kerugian L1 (Persamaan 2.15). Keputusan kelas pada *classifier* berasal dari representasi laten MLP yang tidak dapat ditelusuri, sehingga sifat *black-box* *Faster* R-CNN terpusat pada cabang ini. Oleh karena itu, *classifier* pada *box head* menjadi sasaran penggantian oleh model simbolik dalam penelitian ini.
 
-*Soft*-NMS menyaring deteksi ganda dengan menurunkan skor kandidat yang tumpang-tindih secara bertahap, bukan menghapusnya seketika seperti NMS konvensional (Bodla et al., 2017), sehingga cacat yang berdekatan tidak ikut terbuang (Persamaan 2.20).
+**6. *Soft*-NMS**
+
+Kotak dan skor keluaran *box head* kemudian disaring dengan *Soft*-NMS, yang menurunkan skor kandidat yang tumpang-tindih secara bertahap, bukan menghapusnya seketika seperti NMS konvensional (Bodla et al., 2017), sehingga cacat yang berdekatan tidak ikut terbuang (Persamaan 2.20).
 
 $$
 {s}_{i}=\begin{cases}{s}_{i}, & IoU\left(M,{b}_{i}\right)<{N}_{t}\\ {s}_{i}\left(1-IoU\left(M,{b}_{i}\right)\right), & IoU\left(M,{b}_{i}\right)\ge {N}_{t}\end{cases}
@@ -713,7 +709,7 @@ Tabel 2.2 Ringkasan dan Perbandingan Penelitian Terkait
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | *Improving PCB defect detection using selective feature attention and pixel shuffle pyramid* (Fung et al., 2024) | Deteksi cacat mikroskopis pada sirkuit PCB memiliki tingkat *false negative* yang tinggi pada model deteksi standar. | Meningkatkan kemampuan model melokalisasi target berukuran kecil pada citra PCB. | *Faster* R-CNN dengan *Feature Pyramid Network* (FPN), *Pixel Shuffle Pyramid* (PSPyramid), *Selective Feature Attention*, dan *Soft*-NMS. | Terjadi peningkatan *Mean Average Precision* (mAP) yang signifikan pada pengujian dataset DeepPCB. | Menjadi referensi utama arsitektur dasar (*baseline*) komponen *neural* (ekstraktor fitur dan lokalisasi) dalam penelitian ini. |
 | 2 | *Faster-LTN: a neuro-symbolic, end-to-end object detection architecture* (Manigrasso et al., 2021) | Model *deep learning* konvensional tidak mampu mengintegrasikan pengetahuan relasional dan penalaran logis ke dalam proses deteksi objek, sehingga kurang transparan dalam pengambilan keputusan. | Mengintegrasikan penalaran logis dengan jaringan saraf konvolusional ke dalam arsitektur deteksi objek *end-to-end* untuk meningkatkan transparansi. | *Faster* R-CNN dengan penggantian kepala klasifikasi menjadi *Logic Tensor Networks* (LTN). | Arsitektur *end-to-end* berhasil dilatih dan mencapai performa kompetitif pada dataset PASCAL VOC. | Memberikan landasan konseptual integrasi pendekatan *neuro-symbolic* ke dalam arsitektur deteksi objek dua tahap (*Faster* R-CNN). |
-| 3 | *Sparse oblique decision trees: a tool to understand and manipulate neural net features* (Hada et al., 2024) | Lapisan MLP pada jaringan *deep learning* tidak dapat dijelaskan secara komputasional (*black-box*). | Menciptakan pengganti lapisan MLP yang dapat diinterpretasikan tanpa menurunkan akurasi. | *Sparse Oblique Decision Tree* (SODT) dengan regularisasi L1 yang dilatih menggunakan TAO. | Menghasilkan struktur pohon yang ramping dengan performa setara MLP; bobot tiap *node* dapat divisualisasikan untuk menelusuri fitur yang memisahkan antarkelas. | Menjadi landasan teoretis komponen simbolik yang menggantikan MLP pada *RoI Head* *Faster* R-CNN, serta dasar pembacaan bobot *node* sebagai penjelasan. |
+| 3 | *Sparse oblique decision trees: a tool to understand and manipulate neural net features* (Hada et al., 2024) | Lapisan MLP pada jaringan *deep learning* tidak dapat dijelaskan secara komputasional (*black-box*). | Menciptakan pengganti lapisan MLP yang dapat diinterpretasikan tanpa menurunkan akurasi. | *Sparse Oblique Decision Tree* (SODT) dengan regularisasi L1 yang dilatih menggunakan TAO. | Menghasilkan struktur pohon yang ramping dengan performa setara MLP; bobot tiap *node* dapat divisualisasikan untuk menelusuri fitur yang memisahkan antarkelas. | Menjadi landasan teoretis komponen simbolik yang menggantikan *classifier* pada *box head* *Faster* R-CNN, serta dasar pembacaan bobot *node* sebagai penjelasan. |
 | 4 | *Neurosymbolic models based on hybrids of convolutional neural networks and decision trees* (Kairgeldin & Carreira-Perpiñán, 2025) | Interpretabilitas model hibrida CNN dan pohon keputusan masih terbatas, dan sebaran sparsitas antar-*node* pada TAO tidak dapat dikendalikan. | Membangun model *neuro-symbolic* hibrida CNN dan SODT yang keputusannya dapat dijelaskan. | Komposisi lapisan CNN dengan SODT yang dilatih menggunakan TAO termodifikasi (parameter $\alpha$), serta visualisasi *RF density map* per *node*. | Sebagian kecil *neuron* terbukti bertanggung jawab penuh atas klasifikasi kelas tertentu, dan *receptive field*-nya terpusat pada area citra yang paling membedakan antarkelas. | Menjadi dasar algoritma TAO dengan parameter $\alpha$ untuk pelatihan SODT, serta konsep peta berbasis bobot per *node* yang menjadi titik awal penjelasan *heatmap* pada penelitian ini. |
 | 5 | *Explainable Predictive Quality Inspection using Deep Learning in Electronics Manufacturing* (Saadallah et al., 2022) | Model *deep learning* untuk prediksi kualitas bersifat *black-box* sehingga menyulitkan teknisi memahami fitur mana yang paling berpengaruh terhadap keputusan prediksi. | Menyediakan penjelasan visual atas prediksi kualitas PCB menggunakan *heatmap* untuk membantu teknisi mengidentifikasi fitur global (kuantitas fisik SPI) dan lokal (pin) yang paling menentukan. | 1D-CNN untuk prediksi kualitas biner (OK/NOK) dan Grad-CAM untuk menghasilkan *heatmap* penjelasan. | Grad-CAM berhasil menyoroti fitur SPI (DX, DY, DVolume) dan pin spesifik yang paling diskriminatif untuk kelas "NOK", membantu teknisi melacak penyebab deviasi kualitas. | Menunjukkan penerapan Grad-CAM sebagai metode *post-hoc* untuk inspeksi kualitas PCB. |
 | 6 | *Explainable AI Methods for Identification of Glue Volume Deficiencies in Printed Circuit Boards* (Tziolas et al., 2025) | Inspeksi volume lem pada PCB sulit dilakukan secara manual dan model *deep learning* yang digunakan tidak memberikan penjelasan atas deteksi defisiensi. | Mengidentifikasi defisiensi volume lem pada PCB menggunakan model *deep learning* dan menyediakan penjelasan visual atas prediksi model. | CNN (ResNet-50 dan *Vision Transformer*) untuk klasifikasi defisiensi lem, dengan Grad-CAM dan Deep SHAP untuk menghasilkan *heatmap* penjelasan. | CNN mencapai akurasi tinggi dalam mendeteksi defisiensi lem, dan Grad-CAM/Deep SHAP berhasil menyoroti area dengan volume lem tidak memadai yang menjadi dasar keputusan model. | Memperkuat justifikasi penggunaan Grad-CAM sebagai metode *post-hoc* yang telah teruji dalam inspeksi visual PCB, serta menunjukkan keterbatasan *post-hoc* yang mendorong kebutuhan pendekatan *faithful*. |
@@ -813,7 +809,7 @@ Tabel 3.4 Parameter Utama *Faster* R-CNN
 | | Jumlah proposal setelah NMS (latih / uji) | 2.000 / 1.000 |
 | | Ambang NMS proposal | 0,7 |
 | *RoI Align* | Ukuran keluaran | 7×7 *bin*, 2×2 titik sampel per *bin* |
-| *RoI Head* | Lapisan MLP | 2 lapisan terhubung penuh (1.024 *neuron*) |
+| *Box Head* | Lapisan MLP | 2 lapisan terhubung penuh (1.024 *neuron*) |
 | *Soft*-NMS | Metode penurunan skor | Linear (Persamaan 2.20) |
 | | Ambang IoU / *sigma* | 0,5 / 0,5 |
 | | Ambang skor minimum | 0,001 |
@@ -829,7 +825,7 @@ Tabel 3.4 Parameter Utama *Faster* R-CNN
 2. *Neck* membentuk piramida P2′–P6 melalui *pixel shuffle* (Persamaan 2.8) dan *SF Attention* (Persamaan 2.9).
 3. RPN menghasilkan proposal dari *anchor* (Persamaan 2.10 sampai 2.13) dan menyaringnya dengan NMS.
 4. *RoI Align* memilih tingkat piramida (Persamaan 2.19) dan menghasilkan *tensor* $64\times 7\times 7$ untuk setiap proposal (Persamaan 2.17).
-5. *RoI Head* menghasilkan skor kelas (Persamaan 2.4) dan koordinat *bounding box* akhir.
+5. *Box Head* menghasilkan skor kelas (Persamaan 2.4) dan koordinat *bounding box* akhir.
 6. *Soft*-NMS menyaring deteksi yang tumpang-tindih (Persamaan 2.20).
 
 ## 3.5 Pelatihan dan Evaluasi Model *Neural*
@@ -868,7 +864,7 @@ Tabel 3.5 *Hyperparameter* Pelatihan *Faster* R-CNN
 
 ## 3.6 Ekstraksi Fitur RoI dan Label *Teacher*
 
-Tahap ini membentuk *dataset* simbolik sesuai skema *model mimicking* (Subbab 2.1.7). Fitur diambil tepat setelah *RoI Align*, sebelum masuk MLP *RoI Head*, sehingga bentuk grid $7\times 7$ tetap terjaga. Yang diekstrak adalah seluruh proposal RPN pada mode inferensi, bukan hanya deteksi akhir, agar SODT dilatih pada populasi proposal yang sama dengan saat inferensi. Label setiap proposal adalah prediksi *teacher*, termasuk *background*, bukan *ground truth*. *Ground truth* hanya disimpan sebagai data pendamping untuk metrik lokalisasi. Ekstraksi dilakukan terpisah untuk data latih dan data uji. Mekanismenya diilustrasikan pada Gambar 3.3.
+Tahap ini membentuk *dataset* simbolik sesuai skema *model mimicking* (Subbab 2.1.7). Fitur diambil tepat setelah *RoI Align*, sebelum masuk MLP pada *box head*, sehingga bentuk grid $7\times 7$ tetap terjaga. Yang diekstrak adalah seluruh proposal RPN pada mode inferensi, bukan hanya deteksi akhir, agar SODT dilatih pada populasi proposal yang sama dengan saat inferensi. Label setiap proposal adalah prediksi *teacher*, termasuk *background*, bukan *ground truth*. *Ground truth* hanya disimpan sebagai data pendamping untuk metrik lokalisasi. Ekstraksi dilakukan terpisah untuk data latih dan data uji. Mekanismenya diilustrasikan pada Gambar 3.3.
 
 ![Gambar 3.3](asset:sha256:336ec358889ca6a84ef8ca4fd0b1e985bcb11dd37e812d27a740ecda25205386)
 
@@ -882,13 +878,13 @@ Gambar 3.3 Pengambilan Fitur *RoI Align* dan Label dari *Faster* R-CNN
 
 1. Setiap citra diproses dengan resolusi tetap (Tabel 3.3), lalu RPN menghasilkan hingga 1.000 proposal.
 2. *RoI Align* mengubah setiap proposal menjadi *tensor* $64\times 7\times 7$ (Persamaan 2.17 dan 2.19).
-3. *Tensor* diteruskan ke *RoI Head* *teacher*, dan kelas dengan *softmax* tertinggi (Persamaan 2.4) diambil sebagai label.
+3. *Tensor* diteruskan ke *box head* *teacher*, dan kelas dengan *softmax* tertinggi (Persamaan 2.4) diambil sebagai label.
 4. Setiap proposal dicocokkan dengan *ground truth* ber-IoU tertinggi sebagai data pendamping.
 5. Fitur, label, dan data pendamping disimpan sebagai *dataset* simbolik.
 
 ## 3.7 Model Simbolik (SODT)
 
-SODT menggantikan kepala klasifikasi *RoI Head*, sehingga setiap keputusan kelas berasal dari rangkaian keputusan linear yang dapat ditelusuri (Subbab 2.1.8). Pohon yang digunakan adalah pohon biner lengkap berkedalaman 6 (63 *node* internal dan 64 *leaf*). Masukannya adalah *tensor* $64\times 7\times 7$ yang diratakan menjadi vektor berdimensi 3.136, dengan urutan yang dicatat agar setiap bobot dapat dikembalikan ke kanal dan posisi grid asalnya.
+SODT menggantikan *classifier* pada *box head*, sehingga setiap keputusan kelas berasal dari rangkaian keputusan linear yang dapat ditelusuri (Subbab 2.1.8). Pohon yang digunakan adalah pohon biner lengkap berkedalaman 6 (63 *node* internal dan 64 *leaf*). Masukannya adalah *tensor* $64\times 7\times 7$ yang diratakan menjadi vektor berdimensi 3.136, dengan urutan yang dicatat agar setiap bobot dapat dikembalikan ke kanal dan posisi grid asalnya.
 
 **Input:** Kedalaman pohon dan dimensi *tensor* RoI.
 
