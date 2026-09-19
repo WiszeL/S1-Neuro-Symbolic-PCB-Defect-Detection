@@ -6,13 +6,14 @@ amp: true
 dataset: 
   path: dataset/DeepPCB
   size: [640, 640]
+  # Index i is DeepPCB defect id i+1 (1 open ... 5 copper, 6 pin-hole).
   class_names:
     - open
     - short
     - mouse_bite
     - spur
-    - pinhole
     - spurious_copper
+    - pinhole
   batch_size: 1
   num_workers: 4
 

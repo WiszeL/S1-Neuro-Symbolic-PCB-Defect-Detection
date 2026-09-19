@@ -36,27 +36,33 @@ def gradcam_for_detections(
     score_threshold: float = 0.3,
     output_size: tuple[int, int] = (7, 7),
 ) -> list[dict[str, Any]]:
-    """Heatmaps for detections worth showing (above threshold)."""
-    boxes = prediction["boxes"]
-    labels = prediction["labels"]
-    scores = prediction["scores"]
+    """Heatmaps for detections worth showing (above threshold).
 
-    # Filter
-    keep = scores >= score_threshold
-    boxes = boxes[keep]
-    labels = labels[keep]
-    scores = scores[keep]
+    Each map is explained at, and drawn over, the detection's proposal.
+    """
+    keep = prediction["scores"] >= score_threshold
+    proposals = prediction["proposal_boxes_processed"][keep]
+    labels = prediction["labels"][keep]
+    scores = prediction["scores"][keep]
 
-    if boxes.shape[0] == 0:
+    if proposals.shape[0] == 0:
         return []
 
-    heatmaps = gradcam.generate(image, boxes, labels, output_size=output_size)
+    heatmaps = gradcam.generate(image, proposals, labels, output_size=output_size)
+
+    # Proposal back to original-image coordinates for drawing.
+    images_list, _ = gradcam.model.transform([image.to(gradcam.device)], None)
+    processed_h, processed_w = images_list.image_sizes[0]
+    original_h, original_w = image.shape[-2:]
+    boxes = proposals.detach().cpu().float().clone()
+    boxes[:, [0, 2]] *= original_w / processed_w
+    boxes[:, [1, 3]] *= original_h / processed_h
 
     results: list[dict[str, Any]] = []
     for i in range(boxes.shape[0]):
         results.append(
             {
-                "box": boxes[i].detach().cpu(),
+                "box": boxes[i],
                 "label": int(labels[i]),
                 "score": float(scores[i]),
                 "heatmap": heatmaps[i],

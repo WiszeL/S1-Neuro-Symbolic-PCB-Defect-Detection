@@ -144,3 +144,29 @@ if __name__ == "__main__":
     test_node_score_with_empty_level_equals_bias()
     test_node_score_at_full_deletion_or_insertion_matches_the_endpoint_it_should()
     print("OK")
+
+
+def test_shared_necessity_sufficiency_endpoints():
+    # Budget = whole box: keeping everything must preserve the label, and
+    # zeroing everything must leave only the bias to decide it.
+    from neurosym.evaluation import fpn_necessity_sufficiency
+
+    level_map, bounds, bias, score = _node_masking_fixture((2.0, 2.0, 9.0, 9.0))
+    fx1, fy1, fx2, fy2 = bounds
+    n_pos = (fx2 - fx1) * (fy2 - fy1)
+    fpn_features = {"p2": level_map.unsqueeze(0)}
+    roi_align = MultiScaleRoIAlign(featmap_names=["p2"], output_size=(4, 4), sampling_ratio=2)
+    box = torch.tensor((2.0, 2.0, 9.0, 9.0))
+    weight = np.random.default_rng(0).normal(size=3 * 4 * 4).astype(np.float32)
+
+    def classify(grid):
+        value = grid.reshape(grid.shape[0], -1).numpy() @ weight + bias
+        return (value >= 0).astype(np.int64)
+
+    base = int(classify(roi_align(fpn_features, [box.unsqueeze(0)], [(16, 16)]))[0])
+    flipped, preserved = fpn_necessity_sufficiency(
+        roi_align, fpn_features, "p2", box, (16, 16), bounds,
+        np.arange(n_pos), n_pos, classify, base,
+    )
+    assert preserved == 1.0
+    assert flipped == float(int(bias >= 0) != base)

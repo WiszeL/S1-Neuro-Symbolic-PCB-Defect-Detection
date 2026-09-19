@@ -21,6 +21,8 @@ def load_checkpoint_model(
 ) -> tuple[NeuroFasterRCNN, dict[str, Any]]:
     resolved_device = select_device(device)
     model_config = load_yaml(model_config_path, NeuroConfig)
+    # Weights come from the checkpoint, not a fresh ImageNet download.
+    model_config["net"]["backbone_pretrained"] = False
     train_config = load_yaml(train_config_path, NeuroTrainConfig)
     checkpoint = torch.load(
         checkpoint_path, map_location=resolved_device, weights_only=True

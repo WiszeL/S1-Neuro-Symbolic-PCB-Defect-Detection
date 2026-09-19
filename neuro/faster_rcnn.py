@@ -702,28 +702,36 @@ class NeuroFasterRCNN(nn.Module):
         pred_scores_list = pred_scores.split(boxes_per_image, dim=0)
 
         detections: list[dict[str, Tensor]] = []
-        for boxes, scores, image_shape in zip(
+        for boxes, scores, image_shape, proposals_per_image in zip(
             pred_boxes_list,
             pred_scores_list,
             image_shapes,
+            proposals,
         ):
             boxes = box_ops.clip_boxes_to_image(boxes, image_shape)
             labels = torch.arange(self.num_classes, device=device)
             labels = labels.view(1, -1).expand_as(scores)
+            # The proposal each candidate was classified from — its class
+            # logit came from pooling there, not at the regressed box.
+            proposal_index = torch.arange(scores.shape[0], device=device)
+            proposal_index = proposal_index.view(-1, 1).expand_as(scores)
 
             boxes = boxes[:, 1:].reshape(-1, 4)
             scores = scores[:, 1:].reshape(-1)
             labels = labels[:, 1:].reshape(-1)
+            proposal_index = proposal_index[:, 1:].reshape(-1)
 
             keep = torch.where(scores > self.BOX_SCORE_THRESH)[0]
             boxes = boxes[keep]
             scores = scores[keep]
             labels = labels[keep]
+            proposal_index = proposal_index[keep]
 
             keep = box_ops.remove_small_boxes(boxes, min_size=1e-2)
             boxes = boxes[keep]
             scores = scores[keep]
             labels = labels[keep]
+            proposal_index = proposal_index[keep]
 
             if self.soft_nms_enabled:
                 keep, updated_scores = self.batched_soft_nms(
@@ -734,6 +742,7 @@ class NeuroFasterRCNN(nn.Module):
                 boxes = boxes[keep]
                 scores = updated_scores
                 labels = labels[keep]
+                proposal_index = proposal_index[keep]
             else:
                 # No separate hard-NMS knob — reuses the Soft-NMS threshold.
                 keep = box_ops.batched_nms(
@@ -746,8 +755,17 @@ class NeuroFasterRCNN(nn.Module):
                 boxes = boxes[keep]
                 scores = scores[keep]
                 labels = labels[keep]
+                proposal_index = proposal_index[keep]
 
-            detections.append({"boxes": boxes, "scores": scores, "labels": labels})
+            detections.append(
+                {
+                    "boxes": boxes,
+                    "scores": scores,
+                    "labels": labels,
+                    # Processed-space, like hybrid.py; postprocess leaves it alone.
+                    "proposal_boxes_processed": proposals_per_image[proposal_index],
+                }
+            )
 
         return detections
 

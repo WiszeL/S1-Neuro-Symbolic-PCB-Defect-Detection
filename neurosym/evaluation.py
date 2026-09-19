@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import torch
@@ -146,6 +146,42 @@ def _masked_level(
     return out
 
 
+def fpn_necessity_sufficiency(
+    roi_align: Any,
+    fpn_features: dict[str, Tensor],
+    level_name: str,
+    box_processed: Tensor,
+    processed_size: tuple[int, int],
+    bounds: tuple[int, int, int, int],
+    order: np.ndarray,
+    budget: int,
+    classify: Callable[[Tensor], np.ndarray],
+    base_label: int,
+) -> tuple[float, float]:
+    """One RoI, one ranking: the top `budget` box pixels on its own FPN level.
+
+    Necessity zeroes them and asks whether the label flips; sufficiency keeps
+    only them and asks whether the label survives. Every method goes through
+    this — only `order` (its own map) and `classify` (its own model) differ.
+    """
+    fx1, fy1, fx2, fy2 = bounds
+    box_shape = (fy2 - fy1, fx2 - fx1)
+    level_map = fpn_features[level_name][0]
+    selected = np.zeros(box_shape[0] * box_shape[1], dtype=bool)
+    selected[order[:budget]] = True
+    selected_t = torch.from_numpy(selected.reshape(box_shape)).to(level_map.device)
+
+    labels: list[int] = []
+    for keep, from_zero in ((~selected_t, False), (selected_t, True)):
+        patched = dict(fpn_features)
+        patched[level_name] = _masked_level(
+            level_map, bounds, keep, start_from_zero=from_zero
+        ).unsqueeze(0)
+        grid = roi_align(patched, [box_processed.unsqueeze(0)], [processed_size])
+        labels.append(int(classify(grid)[0]))
+    return float(labels[0] != base_label), float(labels[1] == base_label)
+
+
 def _node_score_after_masking(
     detector,
     fpn_features: dict[str, Tensor],
@@ -173,12 +209,16 @@ def evaluate_faithfulness_fpn_masking(
     rankings: tuple[str, ...] = ("exact", "random"),
     budget_fraction: float = _FAITHFULNESS_CELL_BUDGET_FRACTION,
     margin: int = 2,
-    max_rois_per_image: int = 8,
+    score_threshold: float = 0.5,
     random_state: int = 42,
     per_node: bool = True,
     auc_steps: int = 5,
 ) -> dict[str, Any]:
-    """Necessity test at full FPN resolution: mask top pixels, re-pool, check flips.
+    """Necessity/sufficiency at full FPN resolution: mask top pixels, re-pool, check labels.
+
+    RoIs are the hybrid's detections scoring >= `score_threshold`, pooled at
+    their proposals. Grad-CAM runs the same protocol through
+    `fpn_necessity_sufficiency` (gradcam/evaluation.py).
 
     Masking the FPN map directly (not shrunk to 7x7 first) is the fair test
     for a finer-resolution map. Two things are measured, at the SAME
@@ -208,7 +248,7 @@ def evaluate_faithfulness_fpn_masking(
     tree = model.symbolic_tree
     detector = model.detector
     rng = np.random.default_rng(random_state)
-    path_results = {name: [] for name in rankings}
+    path_results = {name: {"necessity": [], "sufficiency": []} for name in rankings}
     node_rankings = tuple(name for name in rankings if name in ("exact", "random"))
     node_results: dict[str, dict[int, dict[str, list[float]]]] = {
         name: defaultdict(
@@ -221,13 +261,20 @@ def evaluate_faithfulness_fpn_masking(
     featmap_names = list(detector.roi_align.pool.featmap_names)
     map_rankings = {"exact", "shuffled_w", "activation_only"}
 
+    def classify(grid: Tensor) -> np.ndarray:
+        return tree.predict(grid.detach().cpu().numpy().astype(np.float32).reshape(grid.shape[0], -1))
+
     for image in tqdm(images, desc="FPN-masking faithfulness"):
-        images_list, _ = detector.transform([image.to(model.device)], None)
-        fpn_features = detector.backbone(images_list.tensors)
-        proposals_per_image, _ = detector.rpn(images_list, fpn_features, None)
-        boxes_processed = proposals_per_image[0][:max_rois_per_image]
+        # Population: the hybrid's own detections at the P/R operating point,
+        # explained at the proposal each was classified from.
+        detection = model([image])[0]
+        keep = detection["scores"] >= score_threshold
+        boxes_processed = detection["proposal_boxes_processed"][keep].to(model.device)
         if boxes_processed.shape[0] == 0:
             continue
+
+        images_list, _ = detector.transform([image.to(model.device)], None)
+        fpn_features = detector.backbone(images_list.tensors)
 
         pooled = detector.roi_align(fpn_features, [boxes_processed], images_list.image_sizes)
         level_indices = detector.roi_align.pool.map_levels([boxes_processed])
@@ -285,23 +332,12 @@ def evaluate_faithfulness_fpn_masking(
                     name, tree, pooled_grid, level_map, bounds, rng,
                     fpn_map=fpn_maps.get(name),
                 )
-                sel = np.zeros(n_pos, dtype=bool)
-                sel[order[:budget]] = True
-                keep = ~sel.reshape(fy2 - fy1, fx2 - fx1)
-                keep_t = torch.from_numpy(keep).to(model.device)
-
-                nec_level = _masked_level(level_map, bounds, keep_t)
-                nec_fpn = dict(fpn_features)
-                nec_fpn[level_name] = nec_level.unsqueeze(0)
-                nec_grid = detector.roi_align(
-                    nec_fpn, [box_processed.unsqueeze(0)], [processed_size]
-                )[0]
-                nec_pred = int(
-                    tree.predict(
-                        nec_grid.detach().cpu().numpy().astype(np.float32).reshape(1, -1)
-                    )[0]
+                flipped, preserved = fpn_necessity_sufficiency(
+                    detector.roi_align, fpn_features, level_name, box_processed,
+                    processed_size, bounds, order, budget, classify, base_pred,
                 )
-                path_results[name].append(float(nec_pred != base_pred))
+                path_results[name]["necessity"].append(flipped)
+                path_results[name]["sufficiency"].append(preserved)
 
             # ── Per-node: does THIS node's own routing call flip? ──
             if per_node and node_rankings:
@@ -414,10 +450,11 @@ def evaluate_faithfulness_fpn_masking(
     result: dict[str, Any] = {
         "path": {
             name: {
-                "necessity_prediction_flip_rate": _mean(flips),
-                "evaluated_roi_count": len(flips),
+                "necessity_prediction_flip_rate": _mean(scores["necessity"]),
+                "sufficiency_prediction_preservation": _mean(scores["sufficiency"]),
+                "evaluated_roi_count": len(scores["necessity"]),
             }
-            for name, flips in path_results.items()
+            for name, scores in path_results.items()
         }
     }
     if per_node:
