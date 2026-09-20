@@ -110,6 +110,7 @@ Evaluasi kualitas *explainability* dilakukan secara kuantitatif melalui perbandi
 ### 2.1.1 *Printed Circuit Board* (PCB)
 
 *Printed Circuit Board* (PCB) adalah papan dari bahan isolator yang dilapisi tembaga. PCB berfungsi sebagai jalur penghubung listrik sekaligus penyangga antarkomponen elektronik (Coombs & Holden, 2016; Khandpur, 2005).
+
 Kriteria inspeksi PCB di industri mengacu pada standar *Association Connecting Electronics Industries* (IPC), khususnya IPC-A-600 dan IPC-6012 (IPC, 2015, 2020). Standar ini menyatakan suatu kondisi sebagai cacat apabila melanggar batas toleransi, misalnya jalur konduktor yang terlalu sempit atau jarak antarjalur yang terlalu dekat. Dalam *Computer Vision*, pelanggaran tersebut dipandang sebagai cacat visual yang polanya dapat dipelajari oleh model *deep learning* (Tang et al., 2019; Chen et al., 2023). Enam jenis cacat yang umum dipakai pada penelitian deteksi PCB dirangkum pada Tabel 2.1.
 
 Tabel 2.1 Kategori Cacat Visual Umum pada PCB
@@ -241,7 +242,7 @@ $$
 
 dengan ${S}_{l}$ *stride* total lapisan ke-*l*, ${s}_{i}$ *stride* lapisan ke-*i*, $\left(h,w\right)$ indeks baris dan kolom pada peta fitur, dan $\left(u,v\right)$ koordinat pada citra.
 
-*Receptive field* adalah daerah citra yang memengaruhi nilai satu sel peta fitur (Goodfellow et al., 2016; Luo et al., 2016). Ukurannya membesar seiring kedalaman jaringan, sebagaimana dinyatakan pada Persamaan 2.7.
+Persamaan 2.6 baru menetapkan titik pusat korespondensi, belum luas daerah citra yang benar-benar dibaca oleh satu sel. Luas tersebut dinyatakan oleh *receptive field*, yaitu daerah citra yang memengaruhi nilai satu sel peta fitur (Goodfellow et al., 2016; Luo et al., 2016). Ukurannya membesar seiring kedalaman jaringan, sebagaimana dinyatakan pada Persamaan 2.7.
 
 $$
 {r}_{l}={r}_{l-1}+\left({k}_{l}-1\right)\prod_{i=1}^{l-1}{{s}_{i}},\quad {r}_{0}=1
@@ -249,7 +250,9 @@ $$
 
 (2.7)
 
-dengan ${r}_{l}$ ukuran *receptive field* lapisan ke-*l* dalam piksel, ${k}_{l}$ ukuran kernel lapisan ke-*l*, dan ${s}_{i}$ *stride* lapisan ke-*i*. Pengaruh piksel di dalam *receptive field* terpusat di tengah dan melemah ke arah tepi (Luo et al., 2016). Ilustrasi *stride* dan *receptive field* ditunjukkan pada Gambar 2.6.
+dengan ${r}_{l}$ ukuran *receptive field* lapisan ke-*l* dalam piksel, ${k}_{l}$ ukuran kernel lapisan ke-*l*, dan ${s}_{i}$ *stride* lapisan ke-*i*.
+
+*Stride* total (Persamaan 2.5) menentukan letak pusat daerah citra yang diwakili satu sel peta fitur, sedangkan *receptive field* (Persamaan 2.7) menentukan luas daerah tersebut. Keduanya membuat setiap sel dapat dipetakan kembali ke daerah citranya sendiri, sehingga bobot atau atribusi pada sel peta fitur dapat diterjemahkan menjadi penjelasan spasial pada citra (Subbab 2.1.8). Namun, *receptive field* antarsel saling tumpang-tindih dan pengaruh piksel di dalamnya menurun dari pusat ke tepi (Luo et al., 2016), sehingga penjelasan tersebut berlaku pada tingkat daerah, bukan pada piksel tunggal. Ilustrasi *stride* dan *receptive field* ditunjukkan pada Gambar 2.6.
 
 [SISIPKAN GAMBAR: satu sel peta fitur menempati petak ${S}_{l}\times {S}_{l}$ piksel pada citra, sedangkan *receptive field*-nya mencakup daerah citra yang lebih luas dan tumpang-tindih dengan *receptive field* sel tetangga]
 
@@ -474,11 +477,12 @@ $$
 
 Gambar 2.10 Arsitektur *Neuro-Symbolic*
 
-Arsitektur NeSy terdiri atas tiga bagian utama.
+Arsitektur NeSy terdiri atas dua komponen utama.
 
 1. **Komponen *neural*** mengubah data mentah menjadi representasi fitur numerik (d'Avila Garcez & Lamb, 2023).
 2. **Komponen simbolik** mengolah representasi fitur melalui aturan yang dapat ditelusuri. Penjelasannya *faithful*, yaitu merupakan proses keputusan model itu sendiri, bukan aproksimasi (Rudin, 2019). Contohnya *Logic Tensor Network* dan model hibrida CNN dengan pohon keputusan (Manigrasso et al., 2021; Hada et al., 2024).
-3. ***Model mimicking*** membentuk komponen simbolik dengan melatih model sederhana untuk meniru keluaran model kompleks (*teacher*), dengan label berupa prediksi *teacher*, bukan label sebenarnya (Buciluǎ et al., 2006).
+
+Komponen simbolik dapat dibentuk melalui ***model mimicking***, yaitu melatih model sederhana untuk meniru keluaran model kompleks (*teacher*), dengan label pelatihan berupa prediksi *teacher*, bukan label sebenarnya (Buciluǎ et al., 2006).
 
 Komponen *neural* menghasilkan keluaran kontinu, sedangkan komponen simbolik menghasilkan keluaran diskrit, sehingga banyak masukan berbeda memperoleh keluaran identik dan informasi tingkat keyakinan hilang (Provost & Domingos, 2003). Pada komponen simbolik dengan fungsi keputusan bernilai riil, keyakinan dapat dinyatakan melalui dua konsep berikut.
 
@@ -518,7 +522,7 @@ $$
 
 dengan $x$ vektor fitur berdimensi $D$, ${w}_{i}$ vektor bobot, dan ${b}_{i}$ bias *node* ke-*i*.
 
-Masukan diarahkan ke anak kiri apabila ${f}_{i}\left(x\right)\ge 0$ dan ke anak kanan apabila ${f}_{i}\left(x\right)<0$. Urutan *node* yang dilalui dari *root* hingga *leaf* disebut jalur keputusan (*decision path*), dan arah setiap langkahnya dicatat sebagai ${d}_{i}=+1$ (kiri) atau ${d}_{i}=-1$ (kanan). Setiap *leaf* menyimpan tepat satu label kelas, dan prediksi pohon adalah label *leaf* yang dicapai (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025). *Margin* keputusan *node* adalah $\left|{f}_{i}\left(x\right)\right|$ (Persamaan 2.26). Ilustrasinya ditunjukkan pada Gambar 2.11.
+Tanda ${f}_{i}\left(x\right)$ menentukan arah percabangan, yaitu ${d}_{i}=+1$ ke anak kiri untuk ${f}_{i}\left(x\right)\ge 0$ dan ${d}_{i}=-1$ ke anak kanan untuk ${f}_{i}\left(x\right)<0$. Rangkaian *node* dari *root* hingga *leaf* membentuk jalur keputusan (*decision path*), dan label pada *leaf* yang dicapai menjadi prediksi pohon (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025). Ilustrasinya ditunjukkan pada Gambar 2.11.
 
 [SISIPKAN GAMBAR: ilustrasi SODT dengan *node* internal ${w}_{i}^{T}x+{b}_{i}\ge 0$, *leaf* berlabel kelas, dan satu jalur keputusan yang disorot dari *root* ke *leaf*]
 
