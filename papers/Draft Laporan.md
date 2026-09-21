@@ -1152,676 +1152,76 @@ Pada Gambar 4.5, resolusi juga dipilih secara acak. Contohnya, citra 13000141 di
 
 Selain diskalakan, citra juga dinormalisasi. Normalisasi tidak mengubah tampilan citra, tetapi nilai pikselnya berubah menjadi −2,12 hingga 2,64 (Gambar 4.5), sesuai dengan *mean* dan *std* pada Tabel 3.2. Dengan demikian, pra-pemrosesan menghasilkan variasi orientasi dan skala tanpa merusak kesesuaian anotasi, sehingga data siap digunakan untuk pelatihan *Faster* R-CNN.
 
-## Hasil dan Evaluasi Faster RCNN
- 
-1. **Analisis Konvergensi**
-Proses pelatihan model *Faster R-CNN* dilakukan selama 12 *epoch* dengan memantau pergerakan nilai fungsi kerugian (*loss*) secara berkala. Tren penurunan *loss* selama masa pelatihan disajikan pada Gambar 4.6.
- 
-![Text document](asset:sha256:0333e4604aebefb62c6cb6835db8e3feb0bc984b5527c087d788ef2ab7692026)
- 
-*Random Samples (6)
-50600075_test |5 annotations
-00041219_test |5 annotations
-12100190_test |6 annotations
-mouse_bite
-short
-spurious_copper
-mouse_bite
-open
-open
-spur
-7
-spur
-mouse_bite
-2
-7
-7
-spurious_copper
-mouse_bite
-pinhole
-spurious_copper
-N
-open
-open
-…
-2
-short
-S
-00041200_test |5 annotations
-12100159_test |9 annotations
-12100192 test|7 annotations
-mouse_bite
-?
-mouse bite Ise bite
-mouse _bite
-short
--
-pinhole
-mouse_bite
-国
-spurious_copper
-spur
-pinhole
-open
-pinhole
-spur
-open
-2
-□
-open
-spurious_copper
-pinhole
-spurious_copper
-short
-国
-√
-pinhole
-mouse_bite
-可*
- 
-Gambar 4.6 Grafik Total Training Loss Faster R-CNN selama 12 Epoch\_\_.\_\_
- 
-Berdasarkan grafik *Total Training Loss* pada Gambar 4.6, terlihat bahwa model mengalami konvergensi yang sangat stabil. Nilai *loss* total turun secara monoton dari angka 0,804 pada *epoch* pertama hingga mencapai 0,259 pada *epoch* terakhir. Pola penurunan yang mulus ini mengindikasikan bahwa model berhasil mengadaptasikan parameter bobotnya terhadap karakteristik citra cacat PCB tanpa menunjukkan gejala *overfitting* maupun *underfitting*.
- 
-Grafik *Detector Loss Breakdown* di Gambar 4.6 menunjukkan bahwa komponen *loss\_classifier* dan *loss\_box\_reg* merupakan penyumbang utama kerugian pada fase awal, sejalan dengan kompleksitas tugas regresi koordinat kontinu dan klasifikasi jenis cacat. Sementara itu, komponen *loss\_objectness* dan *loss\_rpn\_box\_reg* mencapai nilai yang sangat rendah (di bawah 0,02) sejak *epoch* ketiga. Hal ini membuktikan efisiensi *Region Proposal Network* (RPN) dalam memisahkan wilayah *foreground* cacat dari latar belakang sirkuit PCB sejak fase awal pelatihan.
- 
-1. **Kinerja Keseluruhan Kelas**
-Model diuji menggunakan himpunan data uji untuk mengevaluasi kinerja deteksi secara agregat. Metrik kinerja pada Gambar 4.7 mencatat nilai *mean Average Precision* (mAP@0.5) sebesar 0,982, yang menunjukkan tingkat kesesuaian spasial tinggi dengan *ground truth*.
- 
-.
- 
-![Text document](asset:sha256:8af7600cd1f3a46a5d4d39c74d8799a3ef7e7dfbac4a4127f76aaf1323dedb8e)
- 
-*Dataset Preprocessing Preview
-50600013_test |original
-preprocess pass 1 | flipped: no
-preprocess pass 2 | flipped: no
-mouse_bite
-mouse_bite
-mouse_bite
-pinhole
-pinhole
-pinhole
-spurious copper
-spurious copper
-spurious copper
--
-short
-short
-short
-open
-open
-open
-00041069_test |original
-preprocess pass 1 | flipped: yes
-preprocess pass 2 | flipped: no
-spur
-spur
-spur
-F
-1
-open
-mouse_bite
-mouse_bite
-open
-open
-mouse_bite
-N
-pinhole
-pinhole
-pinhole
-spur
-spur
-spur
-spurious_copper
-spurious_copper
-spurious_copper
-spur
-spur
-spur
-mousebite
-mouse_bite
-mouse_bite
-7
-20085089_test | original
-preprocess pass 1 | flipped: yes
-preprocess pass 2 | flipped: no
-57
-5
-short
-short
-short
-F
--1
-日
-open
-spur
-spur
-open
-open
-spur
-Y
-1
-open
-spur open
-spur
-open
-Spur
-mouse_bite
-mouse_bite
-mouse_bite
-L
-1
-short
-mouse_bite
-short
-short
-mouse short
-short
-mouse_bite
-short*
- 
-Gambar 4.7 Metrik Deteksi Keseluruhan Faster R-CNN pada Dataset Uji
- 
-Performa model yang sangat tinggi ini mereplikasi metodologi modifikasi pengekstrakan fitur yang diusulkan oleh (Fung et al., 2024). Integrasi komponen *SF-PSPyramid* (gabungan *Selective Feature Attention* dan *Pixel Shuffle Pyramid*) secara signifikan memperkuat kemampuan model dalam mendeteksi objek sirkuit mikro. Mekanisme atensi visual ini memungkinkan model menyalurkan informasi semantik bernilai tinggi dari lapisan terdalam ke peta fitur beresolusi tinggi tanpa memicu distorsi geometris. Hal inilah yang mendasari tingginya nilai *recall* model (0,980), yang memastikan detektor hampir tidak melewatkan satupun cacat mikro pada papan PCB uji (Fung et al., 2024).
- 
-1. **Analisis Kinerja Per Kelas Cacat**
-Analisis detail performa deteksi pada tiap kategori cacat dilakukan dengan meninjau nilai *Precision* dan *Recall* sebagaimana disajikan pada Gambar 4.8.
- 
-![Text document](asset:sha256:f6bf1ba2b24bd932ec5da46753d79ddb1d4d860f0aa929f1fd32f0abed03a277)
- 
-*Train RCNN Preprocessing Preview
-00041115_test | dataset preprocess
-RCNN pass 1 |resized 800x800 | padded 800x800 | norm -2.12RΩN4pass 2 | resized 880x880 | padded 896x896 | norm -2.12..2.64
-pinhole
-pinhole
-pinhole
--
-mouse_bite
-spurious_copper
-?
-mouse uite
-。
-mouse_bite
-spurious_copper
-mouse_bite
-mouse_bite
-spurious_copper
-mouse_bite
-open
-short
-pinhole
-open
-short
-mouse_bite
-spur
-open
-short
-pinhole
-厂
-T
-pinhole
-mouse_bite
-spur
-7
-mouse_bite
-spur
-13000141_test |dataset preprocess
-RCNN pass 1 | resized 880x880 | padded 896x896 | norm -2.1R@Ni4pass 2 | resized 720x720 | padded 736x736 | norm -2.12..2.64
-spur
-pinhole
-spur
-pinhole
-S
-mouse_bite
-pinhole
-spur
-/
-spurious copper
-Q
-mouse_bite
-4
-open
-mouse bite
-spurious_copper
-spurious_copper
-open
-open
-spur
-spur
-spur
-20085032_test | dataset preprocess
-RCNN pass 1 | resized 720x720 | padded 736x736 | norm -2.1RΩNi4pass 2 |resized 800x800 | padded 800x800 | norm -2.12..2.64
-spurious_copper
-spurious_copper
-spurious_copper
-mouse_bite
-mouse_bite
-spurious_copper
-mouse_bite
-spurious_copper
-open
-spurious_copper
-open
-open
-pinhole
-.
-spur
-open
-open
-pinhole
-openH
-F
-.
-spur
-pinhole
-F
-●
-spur
-●
-•*
- 
-Gambar 4.8 Per-Class *Precision* dan *Recall* Faster R-CNN untuk Enam Kategori Cacat
- 
-Model menunjukkan kinerja yang sangat baik pada kelas *mouse\_bite* dan *open* karena pola geometrisnya yang konsisten dan kontras terhadap latar belakang. Sebaliknya, kinerja kelas *short* dan *spurious\_copper* berada di posisi terendah. Penurunan nilai pada kedua kelas ini disebabkan oleh karakteristik geometrisnya yang kompleks seperti contohnya kelas *short* memiliki kemiripan visual yang ekstrem dengan konduktor asli, sedangkan variasi skala dan orientasi yang sangat acak pada *spurious\_copper* membuat model kesulitan, meskipun keberadaan objeknya tetap berhasil diidentifikasi dengan tingkat *recall* yang tinggi.
- 
-1. **Analisis *Confusion Matrix***
-Gambar 4.9 menyajikan matriks konfusi yang memvisualisasikan distribusi prediksi model terhadap *ground truth* untuk seluruh kategori, termasuk latar belakang (*background*). Diagonal utama matriks menunjukkan nilai yang dominan untuk setiap kelas aktual. Dominasi nilai pada diagonal ini mengonfirmasi bahwa model memiliki tingkat akurasi klasifikasi yang tinggi dengan minimal kesalahan kategorisasi antarjenis cacat.
- 
-![Text document](asset:sha256:545aca11eff007ddc7022e76daeb244a2b9d8282f8c3d1a043877547ad822f08)
- 
-*Total Training Loss
-Detector Loss Breakdown
-0.804
-loss_classifier
-0.4
-0.391
-0.390
-0.8
-中
-•
-loss_box_reg
-中
-0.351
-?
-loss_objectness
-0
-0.7
-0.316
-loss_rpn_box_reg
-0634
-0.3
-0.285
-0.27
-G
-0.274
-•
-0.265
-价
-•
-0.249
-0.6
-0.216
-9
-SS0I
-0526
-SSOI
-0.207
-0.2
-a
-8
-0.198
-0.194
-0.188
-0.5
-n
-〜
-0.470
-0153
-市
-•
-0
-0.134
-0.415
-0.395
-0.115
-T
-0.113
-0.380
-0.106
-0.4
-0.100
-市
-0.1
-Q
-0.093
-市
-*
-0.356
-市
-4
-0.072
-t
-1
-.
-0.067
-0.065
-0.062
-市
-•
-节
-0.3
-0.289
-0.274
-0.021
-0.268
-8.月17
-8.088
-0.259
-8.03
-8.033
-8.064
-8.039
-0.009
-0.008
-0.008
-8.0
-8.0
-0
-•
-0.0
-•
-0
-•
--
--
--
--
-ü
--
-0.2-
-2
-4
-6
-8
-10
-12
-2
-4
-6
-8
-10
-12
-epoch
-epoch*
- 
-Gambar 4.9 *Confusion Matrix* Deteksi Faster R-CNN pada *test set*
- 
-Baris *background* mengungkap adanya sejumlah *false positive* yang tersebar di seluruh kelas, dengan total 359 deteksi yang keliru diklasifikasikan sebagai cacat. Sebagian kecil dari cacat juga teridentifikasi sebagai *background*. Hal ini menunjukkan bahwa model masih berkecenderungan untuk mengidentifikasi pola tekstur sirkuit normal sebagai anomali, terutama untuk kelas *short* dan *spurious\_copper*. Fenomena ini disebabkan oleh tingginya kompleksitas pola jalur konduktor pada PCB yang terkadang memiliki kemiripan visual dengan cacat adisi material.
- 
-## Hasil Ekstraksi Fitur *Teacher*
- 
-1. **Statistik RoI yang ter-ekstrak**
-Tabel 4.2 dan 4.3 merangkum statistik Region of Interest (RoI) yang berhasil diekstrak dari dataset.
- 
-Tabel 4.2 Statistik Ekstraksi RoI
- 
-***Split***
- 
-***Total RoI***
- 
-***Positive RoI***
- 
-***Background RoI***
- 
-Training
- 
-1.000.000
- 
-133.936 (13,4%)
- 
-866.064 (86,6%)
- 
-Test
- 
-500.000
- 
-437.148 (87,4%)
- 
-62.852 (12,6%)
- 
-Tabel 4.3 Distribusi RoI Per kelas cacat
- 
-***Split***
- 
-**Kelas**
- 
-**Jumlah\* RoI\***
- 
-**Persentase**
- 
-Training
- 
-*open*
- 
-27.020
- 
-2,70%
- 
-*Short*
- 
-18.704
- 
-1,87%
- 
-*mouse\_bite*
- 
-26.871
- 
-2,69%
- 
-*Spur*
- 
-21.519
- 
-2,15%
- 
-*Pinhole*
- 
-19.090
- 
-1,91%
- 
-*spurious\_copper*
- 
-20.732
- 
-2,07%
- 
-Test
- 
-*open*
- 
-13.707
- 
-2,74%
- 
-*Short*
- 
-9.387
- 
-1,88%
- 
-*mouse\_bite*
- 
-11.437
- 
-2,29%
- 
-*Spur*
- 
-8.792
- 
-1,76%
- 
-*Pinhole*
- 
-9.142
- 
-1,83%
- 
-*spurious\_copper*
- 
-10.387
- 
-2,08%
- 
-Meskipun dataset pelatihan hanya terdiri dari 1.000 citra, sistem berhasil mengekstrak total 1.500.000 RoI (rata-rata 1.000 RoI per citra). Volume yang besar ini berasal dari cara kerja *Region Proposal Network* (RPN). RPN secara otomatis mengevaluasi ratusan *anchor boxes* dengan berbagai skala dan rasio aspek pada setiap citra, yang kemudian dibatasi maksimal 1.000 proposal per citra melalui *Non-Maximum Suppression* (NMS).
- 
-Selain itu, dominasi kelas *background* yang mencapai 87% adalah hal yang wajar karena sebagian besar area PCB adalah sirkuit normal. RPN memang dirancang sangat sensitif (*high recall*) untuk meminimalkan risiko cacat yang terlewat (*false negative*). Kelebihan proporsi *background* ini tidak akan menjadi masalah karena akan diseimbangkan nanti melalui teknik *negative sampling* pada tahap pelatihan SODT.
- 
-1. **Fitur Spasial 7x7**
-Untuk memvisualisasikan tensor $64\times 7\times 7$, sistem melakukan *mean pooling* pada dimensi kanal sehingga menghasilkan peta aktivasi spasial berukuran $7\times 7$. Tiga sampel representatif, yaitu kelas *background*, cacat "open", dan cacat "spur"—ditampilkan pada Gambar 4.20, 4.21, dan 4.22.
- 
-![Text document](asset:sha256:02aaf3add41ff953e5baa14c96c00c40afab687670ff93173ecd80b14064fcb9)
- 
-*Final Detection Metrics
-1.0
-0.982
-0.980
-0.924
-0.907
-0.936
-0.896
-0.853
-0.8
-0.764
-0.6
-0.4
-0.2
-0.0
-mAP@0.5:0.95
-mAP@0.5
-AP75
-AP@50:5:85
-precision
-recall
-mar_100
-fl_score*
- 
-Gambar 4.10 Peta aktivasi spasial 7×7 untuk kelas *background*
- 
-![Text document](asset:sha256:b446129dd272351e990ba625f6a74a8fb555f08bb5fafcb9eaaa67592b50313e)
- 
-*Per-Class Precision and Recal
-1.0
-0.953
-0.982
-0.964
-0.983
-0.969
-0.989
-0.994
-0.950
-0.955
-0.896
-0.822
-0.8
-0.794
-0.6
-0.4
-0.2
-Precision
-Recall
-0.0
-open
-short
-spur
-pinhole*
- 
-Gambar 4.11 Peta aktivasi spasial 7×7 untuk kelas *open*
- 
-![Text document](asset:sha256:55ad5cc745bf0364e7be9535a49ff6a14afb133ddda916e209359592b360b4f1)
- 
-*Detection Confusion Matrix
--600
-background
-0
-32
-100
-30
-22
-53
-121
--500
-open
-12
-647
-0
-0
-0
-0
-0
-short
-17
-0
-461
-0
-0
-0
-0
--400
-anull
-mouse_bite
-10
-0
-0
-576
-0
-0
-0
--300
-spur-
-15
-0
-0
-0
-468
-0
-0
--200
-pinhole
-5
-0
-0
-0
-0
-459
-0
-100
-spurious_copper
-3
-0
-0
-0
-0
-0
-467
-open
-short
-mouse_bite
-spur
-pinhole
-spurious_copper
-0
-Predicted*
- 
-Gambar 4.11 Peta aktivasi spasial 7×7 untuk kelas *spur*
- 
-Perbedaan pola aktivasi antara ketiga kelas tampak jelas. Pada kelas *background* di Gambar 4.10, aktivasi tersebar secara merata tanpa konsentrasi di area tertentu, yang mencerminkan tidak adanya anomali visual. Sebaliknya, pada kelas cacat *open* di Gambar 4.11, aktivasi terpusat di area tengah grid, menandakan bahwa fitur FPN berhasil menangkap celah pada jalur konduktor di lokasi spasial yang sesuai. Pada kelas cacat \*spur *di* \*Gambar 4.22, pola aktivasi menunjukkan konsentrasi yang lebih tajam dan terlokalisasi pada satu sisi grid, konsisten dengan karakteristik spur yang berupa tonjolan kecil di tepi jalur tembaga.
- 
-Ketiga visualisasi ini membuktikan bahwa RoI Align berhasil mempertahankan informasi spasial yang diskriminatif antar kelas. Mempertahankan struktur grid 7×7 ini sangat krusial bagi penelitian karena setiap sel grid mewakili area spasial spesifik pada citra asli. Ketika SODT membuat keputusan klasifikasi, bobot pada grid ini dapat dipetakan kembali menjadi *heatmap* yang *faithful*, yang menjamin bahwa area yang disorot pada penjelasan visual benar-benar merupakan dasar logis keputusan model, bukan sekadar perkiraan *post-hoc*.
- 
+## 4.3 Hasil Pelatihan dan Evaluasi *Faster* R-CNN
+
+*Faster* R-CNN dilatih selama 15 *epoch* dengan *hyperparameter* pada Tabel 3.5. Perkembangan *loss* total dan setiap komponennya ditunjukkan pada Gambar 4.6.
+
+![Gambar 4.6]()
+
+Gambar 4.6 *Training Loss* *Faster* R-CNN selama 15 *Epoch*
+
+*Loss* total turun dari 0,817 menjadi 0,267 dan mendatar setelah *epoch* ke-12, sehingga model telah konvergen. Penurunan tajam pada *epoch* ke-9 dan ke-12 terjadi tepat setelah laju pembelajaran diturunkan (Tabel 3.5). Di antara komponennya, *loss* regresi *bounding box* tetap menjadi yang terbesar (0,193), sedangkan *loss* RPN sudah berada di bawah 0,02 sejak *epoch* ke-2. Artinya, kesulitan utama model bukan menemukan cacat, melainkan menentukan batas *bounding box* secara presisi.
+
+Kinerja model pada data uji dirangkum dalam Tabel 4.2, bersama hasil yang dilaporkan Fung et al. (2024) pada *dataset* DeepPCB non-referensial.
+
+Tabel 4.2 Kinerja Deteksi *Faster* R-CNN pada Data Uji
+
+| Model | AP50 | AP75 | AP@50:5:85 | mAP@0,5:0,95 | *Precision* | *Recall* | F1 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| *Faster* R-CNN (Fung et al., 2024) | 0,970 | 0,900 | 0,888 | - | - | - | - |
+| *Faster* R-CNN + SF-PSPyramid (Fung et al., 2024) | 0,986 | 0,946 | 0,932 | - | - | - | - |
+| *Faster* R-CNN + SF-PSPyramid (penelitian ini) | 0,979 | 0,920 | 0,901 | 0,759 | 0,910 | 0,982 | 0,945 |
+
+*Recall* sebesar 0,982 menunjukkan bahwa hampir seluruh cacat terdeteksi. Namun, AP turun dari 0,979 (AP50) menjadi 0,759 (mAP@0,5:0,95) saat ambang IoU dinaikkan, sejalan dengan *loss* regresi *bounding box* yang tetap tinggi. Terhadap Fung et al. (2024), AP@50:5:85 model ini berada di antara *Faster* R-CNN standar dan SF-PSPyramid. Selisih 3,1 poin dari SF-PSPyramid diduga berasal dari kanal *neck* yang dikurangi menjadi 64 (Subbab 3.4).
+
+Kinerja per kelas cacat ditunjukkan pada Tabel 4.3.
+
+Tabel 4.3 Kinerja *Faster* R-CNN per Kelas Cacat
+
+| Kelas | AP@0,5:0,95 | *Precision* | *Recall* |
+| --- | --- | --- | --- |
+| *Spurious copper* | 0,889 | 0,933 | 0,991 |
+| *Pinhole* | 0,862 | 0,799 | 1,000 |
+| *Mousebite* | 0,743 | 0,948 | 0,986 |
+| *Spur* | 0,726 | 0,961 | 0,977 |
+| *Open* | 0,684 | 0,960 | 0,979 |
+| *Short* | 0,651 | 0,859 | 0,956 |
+
+AP tertinggi dicapai *spurious copper* dan *pinhole* yang berbentuk gumpalan atau lubang, sedangkan AP terendah terdapat pada *short* dan *open* yang berada pada jalur konduktor. Hal ini diduga karena batas cacat pada jalur lebih ambigu. Karena distribusi kelas relatif seimbang (Subbab 4.1), perbedaan ini tidak berasal dari jumlah data. Adapun *precision* terendah terdapat pada *pinhole* (0,799) dan *short* (0,859), yang penyebabnya terlihat pada Gambar 4.7.
+
+![Gambar 4.7]()
+
+Gambar 4.7 *Confusion Matrix* *Faster* R-CNN pada Data Uji
+
+Sebanyak 97,8% cacat terklasifikasi benar dan hanya 0,7% tertukar antarkelas. Kesalahan utama justru berasal dari 292 area *background* yang terdeteksi sebagai cacat, terutama sebagai *pinhole* (118) dan *short* (73), sehingga *precision* kedua kelas tersebut rendah. Sebaliknya, cacat yang terlewat hanya 46, sehingga model lebih cenderung mendeteksi berlebih daripada melewatkan cacat. Karena SODT dilatih meniru label *teacher*, termasuk *background* (Subbab 3.6), label yang diterimanya hampir tidak tertukar antarkelas, tetapi turut membawa kecenderungan deteksi berlebih pada *pinhole* dan *short*.
+
+## 4.4 Hasil Ekstraksi Fitur RoI dan Label *Teacher*
+
+Model *teacher* dari Subbab 4.3 selanjutnya digunakan untuk mengekstrak fitur dan label seluruh proposal RPN (Subbab 3.6), yaitu 1.000 RoI per citra. Distribusi label yang dihasilkan ditunjukkan pada Tabel 4.4.
+
+Tabel 4.4 Distribusi Label *Teacher* pada RoI Hasil Ekstraksi
+
+| Label *Teacher* | Data Latih | Data Uji |
+| --- | --- | --- |
+| *Background* | 854.164 | 431.344 |
+| *Open* | 29.288 | 15.116 |
+| *Short* | 20.214 | 10.037 |
+| *Mousebite* | 29.329 | 12.619 |
+| *Spur* | 23.213 | 9.577 |
+| *Spurious copper* | 20.964 | 9.894 |
+| *Pinhole* | 22.828 | 11.413 |
+| Total | 1.000.000 | 500.000 |
+
+Tabel 4.4 menunjukkan bahwa sebagian besar RoI dilabeli *background* oleh *teacher*, yaitu 85,4% pada data latih dan 86,3% pada data uji. Hal ini karena setiap citra hanya memuat sekitar 6–7 cacat, sedangkan proposalnya berjumlah 1.000. RoI berlabel cacat pun jauh lebih banyak daripada jumlah cacat sebenarnya, yaitu sekitar 21 RoI per cacat, karena satu cacat tertangkap oleh beberapa proposal yang saling tumpang-tindih. Dengan demikian, data yang akan dipelajari SODT didominasi *background*, sedangkan setiap cacat terwakili dari berbagai posisi proposal.
+
+Isi fitur tersebut divisualisasikan dengan merata-ratakan 64 kanal setiap RoI menjadi grid 7×7, seperti pada Gambar 4.8.
+
+![Gambar 4.8]()
+
+Gambar 4.8 Visualisasi Fitur RoI 7×7 per Kelas
+
+Pada kelas cacat, aktivasi tinggi umumnya terkumpul di tengah grid, sedangkan pada *background* aktivasi berada di tepi atau sudut. Hal ini menunjukkan bahwa *RoI Align* mempertahankan letak cacat di dalam proposal. Namun, pola antarkelas sulit dibedakan, misalnya *open*, *short*, dan *pinhole* sama-sama tampak sebagai area terang di tengah grid. Hal ini terjadi karena 64 kanal tersebut merupakan hasil pembelajaran *backbone* dan *neck* yang maknanya tidak diketahui, sehingga fitur ini tetap bersifat *black-box*. Dengan demikian, fitur RoI menyimpan informasi letak, tetapi dasar keputusannya tidak dapat dibaca langsung. Hal inilah yang ditangani SODT, karena setiap bobot *node*-nya terikat pada kanal dan posisi grid tertentu sehingga dapat dipetakan kembali menjadi *heatmap* (Subbab 3.9.2).
+
 ## Evaluasi Model Simbolik (*Sparse Oblique Decision Tree*)
  
 1. **Pelatihan TAO**
