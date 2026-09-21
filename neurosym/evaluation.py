@@ -182,6 +182,46 @@ def fpn_necessity_sufficiency(
     return float(labels[0] != base_label), float(labels[1] == base_label)
 
 
+def fpn_deletion_insertion_auc(
+    roi_align: Any,
+    fpn_features: dict[str, Tensor],
+    level_name: str,
+    box_processed: Tensor,
+    processed_size: tuple[int, int],
+    bounds: tuple[int, int, int, int],
+    order: np.ndarray,
+    base_grid: Tensor,
+    score_fn: Callable[[Tensor], float],
+    auc_steps: int = 5,
+) -> tuple[float, float]:
+    """Deletion/insertion AUC for one detection: how the score changes as top-ranked pixels are masked or added back."""
+    fx1, fy1, fx2, fy2 = bounds
+    box_shape = (fy2 - fy1, fx2 - fx1)
+    n_pos = box_shape[0] * box_shape[1]
+    level_map = fpn_features[level_name][0]
+    base = max(score_fn(base_grid), 1e-12)
+    empty = score_fn(torch.zeros_like(base_grid)) / base
+
+    del_curve, ins_curve = [1.0], [empty]  # curve ends are known without re-pooling
+    for step in range(1, auc_steps):
+        k = round(n_pos * step / auc_steps)
+        selected = np.zeros(n_pos, dtype=bool)
+        selected[order[:k]] = True
+        selected_t = torch.from_numpy(selected.reshape(box_shape)).to(level_map.device)
+        for curve, keep, from_zero in ((del_curve, ~selected_t, False), (ins_curve, selected_t, True)):
+            patched = dict(fpn_features)
+            patched[level_name] = _masked_level(
+                level_map, bounds, keep, start_from_zero=from_zero
+            ).unsqueeze(0)
+            grid = roi_align(patched, [box_processed.unsqueeze(0)], [processed_size])
+            curve.append(score_fn(grid) / base)
+    del_curve.append(empty)
+    ins_curve.append(1.0)
+
+    dx = 1.0 / auc_steps
+    return float(np.trapz(del_curve, dx=dx)), float(np.trapz(ins_curve, dx=dx))
+
+
 def _node_score_after_masking(
     detector,
     fpn_features: dict[str, Tensor],
@@ -241,14 +281,15 @@ def evaluate_faithfulness_fpn_masking(
     consecutive nodes' exact maps along the path — evidence the six steps
     weigh different regions (high similarity would mean nothing to show).
 
-    Cost note: per-node is ~2 orders of magnitude more re-pools than
-    path-level alone (depth * rankings * masking steps, per RoI). Time
-    `images[:5]` before picking a subsample size.
+    Per-node masked scores come from each node's exact map (no re-pooling); only the path-level rows re-pool.
     """
     tree = model.symbolic_tree
     detector = model.detector
     rng = np.random.default_rng(random_state)
-    path_results = {name: {"necessity": [], "sufficiency": []} for name in rankings}
+    path_results = {
+        name: {"necessity": [], "sufficiency": [], "deletion_auc": [], "insertion_auc": []}
+        for name in rankings
+    }
     node_rankings = tuple(name for name in rankings if name in ("exact", "random"))
     node_results: dict[str, dict[int, dict[str, list[float]]]] = {
         name: defaultdict(
@@ -263,6 +304,13 @@ def evaluate_faithfulness_fpn_masking(
 
     def classify(grid: Tensor) -> np.ndarray:
         return tree.predict(grid.detach().cpu().numpy().astype(np.float32).reshape(grid.shape[0], -1))
+
+    def routing_confidence(grid: Tensor) -> float:
+        # the same score the detector gives its detections
+        _, confidence = tree.route(
+            grid.detach().cpu().numpy().astype(np.float32).reshape(grid.shape[0], -1), True
+        )
+        return float(confidence[0])
 
     for image in tqdm(images, desc="FPN-masking faithfulness"):
         # Population: the hybrid's own detections at the P/R operating point,
@@ -338,6 +386,14 @@ def evaluate_faithfulness_fpn_masking(
                 )
                 path_results[name]["necessity"].append(flipped)
                 path_results[name]["sufficiency"].append(preserved)
+                if name in ("exact", "random"):  # controls skip AUC to save time
+                    del_auc, ins_auc = fpn_deletion_insertion_auc(
+                        detector.roi_align, fpn_features, level_name, box_processed,
+                        processed_size, bounds, order, pooled[row : row + 1],
+                        routing_confidence, auc_steps=auc_steps,
+                    )
+                    path_results[name]["deletion_auc"].append(del_auc)
+                    path_results[name]["insertion_auc"].append(ins_auc)
 
             # ── Per-node: does THIS node's own routing call flip? ──
             if per_node and node_rankings:
@@ -367,35 +423,32 @@ def evaluate_faithfulness_fpn_masking(
                     # Ranking-independent (same node, same box either way) —
                     # computed once, not once per ranking. Zero features in
                     # is exactly `bias` out (locked by
-                    # test_faithfulness_protocol.py) — no re-pool needed.
+                    # test_faithfulness_protocol.py).
                     base_conf = 1.0 / (1.0 + np.exp(-abs(step.score)))
                     empty_conf = 1.0 / (1.0 + np.exp(-abs(bias)))
-                    box_shape = (fy2 - fy1, fx2 - fx1)
+
+                    # A node's score is a sum over FPN pixels, so masking pixels just subtracts them — no need to re-pool.
+                    contribution = exact_fpn_contribution(
+                        tree, pooled_grid, detector.roi_align, unbatched_fpn,
+                        level_name, box_processed, processed_size, path=[step],
+                    )
+                    direction = 1.0 if step.went_left else -1.0
+                    signed_box = (contribution.sum(0) * direction)[fy1:fy2, fx1:fx2].detach().cpu().numpy().reshape(-1).astype(np.float64)
+                    node_map_box = contribution.abs().sum(0)[fy1:fy2, fx1:fx2].detach().cpu().numpy()
+
+                    def node_score(sel_flat: np.ndarray, *, insert: bool) -> float:
+                        """This node's `w.x + b` with `sel_flat` kept (insert) or masked."""
+                        # Sum what is kept (not total - masked) so a fully masked node gives exactly bias, not float noise.
+                        kept = sel_flat if insert else ~sel_flat
+                        return bias + float(signed_box[kept].sum())
 
                     def conf_ratio(sel_flat: np.ndarray, *, insert: bool) -> float:
-                        """Confidence after keeping/masking `sel_flat`, over unmasked.
-
-                        Reuses `weight`/`bias` from the enclosing loop — a
-                        node's own weights never change while masking it.
-                        """
-                        keep = sel_flat.reshape(box_shape) if insert else ~sel_flat.reshape(box_shape)
-                        level = _masked_level(
-                            level_map, bounds, torch.from_numpy(keep).to(model.device),
-                            start_from_zero=insert,
-                        )
-                        score = _node_score_after_masking(
-                            detector, fpn_features, level_name, level,
-                            box_processed, processed_size, weight, bias,
-                        )
+                        """Confidence after keeping/masking `sel_flat`, over unmasked."""
+                        score = node_score(sel_flat, insert=insert)
                         return (1.0 / (1.0 + np.exp(-abs(score)))) / base_conf
 
                     for name in node_rankings:
                         if name == "exact":
-                            node_map_full = exact_fpn_contribution(
-                                tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                                level_name, box_processed, processed_size, path=[step],
-                            ).abs().sum(0)
-                            node_map_box = node_map_full[fy1:fy2, fx1:fx2].detach().cpu().numpy()
                             exact_node_maps.append(node_map_box)
                             order = np.argsort(node_map_box.reshape(-1))[::-1]
                             # Fraction of box positions with any contribution
@@ -410,14 +463,7 @@ def evaluate_faithfulness_fpn_masking(
 
                         sel = np.zeros(n_pos, dtype=bool)
                         sel[order[:budget]] = True
-                        nec_score = _node_score_after_masking(
-                            detector, fpn_features, level_name,
-                            _masked_level(
-                                level_map, bounds,
-                                torch.from_numpy(~sel.reshape(box_shape)).to(model.device),
-                            ),
-                            box_processed, processed_size, weight, bias,
-                        )
+                        nec_score = node_score(sel, insert=False)
                         flipped = (nec_score >= 0.0) != step.went_left
                         bucket = node_results[name][depth]
                         bucket["flip"].append(float(flipped))
@@ -452,6 +498,9 @@ def evaluate_faithfulness_fpn_masking(
             name: {
                 "necessity_prediction_flip_rate": _mean(scores["necessity"]),
                 "sufficiency_prediction_preservation": _mean(scores["sufficiency"]),
+                # nan for controls (they skip AUC)
+                "deletion_auc": _mean(scores["deletion_auc"]),
+                "insertion_auc": _mean(scores["insertion_auc"]),
                 "evaluated_roi_count": len(scores["necessity"]),
             }
             for name, scores in path_results.items()

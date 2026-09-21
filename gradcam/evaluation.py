@@ -17,7 +17,7 @@ from torchvision.ops import box_iou
 from tqdm import tqdm
 
 from neuro.faster_rcnn import NeuroFasterRCNN
-from neurosym.evaluation import _mean, fpn_necessity_sufficiency
+from neurosym.evaluation import _mean, fpn_deletion_insertion_auc, fpn_necessity_sufficiency
 from neurosym.heatmap import _fpn_box_bounds, compute_exact_attribution
 from neurosym.hybrid import NeuroSymbolicDetector
 from symbolic.evaluation import _FAITHFULNESS_CELL_BUDGET_FRACTION
@@ -56,11 +56,18 @@ def evaluate_gradcam_faithfulness(
     """
     rng = np.random.default_rng(random_state)
     scores: dict[str, dict[str, list[float]]] = {
-        name: {"necessity": [], "sufficiency": []} for name in ("gradcam", "random")
+        name: {"necessity": [], "sufficiency": [], "deletion_auc": [], "insertion_auc": []}
+        for name in ("gradcam", "random")
     }
 
     def classify(grid: Tensor) -> np.ndarray:
         return _neural_labels(model, grid)
+
+    def class_probability(grid: Tensor, label: int) -> float:
+        # Grad-CAM's confidence: probability of the detected class.
+        with torch.no_grad():
+            logits = model.box_predictor.classifier(model.box_head(grid))
+        return float(F.softmax(logits, dim=1)[0, label])
 
     for image in tqdm(images, desc="Grad-CAM FPN-masking faithfulness"):
         with torch.inference_mode():
@@ -80,6 +87,7 @@ def evaluate_gradcam_faithfulness(
                 continue
             n_pos = (fy2 - fy1) * (fx2 - fx1)
             budget = max(int(n_pos * budget_fraction), 1)
+            base_grid = maps["pooled_features"][row : row + 1]
             orders = {
                 "gradcam": np.argsort(cam[fy1:fy2, fx1:fx2].cpu().numpy().reshape(-1))[::-1],
                 "random": rng.permutation(n_pos),
@@ -92,11 +100,20 @@ def evaluate_gradcam_faithfulness(
                 )
                 scores[name]["necessity"].append(flipped)
                 scores[name]["sufficiency"].append(preserved)
+                del_auc, ins_auc = fpn_deletion_insertion_auc(
+                    model.roi_align, maps["fpn_features"], level_name, box,
+                    maps["processed_size"], bounds, order, base_grid,
+                    lambda g: class_probability(g, int(labels[row])),
+                )
+                scores[name]["deletion_auc"].append(del_auc)
+                scores[name]["insertion_auc"].append(ins_auc)
 
     return {
         name: {
             "necessity_prediction_flip_rate": _mean(values["necessity"]),
             "sufficiency_prediction_preservation": _mean(values["sufficiency"]),
+            "deletion_auc": _mean(values["deletion_auc"]),
+            "insertion_auc": _mean(values["insertion_auc"]),
             "evaluated_roi_count": len(values["necessity"]),
         }
         for name, values in scores.items()

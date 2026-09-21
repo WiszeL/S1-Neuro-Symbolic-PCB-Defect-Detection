@@ -1,4 +1,4 @@
-"""Tree layout stays bounded, even with a live off-path grandchild."""
+"""Full-tree layout: every live node drawn, uniform spacing, coords in sync."""
 
 import numpy as np
 import torch
@@ -92,38 +92,37 @@ def _build_explanation():
     return explanation, tree
 
 
-def test_pruned_tree_layout_stays_bounded_even_with_a_live_off_path_grandchild():
+def _live_internal_nodes(tree) -> set[int]:
+    return {
+        i for i in range(tree.num_internal_nodes)
+        if not (np.all(tree.node_weights[i] == 0.0) and tree.node_bias[i] == 0.0)
+    }
+
+
+def test_full_tree_layout_shows_every_live_node_including_off_path_ones():
+    # The forced-path tree has a live off-path grandchild on purpose: a path-only
+    # layout would drop it, the full tree must draw it.
     explanation, tree = _build_explanation()
     layout = _pruned_tree_layout(explanation, tree, class_names=("open", "spur"))
-    # Path nodes + one off-path sibling per level + the final leaf — never
-    # the whole tree (up to 2**DEPTH leaves), regardless of what's pruned.
-    assert len(layout.visible_nodes) <= 2 * DEPTH + 2
+    live = _live_internal_nodes(tree)
+    off_path = live - set(layout.active_nodes)
+    assert off_path, "fixture should have live off-path nodes"
+    assert live <= set(layout.coords)
 
 
-def test_pruned_tree_layout_coords_cover_every_visible_node():
-    # visible_nodes and coords come from two separate walks (drawing structure
-    # vs. drawing position) — if they ever disagree, rendering hits a
-    # KeyError on a missing coord.
+def test_full_tree_layout_never_overlaps_and_keeps_a_minimum_gap():
     explanation, tree = _build_explanation()
     layout = _pruned_tree_layout(explanation, tree, class_names=("open", "spur"))
-    assert set(layout.coords) == layout.visible_nodes
-
-
-def test_pruned_tree_layout_sibling_gap_never_shrinks_with_depth():
-    # Regression: the old "x = average of children" layout squeezed this
-    # tree's shape (one path node + one dangling leaf per level) tighter at
-    # every level. Gap must stay constant instead.
-    explanation, tree = _build_explanation()
-    layout = _pruned_tree_layout(explanation, tree, class_names=("open", "spur"))
-    xs_per_y: dict[float, list[float]] = {}
+    assert len(set(layout.coords.values())) == len(layout.coords)  # no two nodes share a spot
+    rows: dict[float, list[float]] = {}
     for x, y in layout.coords.values():
-        xs_per_y.setdefault(round(y, 6), []).append(x)
-    gaps = [max(xs) - min(xs) for xs in xs_per_y.values() if len(xs) > 1]
-    assert len(set(gaps)) == 1
+        rows.setdefault(round(y, 6), []).append(x)
+    for xs in rows.values():
+        xs = sorted(xs)
+        assert all(b - a >= 1.0 - 1e-9 for a, b in zip(xs, xs[1:]))  # one unit per slot, any depth
 
 
 if __name__ == "__main__":
-    test_pruned_tree_layout_stays_bounded_even_with_a_live_off_path_grandchild()
-    test_pruned_tree_layout_coords_cover_every_visible_node()
-    test_pruned_tree_layout_sibling_gap_never_shrinks_with_depth()
+    test_full_tree_layout_shows_every_live_node_including_off_path_ones()
+    test_full_tree_layout_never_overlaps_and_keeps_a_minimum_gap()
     print("OK")

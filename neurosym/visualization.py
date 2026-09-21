@@ -202,10 +202,12 @@ class _TreeLayout(NamedTuple):
     active_nodes: dict[int, dict[str, Any]]
     num_internal: int
     leaf_node: int
-    visible_nodes: set[int]
     visible_edges: list[tuple[int, int, str]]
     leaf_override: dict[int, str]
     coords: dict[int, tuple[float, float]]
+
+
+_TREE_Y_STEP = 2.0  # row height; the margin panel uses the same rows
 
 
 def _pruned_tree_layout(
@@ -213,88 +215,58 @@ def _pruned_tree_layout(
     symbolic_tree: Any,
     class_names: tuple[str, ...],
 ) -> _TreeLayout:
-    """Path + immediate off-path siblings, laid out top-to-bottom.
-
-    Path stays in a fixed column, one dangling leaf per level at a fixed
-    offset — spacing never shrinks with depth (see `coords` below).
-    """
+    """The whole tree, top to bottom. Dead subtrees collapse into one leaf so only live branches take room."""
     active_nodes = {n["node_index"]: n for n in explanation["node_explanations"]}
-    tree_depth = symbolic_tree.max_depth
-    num_internal = (2**tree_depth) - 1
+    num_internal = (2**symbolic_tree.max_depth) - 1
     leaf_node = explanation["symbolic_leaf_index"] + num_internal
 
-    # Pruned = all-zero weights and bias.
-    pruned_nodes = set()
-    for idx in range(num_internal):
+    # Dead subtree: nothing in it can change the answer, so draw it as one leaf.
+    pruned_nodes: set[int] = set()
+    for idx in range(num_internal - 1, -1, -1):
+        left, right = idx * 2 + 1, idx * 2 + 2
         if (
             np.all(symbolic_tree.node_weights[idx] == 0.0)
             and symbolic_tree.node_bias[idx] == 0.0
+            and (left >= num_internal or left in pruned_nodes)
+            and (right >= num_internal or right in pruned_nodes)
         ):
             pruned_nodes.add(idx)
 
-    visible_nodes = set()
-    visible_edges = []
-    leaf_override = {}
-    path_node_indices = set(active_nodes.keys())
+    visible_edges: list[tuple[int, int, str]] = []
+    leaf_override: dict[int, str] = {}
+    coords: dict[int, tuple[float, float]] = {}
+    next_slot = 0
 
-    def build_pruned_tree(node):
-        visible_nodes.add(node)
-        if node >= num_internal:
-            return
+    def build(node: int, depth: int) -> float:
+        nonlocal next_slot
         if node in pruned_nodes:
             # Collapsed pure subtree shows one label.
             curr = node
             while curr < num_internal:
                 curr = curr * 2 + 1
-            leaf_offset = curr - num_internal
-            label_idx = int(symbolic_tree.leaf_labels[leaf_offset])
+            label_idx = int(symbolic_tree.leaf_labels[curr - num_internal])
             # Tree names include background (7); detector names don't (6) — index carefully.
             if symbolic_tree.class_names is not None:
                 leaf_override[node] = symbolic_tree.class_names[label_idx]
             else:
                 leaf_override[node] = class_names[label_idx - 1]
-            return
-        if node not in path_node_indices:
-            # Off-path branch, not pruned but not walked either — collapse
-            # without recursing, so it doesn't drag its own subtree in.
-            leaf_override[node] = "…"
-            return
+        if node >= num_internal or node in pruned_nodes:
+            x = float(next_slot)
+            next_slot += 1
+        else:
+            left, right = node * 2 + 1, node * 2 + 2
+            visible_edges.append((node, left, "left"))
+            visible_edges.append((node, right, "right"))
+            x = (build(left, depth + 1) + build(right, depth + 1)) / 2.0
+        coords[node] = (x, -depth * _TREE_Y_STEP)
+        return x
 
-        left = node * 2 + 1
-        right = node * 2 + 2
-        visible_edges.append((node, left, "left"))
-        visible_edges.append((node, right, "right"))
-        build_pruned_tree(left)
-        build_pruned_tree(right)
-
-    build_pruned_tree(0)
-
-    # This tree is always a straight line with one dangling leaf per level
-    # (never two live subtrees) — a generic "x = average of children" layout
-    # squeezes that shape, since a deep node's position keeps averaging back
-    # toward its own narrowing subtree. Keep the path in a fixed column
-    # instead and hang each level's dangling side at a fixed offset, so
-    # spacing never shrinks no matter how deep the path goes.
-    coords: dict[int, tuple[float, float]] = {}
-    y_step, x_step = 2.5, 40.0
-    node, depth = 0, 0
-    while node < num_internal:
-        coords[node] = (0.0, -depth * y_step)
-        left, right = node * 2 + 1, node * 2 + 2
-        taken = left if _is_ancestor(left, leaf_node) else right
-        dangling = right if taken == left else left
-        coords[dangling] = (
-            -x_step if dangling == left else x_step,
-            -(depth + 1) * y_step,
-        )
-        node, depth = taken, depth + 1
-    coords[node] = (0.0, -depth * y_step)  # final leaf, still on the path
+    build(0, 0)
 
     return _TreeLayout(
         active_nodes=active_nodes,
         num_internal=num_internal,
         leaf_node=leaf_node,
-        visible_nodes=visible_nodes,
         visible_edges=visible_edges,
         leaf_override=leaf_override,
         coords=coords,
@@ -348,6 +320,109 @@ def _draw_heatmap_panel(
     axis.axis("off")
 
 
+def _node_margin(score: float) -> float:
+    """How sure a node's call was: 0.5 = coin flip, 1.0 = certain."""
+    return float(1.0 / (1.0 + np.exp(-abs(score))))
+
+
+def _draw_full_tree(
+    axis: plt.Axes, layout: _TreeLayout, label_name: str
+) -> None:
+    active_nodes, num_internal, leaf_node = layout.active_nodes, layout.num_internal, layout.leaf_node
+    coords, leaf_override = layout.coords, layout.leaf_override
+
+    for parent, child, side in layout.visible_edges:
+        child_active = parent in active_nodes and _is_ancestor(child, leaf_node)
+        color = (
+            "#388e3c" if (child_active and side == "left")
+            else ("#d32f2f" if (child_active and side == "right") else "#e0e0e0")
+        )
+        axis.plot(
+            [coords[parent][0], coords[child][0]],
+            [coords[parent][1], coords[child][1]],
+            color=color, lw=3 if child_active else 1, zorder=2 if child_active else 1,
+        )
+
+    for node in layout.coords:
+        x, y = coords[node]
+        is_leaf = (node >= num_internal) or (node in leaf_override)
+        is_active = (
+            (node in active_nodes)
+            or (node == leaf_node)
+            or (node in leaf_override and _is_ancestor(node, leaf_node))
+        )
+        ec = "black" if is_active else "#9e9e9e"
+        lw = 2 if is_active else 1
+        font_size = 10 if is_active else 8
+        weight = "bold" if is_active else "normal"
+
+        if is_leaf:
+            if node in leaf_override:
+                label = leaf_override[node].replace("__background__", "bg")
+            else:
+                label = label_name if node == leaf_node else f"L{node - num_internal}"
+            # A leaf is never on `active_nodes` (only internal path nodes carry a
+            # score), so "landed on this leaf" and `is_active` agree.
+            fc = "#4caf50" if is_active else "#f5f5f5"
+            if is_active:
+                ec = "#1b5e20"
+            axis.text(
+                x, y, label, ha="center", va="center", fontsize=font_size, weight=weight,
+                bbox=dict(boxstyle="round,pad=0.3", fc=fc, ec=ec, lw=lw, alpha=1.0 if is_active else 0.6),
+                zorder=3, rotation=90, rotation_mode="anchor",
+            )
+        else:
+            label = f"{active_nodes[node]['score']:.2f}" if node in active_nodes else f"N{node}"
+            axis.text(
+                x, y, label, ha="center", va="center", fontsize=font_size, weight=weight,
+                bbox=dict(
+                    boxstyle="circle,pad=0.2", fc="#e1f5fe" if is_active else "#f5f5f5",
+                    ec=ec, lw=lw, alpha=1.0 if is_active else 0.6,
+                ),
+                zorder=3,
+            )
+
+    xs = [x for x, _ in coords.values()]
+    ys = [y for _, y in coords.values()]
+    axis.set_xlim(min(xs) - 1.0, max(xs) + 1.0)
+    axis.set_ylim(min(ys) - 1.5, 1.5)
+    axis.axis("off")
+
+
+def _draw_routing_margin_panel(
+    axis: plt.Axes, explanation: dict[str, Any], symbolic_tree: Any
+) -> None:
+    """One bar per visited node, on the same row as that node. Bar = distance from the decision boundary; label = the node's confidence. Pruned nodes are skipped."""
+    confidence = 1.0
+    for node in explanation["node_explanations"]:
+        score = float(node["score"])
+        skipped = not np.any(symbolic_tree.node_weights[node["node_index"]] != 0.0)
+        margin = 1.0 if skipped else _node_margin(score)
+        confidence *= margin
+        y = -node["depth"] * _TREE_Y_STEP
+        went_left = node["decision"] == "left"
+        axis.barh(
+            y, 0.0 if skipped else abs(score), height=1.1,
+            color="#388e3c" if went_left else "#d32f2f", alpha=0.85, zorder=2,
+        )
+        axis.text(
+            0.0 if skipped else abs(score), y,
+            "  pruned, skipped" if skipped
+            else f"  N{node['node_index']} {node['decision'].upper()}  σ={margin:.4f}",
+            va="center", ha="left", fontsize=9, zorder=3,
+        )
+    axis.set_xlabel("|w·x + b|  (distance from the decision boundary)")
+    axis.set_yticks([])
+    axis.margins(x=0.45)
+    axis.grid(axis="x", alpha=0.25)
+    for side in ("top", "right", "left"):
+        axis.spines[side].set_visible(False)
+    axis.set_title(
+        f"Routing margin per node\nΠσ = {confidence:.4f}   detection score = {explanation['score']:.4f}",
+        fontsize=12, weight="bold",
+    )
+
+
 def draw_neurosymbolic_explanation(
     image_tensor: torch.Tensor,
     detection_result: dict[str, torch.Tensor],
@@ -359,113 +434,34 @@ def draw_neurosymbolic_explanation(
     extra_panel_func: Any = None,
     show_path_panel: bool = False,
 ) -> None:
+    """Two figures: the full tree with per-node routing margins, then the heatmaps."""
     label_name = class_names[explanation["label"] - 1]
-
     node_count = len(explanation["node_explanations"])
-
-    if extra_panel_func is not None:
-        plt.figure(figsize=(18, max(8, 4 * node_count)))
-        gs = gridspec.GridSpec(1, 3, width_ratios=[1.5, 1, 1], wspace=0.1)
-    else:
-        plt.figure(figsize=(15, max(8, 4 * node_count)))
-        gs = gridspec.GridSpec(1, 2, width_ratios=[1.5, 1], wspace=0.15)
-
-    # Tree panel
-    ax_tree = plt.subplot(gs[0])
-    ax_tree.axis("off")
-    ax_tree.set_title("Pruned SODT Tree", fontsize=16, weight="bold")
-
     layout = _pruned_tree_layout(explanation, symbolic_tree, class_names)
-    active_nodes = layout.active_nodes
-    num_internal = layout.num_internal
-    leaf_node = layout.leaf_node
-    visible_nodes = layout.visible_nodes
-    visible_edges = layout.visible_edges
-    leaf_override = layout.leaf_override
-    coords = layout.coords
 
-    for parent, child, side in visible_edges:
-        is_active_parent = parent in active_nodes
-        child_active = is_active_parent and _is_ancestor(child, leaf_node)
-
-        color = (
-            "#388e3c"
-            if (child_active and side == "left")
-            else ("#d32f2f" if (child_active and side == "right") else "#e0e0e0")
-        )
-        lw = 3 if child_active else 1
-        zorder = 2 if child_active else 1
-        ax_tree.plot(
-            [coords[parent][0], coords[child][0]],
-            [coords[parent][1], coords[child][1]],
-            color=color,
-            lw=lw,
-            zorder=zorder,
-        )
-
-    for node in visible_nodes:
-        x, y = coords[node]
-        is_leaf = (node >= num_internal) or (node in leaf_override)
-        is_active = (
-            (node in active_nodes)
-            or (node == leaf_node)
-            or (node in leaf_override and _is_ancestor(node, leaf_node))
-        )
-
-        alpha = 1.0 if is_active else 0.5
-        ec = "black" if is_active else "#9e9e9e"
-        lw = 2 if is_active else 1
-        font_size = 11 if is_active else 9
-
-        if is_leaf:
-            if node in leaf_override:
-                label = leaf_override[node]
-            else:
-                label = (
-                    f"{label_name}" if node == leaf_node else f"L{node - num_internal}"
-                )
-
-            # A leaf is never on `active_nodes` (only internal path nodes
-            # carry a score), so "landed on this leaf" and `is_active` agree.
-            fc = "#4caf50" if is_active else "#f5f5f5"
-            if is_active:
-                ec = "#1b5e20"
-            bbox = dict(boxstyle="round,pad=0.3", fc=fc, ec=ec, lw=lw, alpha=alpha)
-            ax_tree.text(
-                x, y, label, ha="center", va="center",
-                fontsize=font_size, weight="bold" if is_active else "normal",
-                bbox=bbox, zorder=3, rotation=90, rotation_mode="anchor",
-            )
-        else:
-            label = (
-                f"{active_nodes[node]['score']:.2f}"
-                if node in active_nodes
-                else f"N{node}"
-            )
-            fc = "#e1f5fe" if is_active else "#f5f5f5"
-            bbox = dict(boxstyle="circle,pad=0.2", fc=fc, ec=ec, lw=lw, alpha=alpha)
-            ax_tree.text(
-                x, y, label, ha="center", va="center",
-                fontsize=font_size, weight="bold" if is_active else "normal",
-                bbox=bbox, zorder=3,
-            )
-
-    # Fit to the tree actually drawn, not a fixed depth.
-    min_final_x = min(x for x, y in coords.values())
-    max_final_x = max(x for x, y in coords.values())
-    min_final_y = min(y for x, y in coords.values())
-    ax_tree.set_xlim(min_final_x - 8, max_final_x + 8)
-    ax_tree.set_ylim(min_final_y - 1.0, 1.0)
-
-    # Heatmap panel
-    has_exact = (
-        "projected_exact_attribution_on_proposal_box"
-        in explanation["node_explanations"][0]
+    # ── Figure 1: full tree (path highlighted) + routing margin per node, rows shared ──
+    slots = max(x for x, _ in layout.coords.values()) + 1.0
+    tree_width = max(9.0, 0.45 * slots)
+    fig_tree = plt.figure(figsize=(tree_width + 5.5, 1.5 * (symbolic_tree.max_depth + 1) + 1.5))
+    gs_tree = gridspec.GridSpec(1, 2, width_ratios=[tree_width, 5.5], wspace=0.04, figure=fig_tree)
+    ax_tree = fig_tree.add_subplot(gs_tree[0])
+    _draw_full_tree(ax_tree, layout, label_name)
+    ax_tree.set_title(
+        f"SODT tree — #{selected_number} {label_name} {explanation['score']:.2f}   "
+        "(green=went left, red=went right, node label = its score, grey = not visited)",
+        fontsize=13, weight="bold",
     )
+    ax_margin = fig_tree.add_subplot(gs_tree[1], sharey=ax_tree)
+    _draw_routing_margin_panel(ax_margin, explanation, symbolic_tree)
+
+    # ── Figure 2: per-node heatmaps (+ Grad-CAM) ──
+    has_exact = "projected_exact_attribution_on_proposal_box" in explanation["node_explanations"][0]
     show_path_panel = show_path_panel and has_exact
-    panel_count = node_count + (1 if show_path_panel else 0)
+    columns = 2 if extra_panel_func is not None else 1
+    fig_maps = plt.figure(figsize=(7 * columns, max(8, 4 * (node_count + (1 if show_path_panel else 0)))))
+    gs = gridspec.GridSpec(1, columns, wspace=0.1, figure=fig_maps)
     gs_right = gridspec.GridSpecFromSubplotSpec(
-        panel_count, 1, subplot_spec=gs[1], hspace=0.4
+        node_count + (1 if show_path_panel else 0), 1, subplot_spec=gs[0], hspace=0.4
     )
 
     proposal_box = explanation["proposal_box"]
@@ -473,7 +469,7 @@ def draw_neurosymbolic_explanation(
 
     panel_offset = 0
     if show_path_panel:
-        axis = plt.subplot(gs_right[0])
+        axis = fig_maps.add_subplot(gs_right[0])
         _draw_heatmap_panel(
             axis, image_tensor,
             explanation["projected_path_exact_attribution_on_proposal_box"],
@@ -487,29 +483,26 @@ def draw_neurosymbolic_explanation(
         )
         panel_offset = 1
 
+    heatmap_key = (
+        "projected_exact_attribution_on_proposal_box" if has_exact
+        else "projected_node_heatmap_on_proposal_box"
+    )
+    title_prefix = "SODT heatmap" if has_exact else "SODT heatmap (pooled-grid, no FPN context)"
     for axis_index, node in enumerate(explanation["node_explanations"]):
-        axis = plt.subplot(gs_right[axis_index + panel_offset])
-        heatmap_key = (
-            "projected_exact_attribution_on_proposal_box"
-            if has_exact
-            else "projected_node_heatmap_on_proposal_box"
-        )
+        axis = fig_maps.add_subplot(gs_right[axis_index + panel_offset])
         _draw_heatmap_panel(axis, image_tensor, node[heatmap_key], proposal_box, detection_box)
-        evidence = node.get("positive_evidence_sum", 0.0)
-        title_prefix = "SODT heatmap" if has_exact else "SODT heatmap (pooled-grid, no FPN context)"
         axis.set_title(
             f"{title_prefix} — Depth {node['depth'] + 1} | Node {node['node_index']}\n"
-            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()} "
-            f"(evidence {evidence:.2f})"
+            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}  "
+            f"margin σ={_node_margin(node['score']):.4f} "
+            f"(evidence {node.get('positive_evidence_sum', 0.0):.2f})"
         )
 
     if extra_panel_func is not None:
-        ax_extra = plt.subplot(gs[2])
-        extra_panel_func(ax_extra)
+        extra_panel_func(fig_maps.add_subplot(gs[1]))
 
     if has_exact:
-        plt.figtext(0.5, 0.0, _SODT_HEATMAP_FOOTNOTE, ha="center", va="bottom", fontsize=7, wrap=True)
+        fig_maps.text(0.5, 0.0, _SODT_HEATMAP_FOOTNOTE, ha="center", va="bottom", fontsize=7, wrap=True)
 
     plt.show()
     plt.close("all")
-

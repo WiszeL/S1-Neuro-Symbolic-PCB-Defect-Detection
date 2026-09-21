@@ -1100,207 +1100,58 @@ Seluruhnya dibandingkan dengan Grad-CAM, yang dihitung pada peta fitur *neck* te
 8. Deteksi kedua model dan *ground truth* ditampilkan berdampingan, dengan jalur keputusan dan *heatmap* setiap *node* di samping peta Grad-CAM.
 
 
-#
- 
-3. HASIL DAN PEMBAHASAN
-Bab ini membahas secara komprehensif hasil dari implementasi arsitektur Neuro-Symbolic dengan kombinasi Faster R-CNN dan SODT dibandingkan dengan metode penjelasan baseline berupa Grad-CAM dalam konteks deteksi cacat pada Printed Circuit Board (PCB). Pembahasan mencakup rincian lingkungan pengujian, evaluasi masing-masing model, komparasi visual, hingga analisis kegagalan (failure cases).
- 
-1. Lingkungan Implementasi dan Dataset
-Eksperimen dalam penelitian ini dilakukan pada lingkungan komputasi dengan spesifikasi perangkat keras dan perangkat lunak yang mumpuni untuk melatih model *deep learning* dan *decision tree*.
- 
-Perangkat keras yang digunakan meliputi prosesor Intel Core i5-13500 dan unit pemroses grafis (GPU) NVIDIA RTX 3060. Lingkungan perangkat lunak dibangun di atas sistem bahasa pemrograman Python versi 3.12 dengan memanfaatkan *framework* PyTorch versi terbaru yang kompatibel. Seluruh tahapan pelatihan dan pengujian dijalankan sepenuhnya mengikuti skema pembagian dataset DeepPCB serta penetapan *hyperparameter* yang telah diuraikan pada BAB sebelumnya.
- 
-2. Hasil Persiapan Dataset
-Tahap persiapan dataset berhasil mentransformasi data mentah DeepPCB menjadi representasi numerik yang terstruktur dan siap dikonsumsi oleh arsitektur deteksi objek. Melalui proses partisi, validasi, dan standardisasi anotasi, seluruh tahapan berjalan sesuai dengan rancangan metodologis yang telah ditetapkan.
- 
-1. **Partisi dan Distribusi Data**
-Proses partisi deterministik berdasarkan indeks partisi yang telah ditetapkan berhasil mengalokasikan 1.000 citra untuk himpunan pelatihan dan 500 citra untuk himpunan pengujian, sesuai dengan proporsi 66,67% dan 33,33%. Tidak ditemukan *overlap* antara kedua himpunan data, sehingga objektivitas evaluasi pada fase pengujian tetap terjaga.
- 
-Tabel 4.1 merangkum statistik keseluruhan dari kedua himpunan data. Dataset pelatihan memuat total 6.873 anotasi cacat dengan rata-rata 6,87 kotak pembatas per citra. Sementara itu, dataset pengujian mengandung 3.140 anotasi dengan rata-rata 6,28 kotak per citra. Seluruh citra pada kedua himpunan data memiliki minimal satu anotasi cacat, mengonfirmasi bahwa tidak ada citra kosong yang lolos ke dalam pipeline eksperimen.
- 
-Tabel 4.1 Statistik Partisi Dataset DeepPCB
- 
-**Metrik**
- 
-***Train Set***
- 
-***Test Set***
- 
-Jumlah Citra
- 
-1.000
- 
-500
- 
-Total Anotasi
- 
-6.873
- 
-3.140
- 
-Rata-rata Anotasi/Citra
- 
-6,87
- 
-6,28
- 
-Minimum Anotasi Citra
- 
-1
- 
-2
- 
-Maximum Anotasi Citra
- 
-15
- 
-13
- 
-Citra Kosong
- 
-0
- 
-0
- 
-1. **Distribusi Kelas Cacat**
-Distribusi anotasi per kelas cacat pada kedua himpunan data ditampilkan pada Gambar 4.1 dan Gambar 4.2. Pada dataset pelatihan, kelas *mouse\_bite* mendominasi dengan sekitar 1.380 anotasi (20,1%), diikuti oleh kelas *open* dengan 1.280 anotasi (18,6%). Kelas *pinhole* memiliki representasi terendah dengan sekitar 1.010 anotasi (14,7%). Pola distribusi serupa terlihat pada dataset pengujian, di mana kelas *open* memiliki proporsi tertinggi sekitar 650 anotasi atau 20,7% dan kelas *pinhole* serta *spurious\_copper* memiliki proporsi terendah sekitar 465 hingga 470 anotasi atau 14,8% hingga 15,0%.
- 
-![Text document](asset:sha256:df0f527618e8a09b155ae0bcbf4011b8f6bb4c89343f2136f8227cf57c2fc8a9)
- 
-*1
-spur
-pinhole
-20085000_test.jpg
-mousebite
-•
-spurious_copper
-2
-mouse_bite
-「
-spur*
- 
-Gambar 4.1 Distribusi anotasi per kelas pada *training set.*
- 
-![Text document](asset:sha256:336ec358889ca6a84ef8ca4fd0b1e985bcb11dd37e812d27a740ecda25205386)
- 
-*Model Faster RCNN
-Input
-Backbone
-Lokalisasi
-CNN
-FPN
-RPN
-Rol Align
--
-Klasifikasi
-Dataset Simbolik
-Fitur Spasial 7x7
-Hasil Prediksi
-class prediction
-Koordinat Bbox
-bbox prediction*
- 
-Gambar 4.2 Distribusi anotasi per kelas pada *test set.*
- 
-1. **Kualitas Anotasi**
-Validasi visual terhadap sampel acak anotasi, sebagaimana ditunjukkan pada Gambar 4.3, mengonfirmasi bahwa seluruh kotak pembatas telah ter-petakan dengan presisi pada wilayah cacat yang sesuai. Format koordinat spasial yang diterapkan pada anotasi geometris berhasil mempertahankan korespondensi antara anotasi dan citra target berukuran 640×640 piksel.
- 
-![Text document](asset:sha256:b6e08eb555049c63c5fbf1dd2ad76420f400a1f1bf5bc1df31542ab10cfecd23)
- 
-*Model Faster RCNN
-Input
-Backbone
-Lokalisasi
-bbox prediction
-CNN
-FPN
-RPN
-RolAlign
-)
-)
-Klasifikasi
-class prediction
-Model Neuro-Symbolic (Modelyang diusulkan)
-Input
-Backbone
-FPN
-RPN
-RolAlign
-Lokalisasi
-bbox prediction
-CNN
--)
-Klasifikasi
-oleh SODT
-class prediction
-penjelasan
-heatmap
-Proses Klasifikasi dapat
-dilacak/interpretasi*
- 
-Gambar 4.3 Sampel acak citra PCB dengan anotasi *bounding box ground truth*
- 
-Seluruh enam kelas cacat terdeteksi dalam *dataset* dengan representasi visual yang jelas. Tidak ditemukan anotasi yang mengalami distorsi geometris, koordinat yang keluar dari batas kanvas, atau kotak dengan dimensi tidak valid.
- 
-3. Hasil Pra-Pemrosesan Dataset
-Prapemrosesan dataset dilakukan melalui dua pipeline transformasi yang terpisah untuk memastikan konsistensi spasial antara matriks piksel dan anotasi geometris. Hasil visualisasi prapemrosesan menunjukkan bahwa sinkronisasi koordinat berjalan presisi selama transformasi geometris.
- 
-1. **Augmentasi**
-Gambar 4.4 menampilkan hasil visualisasi augmentasi pembalikan horizontal pada citra PCB. Pada tahap ini, sistem menerapkan transformasi pembalikan horizontal secara acak dengan probabilitas 0,5. Hasil visualisasi mengonfirmasi bahwa augmentasi berjalan sesuai dengan konfigurasi yang ditetapkan.
- 
-![Text document](asset:sha256:40cbaecf11f791e8d5c72cd987b0a7f4e5d9874f400f7b6c46d5aeb0091ee073)
- 
-*Annotations per Class
-1400
-1200
-1000
-800-
-600
-400
-200
-0
-open
-short
-mouse_bite
-spur
-pinhole
-spurious_copper*
- 
-Gambar 4.4 Hasil visualisasi augmentasi pembalikan horizontal pada citra PCB
- 
-Pada Gambar 4.4, terlihat bahwa semua *bounding box* bergerak sinkron dengan transformasi citra tanpa terdapat *offset* atau *drift* spasial. Sistem secara otomatis menyesuaikan koordinat *bounding box* menggunakan matriks transformasi yang sama untuk menjamin korespondensi geometris yang presisi. Hasil ini mengonfirmasi bahwa augmentasi berhasil mempertahankan integritas anotasi geometris selama proses transformasi.
- 
-1. **Multi-Scale Resizing**
-Gambar 4.5 menampilkan hasil visualisasi proses penskalaan multi-resolusi dalam arsitektur model. Sistem menerapkan penskalaan resolusi yang berbeda-beda sesuai konfigurasi yang telah ditetapkan, yaitu sisi terpendek {480, 560, 640, 720, 800, 880} piksel.
- 
-![Text document](asset:sha256:a8683ea7b3dd37ca268c87e8d1868abe04de255998b9e7a569d3051f371289ae)
- 
-*Annotations per Class
-600
-/
-500
-sr
-400
-300
-200
-100
-0
-open
-short
-mouse_bite
-spur
-pinhole
-spurious_copper*
- 
-Gambar 4.5 Hasil visualisasi penskalaan multi-resolusi dalam arsitektur model
- 
-Terlihat bahwa sistem penerapan *padding* *internal* secara otomatis mempertahankan topologi spasial tanpa distorsi geometris. Hasil ini mengkonfirmasi bahwa parameter penskalaan multi-resolusi beroperasi sesuai ekspektasi dan tidak menyebabkan distorsi anotasi. Pada setiap tahap pra-pemrosesan, sistem berhasil mempertahankan konsistensi antara citra dan anotasi geometris
- 
-1. **Normalisasi Dataset**
-Normalisasi statistik tidak menghasilkan perubahan visual yang terlihat pada citra *grayscale* DeepPCB. Hal ini disebabkan oleh sifat grayscale yang hanya memiliki satu saluran intensitas, sehingga transformasi normalisasi tidak mengubah kontras atau kecerahan citra.
- 
-Meskipun tidak terlihat secara visual, normalisasi ini tetap penting untuk keselarasan distribusi fitur dengan bobot pre-trained, yang memastikan ekstraksi fitur yang optimal pada tahap deteksi.
- 
+# BAB IV
+
+# HASIL DAN PEMBAHASAN
+
+## 4.1 Hasil Persiapan *Dataset*
+
+*Dataset* DeepPCB dipartisi menjadi 1.000 citra latih dan 500 citra uji sesuai berkas indeks pada Subbab 3.2, tanpa ada citra yang muncul di kedua himpunan. Statistik anotasi pada kedua himpunan dirangkum dalam Tabel 4.1.
+
+Tabel 4.1 Statistik Anotasi Data Latih dan Data Uji
+
+| Metrik | Data Latih | Data Uji |
+| --- | --- | --- |
+| Jumlah citra | 1.000 | 500 |
+| Total anotasi | 6.873 | 3.140 |
+| Rata-rata anotasi per citra | 6,87 | 6,28 |
+| Anotasi per citra (min–maks) | 1–15 | 2–13 |
+| Citra tanpa anotasi | 0 | 0 |
+
+Setiap citra memuat 1 hingga 15 cacat dengan rata-rata 6,87 pada data latih dan 6,28 pada data uji, sehingga tidak ada citra kosong dan setiap citra merupakan kasus deteksi multi-objek. Distribusi kelas juga relatif seimbang, seperti terlihat pada Gambar 4.1 dan Gambar 4.2. Kelas terbanyak hanya sekitar 1,4 kali kelas tersedikit, yaitu *mousebite* (1.379) terhadap *spurious copper* (1.010) pada data latih, serta *open* (659) terhadap *spurious copper* (464) pada data uji. Dengan demikian, perbedaan kinerja antarkelas pada pembahasan berikutnya tidak dapat dijelaskan terutama oleh ketimpangan jumlah data.
+
+![Gambar 4.1](asset:sha256:40cbaecf11f791e8d5c72cd987b0a7f4e5d9874f400f7b6c46d5aeb0091ee073)
+
+Gambar 4.1 Distribusi Anotasi per Kelas pada Data Latih
+
+![Gambar 4.2](asset:sha256:a8683ea7b3dd37ca268c87e8d1868abe04de255998b9e7a569d3051f371289ae)
+
+Gambar 4.2 Distribusi Anotasi per Kelas pada Data Uji
+
+Dari sisi kualitas, seluruh *bounding box* berada di dalam batas citra 640×640 piksel dan tidak ada yang berdimensi nol. Gambar 4.3 menunjukkan enam sampel acak dengan 5 hingga 9 anotasi per citra. Setiap *bounding box* menutupi area cacat dengan label yang sesuai, sehingga anotasi dapat langsung digunakan sebagai *ground truth*.
+
+![Gambar 4.3]()
+
+Gambar 4.3 Sampel Acak Citra PCB beserta Anotasi *Ground Truth*
+
+## 4.2 Hasil Pra-pemrosesan *Dataset*
+
+Kedua transformasi pada Tabel 3.3 divisualisasikan untuk memastikan *bounding box* tetap sesuai dengan citranya. Setiap citra diproses dua kali agar pengaruh pemilihan acak dapat terlihat. Hasil *horizontal flip* ditunjukkan pada Gambar 4.4.
+
+![Gambar 4.4]()
+
+Gambar 4.4 Hasil *Horizontal Flip* pada Citra PCB
+
+Pada Gambar 4.4, citra 00041069 dan 20085089 terbalik pada pemrosesan pertama tetapi tidak pada pemrosesan kedua, sedangkan citra 50600013 tidak terbalik sama sekali. Hal ini menunjukkan bahwa *flip* terjadi secara acak, sehingga model menerima orientasi yang berbeda setiap kali citra dimuat. Saat citra terbalik, *bounding box* ikut berpindah ke posisi cerminnya dan tetap menutupi cacat yang sama. Hasil *multi-resolution scaling* ditunjukkan pada Gambar 4.5.
+
+![Gambar 4.5]()
+
+Gambar 4.5 Hasil *Multi-resolution Scaling* pada Citra PCB
+
+Pada Gambar 4.5, resolusi juga dipilih secara acak. Contohnya, citra 13000141 diskalakan menjadi 880×880 piksel pada pemrosesan pertama dan 720×720 piksel pada pemrosesan kedua. Citra kemudian diberi *padding* hingga ukurannya kelipatan 32, yaitu 880 menjadi 896 dan 720 menjadi 736, sedangkan 800 tidak berubah. Karena penskalaan bersifat proporsional, bentuk cacat tidak terdistorsi dan *bounding box* tetap berada pada area cacat.
+
+Selain diskalakan, citra juga dinormalisasi. Normalisasi tidak mengubah tampilan citra, tetapi nilai pikselnya berubah menjadi −2,12 hingga 2,64 (Gambar 4.5), sesuai dengan *mean* dan *std* pada Tabel 3.2. Dengan demikian, pra-pemrosesan menghasilkan variasi orientasi dan skala tanpa merusak kesesuaian anotasi, sehingga data siap digunakan untuk pelatihan *Faster* R-CNN.
+
 ## Hasil dan Evaluasi Faster RCNN
  
 1. **Analisis Konvergensi**
