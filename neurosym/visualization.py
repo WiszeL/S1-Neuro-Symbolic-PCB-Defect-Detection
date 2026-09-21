@@ -418,13 +418,22 @@ def _draw_node_split_panel(
     lo = min(0.0, a, c)
     hi = 1.15 * max(a, c, abs(bias), 1e-6)
     grid = np.linspace(lo, hi, 200)
-    sigma = 1.0 / (1.0 + np.exp(-np.abs(grid[None, :] - grid[:, None] + bias)))  # rows = c, cols = a
-    axis.imshow(
-        sigma, extent=(lo, hi, lo, hi), origin="lower", cmap="Blues", vmin=0.5, vmax=1.0,
-        aspect="equal", zorder=0,
-    )
-    axis.fill_between(grid, lo, grid + bias, color="#388e3c", alpha=0.2, zorder=1)  # f >= 0: left
-    axis.fill_between(grid, grid + bias, hi, color="#d32f2f", alpha=0.2, zorder=1)  # f < 0: right
+    f_grid = grid[None, :] - grid[:, None] + bias  # rows = c, cols = a
+    sigma = 1.0 / (1.0 + np.exp(-np.abs(f_grid)))
+    # Each half in its branch color (matches the tree edges): light at the split, saturated far from it.
+    for cmap, half in (("Greens", f_grid >= 0.0), ("Reds", f_grid < 0.0)):
+        axis.imshow(
+            np.ma.masked_where(~half, sigma), extent=(lo, hi, lo, hi), origin="lower",
+            cmap=cmap, vmin=0.5, vmax=1.15, aspect="equal", zorder=0,
+        )
+    span = hi - lo
+    # Two candidate corners per label; take the one farther from the dot so it never hides behind it.
+    for text, spots in (
+        ("LEFT branch", ((0.5, 0.06), (0.3, 0.06))),
+        ("RIGHT branch", ((0.06, 0.9), (0.06, 0.6))),
+    ):
+        x, y = max(spots, key=lambda sp: (lo + sp[0] * span - a) ** 2 + (lo + sp[1] * span - c) ** 2)
+        axis.text(lo + x * span, lo + y * span, text, fontsize=7, weight="bold", color="white", zorder=5)
     axis.plot(grid, grid + bias, color="black", lw=1.5, zorder=2)
 
     foot = ((a + c - bias) / 2.0, (a + c + bias) / 2.0)  # closest point on the split line
@@ -434,7 +443,8 @@ def _draw_node_split_panel(
     axis.set_ylim(lo, hi)
     axis.set_aspect("equal")
     axis.tick_params(labelsize=7)
-    axis.set_xlabel(f"|f|={abs(score):.2f}   σ={margin:.4f}", fontsize=9, labelpad=2)
+    axis.set_xlabel(f"evidence LEFT   |f|={abs(score):.2f}  σ={margin:.4f}", fontsize=8, labelpad=2)
+    axis.set_ylabel("evidence RIGHT", fontsize=8, labelpad=2)
     return margin
 
 
