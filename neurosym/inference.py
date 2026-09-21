@@ -64,6 +64,7 @@ def explain_hybrid_detection(
     detection_index: int,
     image_shape: tuple[int, int],
     mode: str = "local_instance_evidence_map",
+    use_fpn_heatmap: bool = True,
 ) -> dict[str, Any]:
     feature_grid = detection["pooled_features"][detection_index]
     proposal_box = detection["proposal_boxes"][detection_index]
@@ -75,7 +76,9 @@ def explain_hybrid_detection(
     )
 
     # Hand-built test dicts lack FPN context, so they skip the exact-attribution panel.
-    has_fpn_inputs = "fpn_features" in detection and "featmap_names" in detection
+    has_fpn_inputs = (
+        use_fpn_heatmap and "fpn_features" in detection and "featmap_names" in detection
+    )
     if has_fpn_inputs:
         level_index = int(detection["symbolic_level_indices"][detection_index])
         level_name = detection["featmap_names"][level_index]
@@ -179,6 +182,7 @@ def explain_hybrid_detections(
     score_threshold: float = 0.3,
     max_detections: int | None = None,
     mode: str = "local_instance_evidence_map",
+    use_fpn_heatmap: bool = True,
 ) -> list[dict[str, Any]]:
     selected_indices = detection_indices
     if selected_indices is None:
@@ -195,6 +199,7 @@ def explain_hybrid_detections(
             detection_index=index,
             image_shape=image_shape,
             mode=mode,
+            use_fpn_heatmap=use_fpn_heatmap,
         )
         for index in selected_indices
     ]
