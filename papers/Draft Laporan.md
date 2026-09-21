@@ -74,8 +74,9 @@ Untuk mewujudkan *explainability* yang *faithfulness*, penelitian ini mengusulka
 2. Rumusan Masalah
 Berdasarkan latar belakang yang telah diuraikan, rumusan masalah dalam penelitian ini adalah sebagai berikut.
  
-1. Bagaimana model *deep learning* dapat mempertahankan performa deteksi tinggi pada inspeksi PCB sekaligus mengatasi sifat *black‑box* yang menghambat validasi teknisi?
-2. Bagaimana arsitektur *neuro‑symbolic* yang mengintegrasikan *Faster* R‑CNN dengan *Sparse Oblique Decision Tree* (SODT) dapat dikembangkan untuk menghadirkan sistem deteksi cacat PCB yang akurat sekaligus menyediakan *explainability* yang *faithful*?
+1. Bagaimana merancang sistem deteksi cacat PCB yang akurat pada keenam jenis cacat visual?
+2. Bagaimana menghadirkan penjelasan yang *faithful* atas keputusan sistem tersebut, bukan penjelasan *post‑hoc*?
+3. Bagaimana menjaga biaya komputasi penjelasan tersebut tetap rendah?
 ## Batasan Masalah
  
 Agar penelitian ini tetap terarah dan fokus sesuai dengan tujuan yang telah ditetapkan, ruang lingkup permasalahan dibatasi pada hal-hal sebagai berikut.
@@ -94,8 +95,9 @@ Evaluasi kualitas *explainability* dilakukan secara kuantitatif melalui perbandi
  
 ## Tujuan Penelitian
  
-1. Mengembangkan sistem deteksi cacat PCB berbasis integrasi Faster R CNN dan Sparse Oblique Decision Tree (SODT) yang mampu mempertahankan performa deteksi tinggi sekaligus menyediakan penjelasan yang faithful guna mendukung proses validasi teknisi.
-2. Mengevaluasi apakah sistem yang diusulkan mampu menghasilkan penjelasan yang *faithful* dan lebih baik dibandingkan pendekatan *post-hoc* Grad-CAM.
+1. Mengembangkan sistem deteksi cacat PCB berbasis integrasi *Faster* R‑CNN dan *Sparse Oblique Decision Tree* (SODT), serta mengevaluasi performanya terhadap *Faster* R‑CNN.
+2. Mengevaluasi *faithfulness* penjelasan yang dihasilkan sistem tersebut terhadap pendekatan *post‑hoc* Grad‑CAM.
+3. Mengukur waktu inferensi sistem tersebut dibandingkan *Faster* R‑CNN dan Grad‑CAM.
 
 ## Manfaat Penelitian
  
@@ -480,11 +482,9 @@ Gambar 2.10 Arsitektur *Neuro-Symbolic*
 Arsitektur NeSy terdiri atas dua komponen utama.
 
 1. **Komponen *neural*** mengubah data mentah menjadi representasi fitur numerik (d'Avila Garcez & Lamb, 2023).
-2. **Komponen simbolik** mengolah representasi fitur melalui aturan yang dapat ditelusuri. Penjelasannya *faithful*, yaitu merupakan proses keputusan model itu sendiri, bukan aproksimasi (Rudin, 2019). Contohnya *Logic Tensor Network* dan model hibrida CNN dengan pohon keputusan (Manigrasso et al., 2021; Hada et al., 2024).
+2. **Komponen simbolik** mengolah representasi fitur melalui aturan yang dapat ditelusuri. Penjelasannya *faithful*, yaitu merupakan proses keputusan model itu sendiri, bukan aproksimasi (Rudin, 2019). Contohnya *Logic Tensor Network* dan model hibrida CNN dengan pohon keputusan (Manigrasso et al., 2021; Hada et al., 2024). Komponen ini dapat dibentuk melalui ***model mimicking***, yaitu melatih model sederhana untuk meniru keluaran model kompleks (*teacher*), dengan label pelatihan berupa prediksi *teacher*, bukan label sebenarnya (Buciluǎ et al., 2006).
 
-Komponen simbolik dapat dibentuk melalui ***model mimicking***, yaitu melatih model sederhana untuk meniru keluaran model kompleks (*teacher*), dengan label pelatihan berupa prediksi *teacher*, bukan label sebenarnya (Buciluǎ et al., 2006).
-
-Komponen *neural* menghasilkan keluaran kontinu, sedangkan komponen simbolik menghasilkan keluaran diskrit, sehingga banyak masukan berbeda memperoleh keluaran identik dan informasi tingkat keyakinan hilang (Provost & Domingos, 2003). Pada komponen simbolik dengan fungsi keputusan bernilai riil, keyakinan dapat dinyatakan melalui dua konsep berikut.
+Pengalihan keputusan dari komponen *neural* ke komponen simbolik membawa konsekuensi pada bentuk keluarannya. Keluaran komponen *neural* bersifat kontinu, sedangkan keluaran komponen simbolik bersifat diskrit, sehingga banyak masukan berbeda memperoleh keluaran identik dan informasi tingkat keyakinan hilang (Provost & Domingos, 2003). Informasi tersebut masih tersimpan pada nilai keputusan sebelum diubah menjadi label, dan dapat dinyatakan melalui dua konsep berikut.
 
 **1. *Margin***
 
@@ -512,7 +512,7 @@ dengan $z$ nilai masukan dan $e$ bilangan Euler.
 
 ### 2.1.8 *Sparse Oblique Decision Tree* (SODT)
 
-*Sparse Oblique Decision Tree* (SODT) adalah pohon keputusan yang melakukan pemisahan linear multivariat (*oblique split*) pada setiap *node* internal, berbeda dengan pohon *axis-aligned* yang hanya memakai satu fitur per pemisahan (Hada et al., 2024). Fungsi keputusan *node* internal ke-*i* dinyatakan pada Persamaan 2.28.
+*Sparse Oblique Decision Tree* (SODT) adalah pohon keputusan yang melakukan pemisahan linear multivariat (*oblique split*) pada setiap *node* internal, berbeda dengan pohon *axis-aligned* yang hanya memakai satu fitur per pemisahan (Hada et al., 2024). Setiap *node* internal meneruskan masukan ke salah satu dari dua anaknya, dan label pada *leaf* yang dicapai menjadi prediksi pohon. Fungsi keputusan *node* internal ke-*i* dinyatakan pada Persamaan 2.28.
 
 $$
 {f}_{i}\left(x\right)={w}_{i}^{T}x+{b}_{i}
@@ -522,7 +522,7 @@ $$
 
 dengan $x$ vektor fitur berdimensi $D$, ${w}_{i}$ vektor bobot, dan ${b}_{i}$ bias *node* ke-*i*.
 
-Tanda ${f}_{i}\left(x\right)$ menentukan arah percabangan, yaitu ${d}_{i}=+1$ ke anak kiri untuk ${f}_{i}\left(x\right)\ge 0$ dan ${d}_{i}=-1$ ke anak kanan untuk ${f}_{i}\left(x\right)<0$. Rangkaian *node* dari *root* hingga *leaf* membentuk jalur keputusan (*decision path*), dan label pada *leaf* yang dicapai menjadi prediksi pohon (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025). Ilustrasinya ditunjukkan pada Gambar 2.11.
+Arah percabangan ditentukan oleh tanda ${f}_{i}\left(x\right)$, dinotasikan ${d}_{i}=+1$ untuk ke anak kiri dan ${d}_{i}=-1$ untuk ke anak kanan. Rangkaian *node* dari *root* hingga *leaf* membentuk jalur keputusan (*decision path*) (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025). Ilustrasinya ditunjukkan pada Gambar 2.11.
 
 [SISIPKAN GAMBAR: ilustrasi SODT dengan *node* internal ${w}_{i}^{T}x+{b}_{i}\ge 0$, *leaf* berlabel kelas, dan satu jalur keputusan yang disorot dari *root* ke *leaf*]
 
@@ -552,14 +552,9 @@ $$
 
 (2.30)
 
-dengan ${\mathcal{R}}_{i}$ sampel yang mencapai *node* ke-*i* (*reduced set*), ${\bar{y}}_{n}$ label semu (*pseudo-label*) arah kiri atau kanan, ${g}_{i}$ keputusan biner *node*, dan $\bar{L}$ kerugian 0/1. Langkah TAO pada satu *node* adalah sebagai berikut (Carreira-Perpiñán & Tavallali, 2018; Hada et al., 2024).
+dengan ${\mathcal{R}}_{i}$ sampel yang mencapai *node* ke-*i* (*reduced set*), ${\bar{y}}_{n}$ label semu (*pseudo-label*) arah kiri atau kanan, ${g}_{i}$ keputusan biner *node*, dan $\bar{L}$ kerugian 0/1.
 
-1. Setiap sampel dalam ${\mathcal{R}}_{i}$ diprediksi dua kali, yaitu bila diarahkan ke kiri dan ke kanan, dengan sub-pohon di bawahnya tetap.
-2. Sampel yang hasilnya sama pada kedua arah dikeluarkan; sisanya (*care set*) memperoleh label semu berupa arah yang menghasilkan prediksi benar.
-3. Kerugian 0/1 diganti fungsi pengganti (*surrogate*) berupa regresi logistik dengan regularisasi L1.
-4. Parameter baru hanya diterima apabila tidak memperburuk fungsi tujuan *node* tersebut.
-
-Setiap *leaf* diberi label kelas mayoritas dari sampel yang mencapainya. TAO memperbarui *node* dari yang terdalam menuju *root* dan mengulangnya hingga konvergen.
+Tidak semua sampel dalam ${\mathcal{R}}_{i}$ berpengaruh; sampel yang prediksinya sama pada kedua arah diabaikan, sedangkan sisanya (*care set*) memperoleh label semu berupa arah yang menghasilkan prediksi benar. Masalah biner tersebut diselesaikan dengan regresi logistik berregularisasi L1 sebagai pengganti (*surrogate*) kerugian 0/1, dan setiap *leaf* berlabel kelas mayoritas sampel yang mencapainya. Penyelesaian ini dilakukan bergantian antar-*node* dari yang terdalam menuju *root*, dan karena tidak pernah menaikkan nilai fungsi tujuan, TAO dijamin konvergen (Carreira-Perpiñán & Tavallali, 2018; Hada et al., 2024).
 
 Karena penalti $\lambda$ sama untuk semua *node*, *node* dengan banyak data cenderung kurang *sparse*. Kairgeldin dan Carreira-Perpiñán (2025) mengatasinya dengan membobot penalti berdasarkan jumlah sampel *node* melalui parameter $\alpha$, sebagaimana dinyatakan pada Persamaan 2.31 dan 2.32.
 
@@ -590,7 +585,7 @@ $$
 dengan ${\omega}_{{y}_{n}}\ge 0$ biaya kesalahan kelas ${y}_{n}$.
 **4. Penjelasan melalui Bobot *Node***
 
-Karena setiap *node* linear dan *sparse*, bobot ${w}_{i}$ langsung menunjukkan fitur yang dipakai *node*: bobot nol berarti tidak dipakai, tandanya menunjukkan arah dorongan, dan besarnya menunjukkan kekuatan pengaruh. Hada et al. (2024) memvisualisasikan bobot ini untuk menelusuri fitur yang memisahkan antarkelas.
+Setiap *node* bersifat linear dan *sparse*, sehingga bobot ${w}_{i}$ langsung menunjukkan fitur yang dipakai *node*. Bobot nol berarti fitur tidak dipakai, tandanya menyatakan arah dorongan, dan besarnya menyatakan kekuatan pengaruh. Hada et al. (2024) memvisualisasikan bobot ini untuk menelusuri fitur yang memisahkan antarkelas.
 
 Kairgeldin dan Carreira-Perpiñán (2025) memperluasnya pada model hibrida CNN dan SODT. Karena setiap fitur berasal dari sel peta fitur CNN yang memiliki *receptive field* (Subbab 2.1.4), mereka menyusun peta kepadatan *receptive field* (*RF density map*) untuk setiap *node*, sebagaimana dinyatakan pada Persamaan 2.34.
 
@@ -733,7 +728,7 @@ Penelitian ini membangun, mengintegrasikan, dan mengevaluasi sistem deteksi caca
 
 Gambar 3.1 Diagram Alir Penelitian
 
-Penelitian dimulai dengan persiapan dan pra-pemrosesan *dataset* DeepPCB. *Faster* R-CNN kemudian dilatih dan dibekukan sebagai model *teacher*, lalu dipakai untuk mengekstrak fitur RoI beserta label prediksinya sebagai *dataset* simbolik. *Dataset* ini melatih SODT yang meniru keputusan klasifikasi *teacher*. SODT kemudian menggantikan kepala klasifikasi *Faster* R-CNN, dilengkapi skor deteksi berbasis *routing margin* dan *heatmap* per *node*. Terakhir, model hibrida dievaluasi terhadap *Faster* R-CNN dari sisi deteksi dan terhadap Grad-CAM dari sisi penjelasan.
+Penelitian dimulai dengan persiapan dan pra-pemrosesan *dataset* DeepPCB, dilanjutkan pelatihan *Faster* R-CNN, ekstraksi *dataset* simbolik, pelatihan SODT, integrasi keduanya, lalu evaluasi akhir.
 
 ## 3.2 Persiapan *Dataset*
 
@@ -899,14 +894,14 @@ SODT menggantikan *classifier* pada *box head*, sehingga setiap keputusan kelas 
 
 **Langkah-langkah:**
 
-1. Sistem membentuk pohon biner lengkap berkedalaman 6 dengan fungsi keputusan linear pada setiap *node* (Persamaan 2.28) dan satu label pada setiap *leaf*.
+1. Sistem membentuk pohon biner lengkap sesuai kedalaman pohon pada Tabel 3.6, dengan fungsi keputusan linear pada setiap *node* (Persamaan 2.28) dan satu label pada setiap *leaf*.
 2. *Tensor* $64\times 7\times 7$ diratakan dengan urutan kanal, baris, lalu kolom.
 3. Bobot dan bias diinisialisasi dari distribusi normal baku, dan label *leaf* secara acak (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025).
 4. Fungsi tujuan disusun dari kerugian berbobot kelas (Persamaan 2.33) dan penalti L1 berbobot ukuran *reduced set* (Persamaan 2.31 dan 2.32).
 
 ## 3.8 Pelatihan dan Evaluasi Model Simbolik
 
-SODT dilatih dengan TAO (Subbab 2.1.8) pada *dataset* simbolik latih. Karena sebagian besar proposal berlabel *background*, dilakukan *negative sampling*: semua proposal berlabel cacat dipertahankan, dan proposal *background* diambil acak sebanyak dua kali jumlahnya.
+SODT dilatih dengan TAO (Subbab 2.1.8) pada *dataset* simbolik latih. Karena sebagian besar proposal berlabel *background*, distribusi kelasnya sangat timpang sehingga diperlukan *negative sampling*.
 
 Pembobotan kelas diterapkan di dua tempat. Pada masalah tereduksi setiap *node* (Persamaan 2.30), setiap sampel diberi bobot pada Persamaan 3.1. Pada *leaf*, label ditentukan dengan mayoritas berbobot pada Persamaan 3.2.
 
@@ -922,9 +917,9 @@ $$
 
 (3.2)
 
-dengan ${u}_{n}$ bobot sampel ke-*n*, ${\ell}_{L}\left(n\right),{\ell}_{R}\left(n\right)$ kerugian 0/1 sampel ke-*n* bila diarahkan ke kiri dan ke kanan, ${\omega}_{c}$ bobot kelas $c$ (Persamaan 2.33), ${\hat{y}}_{\ell}$ label *leaf* ke-$\ell$, dan ${N}_{\ell,c}$ jumlah sampel berlabel $c$ pada *leaf* tersebut. Faktor $\left|{\ell}_{L}-{\ell}_{R}\right|$ bernilai 1 hanya untuk *care set*, sehingga kesalahan pengarahan pada kelas berbobot besar menjadi lebih mahal. Bobot *background* dibiarkan 1,0 agar *false positive* tidak meningkat.
+dengan ${u}_{n}$ bobot sampel ke-*n*, ${\ell}_{L}\left(n\right),{\ell}_{R}\left(n\right)$ kerugian 0/1 sampel ke-*n* bila diarahkan ke kiri dan ke kanan, ${\omega}_{c}$ bobot kelas $c$ (Persamaan 2.33), ${\hat{y}}_{\ell}$ label *leaf* ke-$\ell$, dan ${N}_{\ell,c}$ jumlah sampel berlabel $c$ pada *leaf* tersebut. Faktor $\left|{\ell}_{L}-{\ell}_{R}\right|$ bernilai 1 hanya untuk *care set*, sehingga kesalahan pengarahan pada kelas berbobot besar menjadi lebih mahal. Bobot *background* dibiarkan netral agar *false positive* tidak meningkat.
 
-Setelah TAO, pohon dipangkas tanpa mengubah keputusannya. *Node* yang tidak dilalui sampel (*dead branch*) dan *node* yang seluruh *leaf* di bawahnya berlabel sama (*pure subtree*) dinolkan bersama sub-pohonnya, dan *leaf* yang tidak dicapai sampel diberi label *background*. *Hyperparameter* pelatihan dirangkum pada Tabel 3.6.
+Setelah TAO, pohon dipangkas tanpa mengubah keputusannya, sehingga penjelasan yang dihasilkan menjadi lebih ringkas tanpa mengorbankan fidelitas. *Hyperparameter* pelatihan dirangkum pada Tabel 3.6.
 
 Tabel 3.6 *Hyperparameter* Pelatihan SODT
 
@@ -950,10 +945,10 @@ Fidelitas SODT diukur terhadap label *teacher* pada *dataset* simbolik uji denga
 
 **Langkah-langkah:**
 
-1. Sistem menerapkan *negative sampling* dengan rasio 2 pada *dataset* simbolik latih.
+1. Sistem mempertahankan seluruh proposal berlabel cacat dan mengambil acak proposal *background* sesuai rasio negatif pada Tabel 3.6.
 2. Pada setiap iterasi TAO, *node* diperbarui dari yang terdalam menuju *root* menggunakan bobot sampel Persamaan 3.1, lalu label *leaf* diperbarui dengan Persamaan 3.2.
-3. Iterasi berhenti setelah 15 iterasi atau ketika penurunan relatif fungsi tujuan di bawah toleransi.
-4. Pohon dipangkas dengan menolkan *dead branch* dan *pure subtree*.
+3. Iterasi berhenti setelah mencapai batas iterasi TAO atau ketika penurunan relatif fungsi tujuan di bawah toleransi (Tabel 3.6).
+4. *Node* yang tidak dilalui sampel (*dead branch*) dan *node* yang seluruh *leaf* di bawahnya berlabel sama (*pure subtree*) dinolkan bersama sub-pohonnya, sedangkan *leaf* yang tidak dicapai sampel diberi label *background*.
 5. Fidelitas diukur pada *dataset* simbolik uji.
 
 ## 3.9 Integrasi *Faster* R-CNN dan SODT
@@ -968,21 +963,7 @@ SODT hanya menggantikan kepala klasifikasi. Koordinat *bounding box* akhir tetap
 
 Gambar 3.4 Diagram Integrasi *Neuro-Symbolic*
 
-**Input:** Citra uji, *Faster* R-CNN (*frozen*), dan SODT terlatih.
-
-**Output:** *Bounding box*, label kelas, skor deteksi, dan jalur keputusan setiap deteksi.
-
-**Langkah-langkah:**
-
-1. *Faster* R-CNN menghasilkan proposal dan *tensor* $64\times 7\times 7$ untuk setiap proposal.
-2. SODT menentukan label dari *leaf* yang dicapai, dan skor dihitung dengan Persamaan 3.3.
-3. Kepala regresi *Faster* R-CNN menghitung koordinat *bounding box* akhir.
-4. Deteksi berlabel *background* atau berskor di bawah 0,001 dibuang, lalu *Soft*-NMS diterapkan (Persamaan 2.20).
-5. Jalur keputusan, tingkat piramida sumber, dan peta fitur *neck* setiap deteksi disimpan untuk pembentukan *heatmap*.
-
-### 3.9.2 Skor Deteksi Berbasis *Routing Margin*
-
-Karena setiap *leaf* hanya menyimpan satu label, semua deteksi yang mencapai *leaf* berkelas sama akan memiliki skor identik (Subbab 2.1.7). Akibatnya, AP (Persamaan 2.39) dan *Soft*-NMS kehilangan urutan skor. Oleh karena itu, skor dibentuk dari *margin* (Persamaan 2.26) dan *sigmoid* (Persamaan 2.27) setiap *node* pada jalur keputusan, sebagaimana dinyatakan pada Persamaan 3.3.
+Penggantian kepala klasifikasi tersebut menimbulkan satu persoalan pada skor deteksi. Karena setiap *leaf* hanya menyimpan satu label, semua deteksi yang mencapai *leaf* berkelas sama akan memiliki skor identik (Subbab 2.1.7). Akibatnya, AP (Persamaan 2.39) dan *Soft*-NMS kehilangan urutan skor. Oleh karena itu, skor dibentuk dari *margin* (Persamaan 2.26) dan *sigmoid* (Persamaan 2.27) setiap *node* pada jalur keputusan, yang selanjutnya disebut skor deteksi berbasis ***routing margin***, sebagaimana dinyatakan pada Persamaan 3.3.
 
 $$
 s\left(x\right)=\prod_{i\in P\left(x\right),\, {w}_{i}\ne 0}{\sigma \left(\left|{f}_{i}\left(x\right)\right|\right)}
@@ -994,7 +975,25 @@ dengan $s\left(x\right)$ skor untuk RoI $x$ pada kelas *leaf* yang dicapai (kela
 
 Berbeda dengan Platt (1999), parameter *sigmoid* bernilai tetap, sehingga $s\left(x\right)$ merupakan skor keyakinan, bukan probabilitas kelas, dan setiap faktornya berada pada rentang [0,5; 1).
 
-### 3.9.3 *Heatmap* Per *Node*
+Secara geometris, $\left|{f}_{i}\left(x\right)\right|$ sebanding dengan jarak RoI terhadap bidang *split* *node* ke-*i*. RoI yang jauh dari bidang tersebut menghasilkan faktor mendekati 1, sedangkan RoI yang dekat dengan bidang tersebut menghasilkan faktor mendekati 0,5. Dengan demikian, $s\left(x\right)$ bernilai tinggi hanya jika RoI melewati setiap *node* pada jalurnya dengan jelas, dan satu *node* yang ragu sudah cukup untuk menurunkan skor. Ilustrasinya ditunjukkan pada Gambar 3.5.
+
+[SISIPKAN GAMBAR: SODT dengan jalur keputusan menuju *leaf* short; untuk setiap *node* pada jalur, bidang 2D berisi garis *split* ${f}_{i}\left(x\right)=0$, titik RoI $x$, dan jarak tegak lurusnya; semakin jauh dari garis, semakin besar $\sigma \left(\left|{f}_{i}\left(x\right)\right|\right)$; skor akhir sebagai hasil kali faktor setiap *node*]
+
+Gambar 3.5 Ilustrasi Skor Deteksi Berbasis *Routing Margin*
+
+**Input:** Citra uji, *Faster* R-CNN (*frozen*), dan SODT terlatih.
+
+**Output:** *Bounding box*, label kelas, skor deteksi, dan jalur keputusan setiap deteksi.
+
+**Langkah-langkah:**
+
+1. *Faster* R-CNN menghasilkan proposal dan *tensor* $64\times 7\times 7$ untuk setiap proposal.
+2. SODT menentukan label dari *leaf* yang dicapai, dan skor deteksi berbasis *routing margin* dihitung dengan Persamaan 3.3.
+3. Kepala regresi *Faster* R-CNN menghitung koordinat *bounding box* akhir.
+4. Deteksi berlabel *background* atau berskor di bawah ambang skor minimum (Tabel 3.4) dibuang, lalu *Soft*-NMS diterapkan (Persamaan 2.20).
+5. Jalur keputusan, tingkat piramida sumber, dan peta fitur *neck* setiap deteksi disimpan untuk pembentukan *heatmap*.
+
+### 3.9.2 *Heatmap* Per *Node*
 
 Setiap *node* pada jalur keputusan memperoleh satu *heatmap* yang menunjukkan daerah yang ditimbang *node* tersebut untuk RoI yang dijelaskan. Berbeda dengan peta Kairgeldin dan Carreira-Perpiñán (2025) (Persamaan 2.34) yang statis, *heatmap* ini dinamis karena memakai nilai fitur RoI, dan dihitung pada peta fitur *neck*, bukan grid $7\times 7$.
 
@@ -1032,11 +1031,11 @@ $$
 
 Nilai mutlak membuat ${H}_{i}$ menunjukkan besar pengaruh, baik yang mendukung maupun yang menentang, sedangkan arah keputusan ditampilkan pada jalur pohon.
 
-${H}_{i}$ kemudian dipotong sesuai letak proposal pada tingkat piramida menggunakan *stride* (Persamaan 2.5 dan 2.6), dinormalisasi, lalu diperbesar dengan interpolasi bilinear (Persamaan 2.16) ke ukuran proposal pada citra. Ketelitiannya berada pada tingkat daerah karena perhitungan eksak berhenti pada peta fitur *neck* (Persamaan 2.7), tetapi lebih halus daripada grid $7\times 7$. Alurnya ditunjukkan pada Gambar 3.5.
+Ketelitian ${H}_{i}$ berada pada tingkat daerah karena perhitungan eksak berhenti pada peta fitur *neck* (Persamaan 2.7), tetapi tetap lebih halus daripada grid $7\times 7$. Alurnya ditunjukkan pada Gambar 3.6.
 
 [SISIPKAN GAMBAR: alur *heatmap* per *node*: bobot *node* ${w}_{i}$ (grid $64\times 7\times 7$) → disebar kembali melalui koefisien *RoI Align* (${A}^{T}{w}_{i}$) → dikalikan peta fitur *neck* (*Gradient × Input*) → ${H}_{i}$ → dipotong, dinormalisasi, dan diperbesar ke proposal pada citra, untuk setiap *node* pada jalur keputusan]
 
-Gambar 3.5 Alur Pembentukan *Heatmap* Per *Node*
+Gambar 3.6 Alur Pembentukan *Heatmap* Per *Node*
 
 **Input:** Satu deteksi beserta *tensor* RoI, jalur keputusan, tingkat piramida, dan peta fitur *neck*.
 
@@ -1044,34 +1043,34 @@ Gambar 3.5 Alur Pembentukan *Heatmap* Per *Node*
 
 **Langkah-langkah:**
 
-1. Untuk setiap *node* pada jalur keputusan, bobot ${w}_{i}$ dikembalikan ke grid $64\times 7\times 7$ dan dikalikan dengan ${d}_{i}$.
+1. Untuk setiap *node* aktif pada jalur keputusan, bobot ${w}_{i}$ dikembalikan ke grid $64\times 7\times 7$ dan dikalikan dengan ${d}_{i}$.
 2. *RoI Align* dijalankan ulang pada peta fitur *neck*, lalu gradien Persamaan 3.4 dihitung dengan propagasi mundur.
 3. Gradien dikalikan dengan peta fitur (Persamaan 3.5) dan diringkas menjadi ${H}_{i}$ (Persamaan 3.7).
-4. ${H}_{i}$ dipotong, dinormalisasi, diperbesar ke ukuran proposal, lalu ditumpangkan pada citra di samping jalur keputusan pohon.
+4. ${H}_{i}$ dipotong sesuai letak proposal pada tingkat piramida menggunakan *stride* (Persamaan 2.5 dan 2.6), dinormalisasi, lalu diperbesar dengan interpolasi bilinear (Persamaan 2.16) ke ukuran proposal.
+5. *Heatmap* ditumpangkan pada citra di samping jalur keputusan pohon.
 ## 3.10 Evaluasi Model *Neuro-Symbolic*
 
-Seluruh pengujian dilakukan pada data uji. Ringkasan skenario evaluasi ditunjukkan pada Tabel 3.7.
+Evaluasi mencakup dua aspek, yaitu kinerja deteksi model hibrida dan kualitas penjelasan yang dihasilkannya. Seluruh pengujian dilakukan pada data uji.
 
-Tabel 3.7 Ringkasan Skenario Evaluasi
-
-| Aspek | Pembanding | Metrik |
-| --- | --- | --- |
-| Kinerja deteksi | *Faster* R-CNN vs model hibrida | mAP, *Precision*, *Recall*, F1, *confusion matrix* |
-| Ablasi skor | Model hibrida dengan dan tanpa *routing margin* | mAP, *Precision*, *Recall*, F1 |
-| Fidelitas | SODT terhadap label *teacher* | *Mimic accuracy*, *macro*-F1, kesesuaian per kelas (Subbab 3.8) |
-| *Faithfulness* tingkat jalur | SODT vs Grad-CAM vs kontrol | *Necessity Flip Rate*, *Sufficiency Preservation* |
-| Lokalisasi | SODT vs Grad-CAM vs acak | *Pointing Game*, IoU *Heatmap* |
-| *Faithfulness* per *node* | SODT vs kontrol acak | *Necessity Flip Rate* per *node*, *Deletion*/*Insertion* AUC |
-| Waktu inferensi | *Faster* R-CNN vs model hibrida vs Grad-CAM | Waktu rata-rata per citra |
-| Kualitatif | SODT vs Grad-CAM | Perbandingan visual per deteksi |
-
-### 3.10.1 Kinerja Deteksi dan Ablasi *Routing Margin*
+### 3.10.1 Evaluasi Deteksi
 
 Model hibrida dibandingkan dengan *Faster* R-CNN menggunakan metrik pada Subbab 3.5. Untuk mengukur peran *routing margin*, metrik yang sama dihitung ulang dengan skor seluruh deteksi diganti menjadi 1, tanpa mengubah jalur maupun label.
 
-### 3.10.2 *Faithfulness* Tingkat Jalur terhadap Grad-CAM
+Waktu rata-rata per citra uji juga diukur untuk *Faster* R-CNN, model hibrida, dan Grad-CAM (termasuk pembentukan petanya).
 
-Grad-CAM menghasilkan satu peta per deteksi, sedangkan SODT satu peta per *node*. Untuk perbandingan, *heatmap* per *node* ditumpuk menjadi satu peta dengan Persamaan 3.8.
+**Input:** Model hibrida, *Faster* R-CNN, dan data uji.
+
+**Output:** Metrik deteksi kedua model, metrik ablasi tanpa *routing margin*, dan waktu inferensi.
+
+**Langkah-langkah:**
+
+1. Sistem menghitung metrik deteksi *Faster* R-CNN dan model hibrida pada data uji.
+2. Sistem menghitung ulang metrik yang sama dengan skor seluruh deteksi diganti menjadi 1 sebagai ablasi *routing margin*.
+3. Sistem mencatat waktu rata-rata inferensi per citra untuk ketiga konfigurasi.
+
+### 3.10.2 Evaluasi Penjelasan
+
+Grad-CAM menghasilkan satu peta per deteksi, sedangkan SODT satu peta per *node*. Agar sebanding, setiap *heatmap* dimutlakkan lalu ditumpuk dengan Persamaan 3.8. Penjumlahan bertanda dihindari karena SODT tidak memiliki satu skor jalur, sehingga daerah yang mendukung satu *node* tetapi menentang *node* lain dapat saling menghapus.
 
 $$
 M\left(p\right)=\sum_{i\in P\left(x\right)}{{H}_{i}\left(p\right)}
@@ -1079,43 +1078,26 @@ $$
 
 (3.8)
 
-Penumpukan dilakukan setelah setiap *heatmap* dimutlakkan, bukan dengan menjumlahkan kontribusi bertanda. SODT tidak memiliki satu skor jalur, sehingga penjumlahan bertanda dapat menghapus daerah yang mendukung satu *node* tetapi menentang *node* lain. Peta $M$ hanya dipakai untuk perbandingan dengan Grad-CAM.
+dengan $M\left(p\right)$ peta gabungan pada posisi $p$, $P\left(x\right)$ *node* pada jalur keputusan RoI $x$ (Persamaan 3.3), dan ${H}_{i}$ *heatmap* *node* ke-*i* (Persamaan 3.7). Peta $M$ hanya dipakai untuk perbandingan dengan Grad-CAM.
 
-Grad-CAM (Persamaan 2.21 dan 2.22) dihitung pada tingkat peta fitur *neck* tempat proposal di-*pool*, yaitu lapisan konvolusi terakhir yang dibaca *box head* (Selvaraju et al., 2017), dari skor kelas hasil *pooling* pada proposal asal deteksi.
+Penjelasan diuji pada tiga hal, yaitu *faithfulness* tingkat jalur yang memeriksa apakah daerah yang disorot menentukan label, lokalisasi yang memeriksa apakah daerah tersebut jatuh pada cacat sebenarnya, dan *faithfulness* per *node* yang menguji klaim bahwa setiap *heatmap* menentukan keputusan *node*-nya. Perbandingan kualitatif melengkapinya dengan telaah per deteksi.
 
-Kedua metode diuji dengan protokol yang sama pada seluruh 500 citra uji. Yang dijelaskan adalah seluruh deteksi masing-masing model dengan skor ≥ 0,5, yaitu titik operasi *Precision* dan *Recall*, pada proposal asalnya. Pada peta fitur *neck* di dalam proposal (diperluas 2 posisi), 50% posisi bernilai tertinggi menurut peta masing-masing metode dipilih. *Necessity* (Persamaan 2.41) menolkan posisi tersebut, menjalankan ulang *RoI Align*, lalu memeriksa apakah label berubah. *Sufficiency* (Persamaan 2.42) hanya mempertahankan posisi tersebut, lalu memeriksa apakah label tetap. Kedua metode dibandingkan dengan kontrol acak, dan SODT juga dengan dua kontrol tambahan (Adebayo et al., 2018):
+Seluruhnya dibandingkan dengan Grad-CAM, yang dihitung pada peta fitur *neck* tempat proposal di-*pool* sesuai anjuran Selvaraju et al. (2017), serta dengan kontrol acak (Adebayo et al., 2018) agar hasilnya tidak dapat dijelaskan oleh pola aktivasi semata.
 
-1. **Acak**: posisi dipilih secara acak.
-2. **Bobot diacak**: bobot setiap *node* diacak sebelum Persamaan 3.8 dihitung.
-3. **Aktivasi saja**: posisi diurutkan berdasarkan besar peta fitur tanpa bobot pohon.
+**Input:** Model hibrida, Grad-CAM, data uji, dan *dataset* simbolik uji.
 
-### 3.10.3 Lokalisasi
-
-*Pointing Game* (Persamaan 2.44) dan IoU *Heatmap* (Persamaan 2.45) dihitung antara peta dan *ground truth* pada proposal longgar (IoU 0,05–0,35) dari seluruh 500 citra uji. Karena kedua model memakai *backbone* dan RPN yang sama, SODT (peta gabungan), Grad-CAM, dan peta acak dievaluasi pada himpunan proposal yang identik, yaitu proposal yang diprediksi sebagai cacat oleh kedua model. Setiap peta di-*resample* ke grid $7\times 7$, dan ${H}_{bin}$ berisi sel bernilai tertinggi sebanyak sel *ground truth*.
-
-### 3.10.4 *Faithfulness* Per *Node*
-
-Klaim utama penjelasan SODT, yaitu bahwa daerah pada setiap *heatmap* menentukan keputusan *node*-nya, diuji dengan dua cara. Pertama, 50% posisi tertinggi ${H}_{i}$ dihapus, lalu diperiksa apakah tanda ${f}_{i}\left(x\right)$ berbalik. Kedua, *Deletion* dan *Insertion* AUC (Persamaan 2.43) dihitung dalam lima tahap atas $\sigma \left(\left|{f}_{i}\left(x\right)\right|\right)$. Keduanya dihitung pada deteksi yang sama dengan Subbab 3.10.2 dan dibandingkan dengan kontrol acak per kedalaman *node*, dan *node* yang telah dinolkan dilewati.
-
-### 3.10.5 Waktu Inferensi
-
-Waktu rata-rata per citra uji diukur untuk *Faster* R-CNN, model hibrida, dan Grad-CAM (termasuk pembentukan petanya).
-
-### 3.10.6 Perbandingan Kualitatif
-
-Untuk citra uji terpilih, deteksi *Faster* R-CNN, deteksi model hibrida, dan *ground truth* ditampilkan berdampingan. Setiap deteksi model hibrida ditampilkan dengan jalur keputusan dan *heatmap* setiap *node*, di samping peta Grad-CAM untuk deteksi yang sama.
-
-**Input:** Model hibrida, *Faster* R-CNN, Grad-CAM, data uji, dan *dataset* simbolik uji.
-
-**Output:** Metrik deteksi, ablasi, fidelitas, *faithfulness*, lokalisasi, waktu inferensi, dan perbandingan visual.
+**Output:** Metrik *faithfulness* tingkat jalur dan per *node*, metrik lokalisasi, serta perbandingan visual.
 
 **Langkah-langkah:**
 
-1. Sistem menghitung metrik deteksi *Faster* R-CNN dan model hibrida, termasuk ablasi tanpa *routing margin*.
-2. Sistem menghitung *necessity* dan *sufficiency* SODT dan Grad-CAM beserta kontrolnya pada deteksi masing-masing model.
-3. Sistem menghitung *Pointing Game* dan IoU *Heatmap* untuk SODT, Grad-CAM, dan peta acak pada proposal longgar yang sama.
-4. Sistem menghitung *faithfulness* per *node* beserta kontrol acaknya.
-5. Sistem mencatat waktu inferensi dan menampilkan perbandingan visual.
+1. Deteksi berskor ≥ 0,5 dipilih dari 500 citra uji.
+2. Peta $M$ (Persamaan 3.8) dan peta Grad-CAM (Persamaan 2.21 dan 2.22) dihitung untuk deteksi yang sama.
+3. Pada peta fitur *neck* di dalam proposal (diperluas 2 posisi), 50% posisi tertinggi tiap peta dipilih.
+4. Posisi tersebut dinolkan untuk *Necessity* (Persamaan 2.41) dan disisakan untuk *Sufficiency* (Persamaan 2.42), lalu *RoI Align* dijalankan ulang dan label diperiksa.
+5. Langkah 3 dan 4 diulang untuk tiga kontrol, yaitu posisi acak, bobot *node* diacak, dan pengurutan tanpa bobot pohon.
+6. Setiap peta di-*resample* ke grid $7\times 7$, lalu *Pointing Game* dan IoU *Heatmap* dihitung pada proposal longgar (IoU 0,05–0,35).
+7. Untuk setiap *node* aktif, 50% posisi tertinggi ${H}_{i}$ dihapus dan pembalikan tanda ${f}_{i}\left(x\right)$ diperiksa, lalu *Deletion* dan *Insertion* AUC (Persamaan 2.43) dihitung dalam lima tahap.
+8. Deteksi kedua model dan *ground truth* ditampilkan berdampingan, dengan jalur keputusan dan *heatmap* setiap *node* di samping peta Grad-CAM.
 
 
 #
