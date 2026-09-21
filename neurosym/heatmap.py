@@ -284,21 +284,17 @@ def exact_fpn_contribution(
         if weight_grid_override is not None
         else path_weight_grid(tree, feature_grid, path=path)
     )
-    with torch.enable_grad():
-        # Escape inference-mode so autograd can run.
-        feats = {
-            name: torch.from_numpy(
-                np.ascontiguousarray(level.detach().cpu().numpy())
-            ).unsqueeze(0)
-            for name, level in fpn_features.items()
-        }
+    device = fpn_features[level_name].device  # stay where the features are (GPU stays GPU)
+    with torch.inference_mode(False), torch.enable_grad():
+        # Fresh copies so autograd works even on tensors made in inference mode.
+        feats = {name: level.detach().clone().unsqueeze(0) for name, level in fpn_features.items()}
         feats[level_name].requires_grad_(True)
         pooled = roi_align(
             feats,
-            [box_processed.detach().cpu().unsqueeze(0)],
+            [box_processed.detach().to(device).unsqueeze(0)],
             [tuple(processed_image_size)],
         )[0]
-        score = (torch.as_tensor(weights, dtype=torch.float32) * pooled).sum()
+        score = (torch.as_tensor(weights, dtype=torch.float32, device=device) * pooled).sum()
         (grad,) = torch.autograd.grad(score, feats[level_name])
     return (grad[0] * feats[level_name][0]).detach()
 

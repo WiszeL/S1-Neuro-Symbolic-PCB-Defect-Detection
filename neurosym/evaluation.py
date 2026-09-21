@@ -349,16 +349,29 @@ def evaluate_faithfulness_fpn_masking(
             n_pos = (fy2 - fy1) * (fx2 - fx1)
             budget = max(int(n_pos * budget_fraction), 1)
 
+            # One map per path node, shared by the path map and the per-node block below.
+            node_contribs: dict[int, Tensor] = {}
+
+            def contribution_for(step) -> Tensor:
+                if step.node_index not in node_contribs:
+                    node_contribs[step.node_index] = exact_fpn_contribution(
+                        tree, pooled_grid, detector.roi_align, unbatched_fpn,
+                        level_name, box_processed, processed_size, path=[step],
+                    )
+                return node_contribs[step.node_index]
+
             # ── Path-level (unchanged): does the final label flip? ──
             fpn_maps: dict[str, Tensor] = {}
             if map_rankings & set(rankings):
                 # Path map = stacked per-node panels (Σ|node map|), never a signed sum.
                 path_steps = tree.decision_path(pooled_grid.reshape(-1))
                 if "exact" in rankings:
-                    fpn_maps["exact"] = path_fpn_map(
-                        tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                        level_name, box_processed, processed_size, path=path_steps,
-                    )
+                    # Pruned nodes add zero, so skip them.
+                    exact_map = torch.zeros_like(level_map[0])
+                    for step in path_steps:
+                        if np.any(tree.node_weights[step.node_index] != 0.0):
+                            exact_map = exact_map + contribution_for(step).abs().sum(0)
+                    fpn_maps["exact"] = exact_map
                 if "shuffled_w" in rankings:
                     # Same stacking, each node's own weights shuffled in place.
                     shuffled_grids = []
@@ -428,10 +441,7 @@ def evaluate_faithfulness_fpn_masking(
                     empty_conf = 1.0 / (1.0 + np.exp(-abs(bias)))
 
                     # A node's score is a sum over FPN pixels, so masking pixels just subtracts them — no need to re-pool.
-                    contribution = exact_fpn_contribution(
-                        tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                        level_name, box_processed, processed_size, path=[step],
-                    )
+                    contribution = contribution_for(step)
                     direction = 1.0 if step.went_left else -1.0
                     signed_box = (contribution.sum(0) * direction)[fy1:fy2, fx1:fx2].detach().cpu().numpy().reshape(-1).astype(np.float64)
                     node_map_box = contribution.abs().sum(0)[fy1:fy2, fx1:fx2].detach().cpu().numpy()
