@@ -207,7 +207,7 @@ class _TreeLayout(NamedTuple):
     coords: dict[int, tuple[float, float]]
 
 
-_TREE_Y_STEP = 2.0  # row height; the margin panel uses the same rows
+_TREE_Y_STEP = 2.0  # row height
 
 
 def _pruned_tree_layout(
@@ -389,37 +389,76 @@ def _draw_full_tree(
     axis.axis("off")
 
 
-def _draw_routing_margin_panel(
-    axis: plt.Axes, explanation: dict[str, Any], symbolic_tree: Any
+def _draw_node_split_panel(
+    axis: plt.Axes, node: dict[str, Any], symbolic_tree: Any, feature_vector: np.ndarray
+) -> float:
+    """One node's real split plane; returns its margin factor σ.
+
+    Axes are the node's own score split in two: a = evidence for LEFT (Σ w>0 · x),
+    c = evidence for RIGHT (-Σ w<0 · x), so f(x) = a - c + b exactly. The split
+    f = 0 is the line c = a + b; the dot is the RoI's real (a, c); its
+    perpendicular distance to the line is |f| / √2. Shading = σ(|f|) at each point.
+    """
+    index = node["node_index"]
+    weights = symbolic_tree.node_weights[index]
+    axis.set_title(f"N{index} {node['decision'].upper()}", fontsize=9, weight="bold", pad=3)
+    if not np.any(weights != 0.0):
+        axis.text(0.5, 0.5, "pruned, skipped", ha="center", va="center", transform=axis.transAxes, fontsize=9)
+        axis.set_xticks([])
+        axis.set_yticks([])
+        return 1.0
+
+    bias = float(symbolic_tree.node_bias[index])
+    contributions = weights * feature_vector
+    a = float(contributions[weights > 0].sum())
+    c = float(-contributions[weights < 0].sum())
+    score = float(node["score"])
+    margin = _node_margin(score)
+
+    lo = min(0.0, a, c)
+    hi = 1.15 * max(a, c, abs(bias), 1e-6)
+    grid = np.linspace(lo, hi, 200)
+    sigma = 1.0 / (1.0 + np.exp(-np.abs(grid[None, :] - grid[:, None] + bias)))  # rows = c, cols = a
+    axis.imshow(
+        sigma, extent=(lo, hi, lo, hi), origin="lower", cmap="Blues", vmin=0.5, vmax=1.0,
+        aspect="equal", zorder=0,
+    )
+    axis.fill_between(grid, lo, grid + bias, color="#388e3c", alpha=0.2, zorder=1)  # f >= 0: left
+    axis.fill_between(grid, grid + bias, hi, color="#d32f2f", alpha=0.2, zorder=1)  # f < 0: right
+    axis.plot(grid, grid + bias, color="black", lw=1.5, zorder=2)
+
+    foot = ((a + c - bias) / 2.0, (a + c + bias) / 2.0)  # closest point on the split line
+    axis.plot([a, foot[0]], [c, foot[1]], color="#f57c00", lw=1.5, ls="--", zorder=3)
+    axis.plot(a, c, "o", color="#fdd835", mec="black", ms=8, zorder=4)
+    axis.set_xlim(lo, hi)
+    axis.set_ylim(lo, hi)
+    axis.set_aspect("equal")
+    axis.tick_params(labelsize=7)
+    axis.set_xlabel(f"|f|={abs(score):.2f}   σ={margin:.4f}", fontsize=9, labelpad=2)
+    return margin
+
+
+def _draw_routing_margin_panels(
+    fig: plt.Figure,
+    spec: Any,
+    explanation: dict[str, Any],
+    symbolic_tree: Any,
+    feature_vector: np.ndarray,
 ) -> None:
-    """One bar per visited node, on the same row as that node. Bar = distance from the decision boundary; label = the node's confidence. Pruned nodes are skipped."""
+    """One 2D split plane per visited node, in tree-depth rows. Πσ is the detection score."""
+    rows = gridspec.GridSpecFromSubplotSpec(symbolic_tree.max_depth, 1, subplot_spec=spec, hspace=0.55)
     confidence = 1.0
     for node in explanation["node_explanations"]:
-        score = float(node["score"])
-        skipped = not np.any(symbolic_tree.node_weights[node["node_index"]] != 0.0)
-        margin = 1.0 if skipped else _node_margin(score)
-        confidence *= margin
-        y = -node["depth"] * _TREE_Y_STEP
-        went_left = node["decision"] == "left"
-        axis.barh(
-            y, 0.0 if skipped else abs(score), height=1.1,
-            color="#388e3c" if went_left else "#d32f2f", alpha=0.85, zorder=2,
+        confidence *= _draw_node_split_panel(
+            fig.add_subplot(rows[node["depth"]]), node, symbolic_tree, feature_vector
         )
-        axis.text(
-            0.0 if skipped else abs(score), y,
-            "  pruned, skipped" if skipped
-            else f"  N{node['node_index']} {node['decision'].upper()}  σ={margin:.4f}",
-            va="center", ha="left", fontsize=9, zorder=3,
-        )
-    axis.set_xlabel("|w·x + b|  (distance from the decision boundary)")
-    axis.set_yticks([])
-    axis.margins(x=0.45)
-    axis.grid(axis="x", alpha=0.25)
-    for side in ("top", "right", "left"):
-        axis.spines[side].set_visible(False)
-    axis.set_title(
-        f"Routing margin per node\nΠσ = {confidence:.4f}   detection score = {explanation['score']:.4f}",
-        fontsize=12, weight="bold",
+    box = spec.get_position(fig)
+    fig.text(
+        (box.x0 + box.x1) / 2, box.y1 + 0.025,
+        f"Routing margin per node\n"
+        f"x: evidence LEFT (Σw⁺x)   y: evidence RIGHT (−Σw⁻x)\n"
+        f"Πσ = {confidence:.4f}   detection score = {explanation['score']:.4f}",
+        ha="center", va="bottom", fontsize=10, weight="bold",
     )
 
 
@@ -442,8 +481,8 @@ def draw_neurosymbolic_explanation(
     # ── Figure 1: full tree (path highlighted) + routing margin per node, rows shared ──
     slots = max(x for x, _ in layout.coords.values()) + 1.0
     tree_width = max(9.0, 0.45 * slots)
-    fig_tree = plt.figure(figsize=(tree_width + 5.5, 1.5 * (symbolic_tree.max_depth + 1) + 1.5))
-    gs_tree = gridspec.GridSpec(1, 2, width_ratios=[tree_width, 5.5], wspace=0.04, figure=fig_tree)
+    fig_tree = plt.figure(figsize=(tree_width + 4.5, 2.4 * symbolic_tree.max_depth + 1.5))
+    gs_tree = gridspec.GridSpec(1, 2, width_ratios=[tree_width, 4.5], wspace=0.04, left=0.02, right=0.98, bottom=0.03, top=0.93, figure=fig_tree)
     ax_tree = fig_tree.add_subplot(gs_tree[0])
     _draw_full_tree(ax_tree, layout, label_name)
     ax_tree.set_title(
@@ -451,8 +490,9 @@ def draw_neurosymbolic_explanation(
         "(green=went left, red=went right, node label = its score, grey = not visited)",
         fontsize=13, weight="bold",
     )
-    ax_margin = fig_tree.add_subplot(gs_tree[1], sharey=ax_tree)
-    _draw_routing_margin_panel(ax_margin, explanation, symbolic_tree)
+    # Same vector explain_hybrid_detection routed on, so each node's (a, c) is its real score.
+    feature_vector = detection_result["pooled_features"][detection_index].detach().cpu().numpy().reshape(-1)
+    _draw_routing_margin_panels(fig_tree, gs_tree[1], explanation, symbolic_tree, feature_vector)
 
     # ── Figure 2: per-node heatmaps (+ Grad-CAM) ──
     has_exact = "projected_exact_attribution_on_proposal_box" in explanation["node_explanations"][0]
