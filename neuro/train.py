@@ -368,6 +368,17 @@ def evaluate_model(
         iou_thresholds=evaluation_config["iou_thresholds"],
     )
 
+    ap50_metric = (
+        MeanAveragePrecision(
+            iou_type="bbox",
+            backend="pycocotools",
+            iou_thresholds=[0.5],
+            class_metrics=True,
+        )
+        if evaluation_config["class_metrics"]
+        else None
+    )
+
     num_classes = len(class_names) + 1
     conf_matrix = torch.zeros(num_classes, num_classes, dtype=torch.int64)
     class_tp = torch.zeros(num_classes, dtype=torch.int64)
@@ -411,6 +422,8 @@ def evaluate_model(
 
         coco_metric.update(predictions_for_metric, targets_for_metric)
         paper_metric.update(predictions_for_metric, targets_for_metric)
+        if ap50_metric is not None:
+            ap50_metric.update(predictions_for_metric, targets_for_metric)
 
     coco_output = coco_metric.compute()
     paper_output = paper_metric.compute()
@@ -467,5 +480,14 @@ def evaluate_model(
         ):
             per_class_ap[class_names[int(class_id) - 1]] = float(class_ap)
         summary["per_class_AP"] = per_class_ap
+
+        ap50_output = ap50_metric.compute()
+        summary["per_class_AP50"] = {
+            class_names[int(class_id) - 1]: float(class_ap)
+            for class_id, class_ap in zip(
+                ap50_output["classes"].tolist(),
+                ap50_output["map_per_class"].tolist(),
+            )
+        }
 
     return summary
