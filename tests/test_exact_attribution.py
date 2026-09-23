@@ -123,6 +123,41 @@ def test_signed_evidence_map_sums_to_the_node_score_exactly():
         assert abs(actual - expected) < 1e-4
 
 
+def test_node_heatmap_uses_absolute_value_not_positive_only():
+    """Mixed positive/negative contributions: `raw_node_heatmap` must be the
+    magnitude of the signed contribution — matches the FPN path's
+    `.abs().sum(0)` (heatmap.path_fpn_map / exact_fpn_contribution) — not
+    just the positive half."""
+    rng = np.random.default_rng(7)
+    feature_shape = (3, 2, 2)
+    tree = SparseObliqueDecisionTreeClassifier(
+        max_depth=1, num_classes=2, input_dim=int(np.prod(feature_shape)),
+        feature_shape=feature_shape,
+    )
+    tree.node_weights[0] = rng.normal(size=tree.node_weights.shape[1]).astype(np.float32)
+    tree.node_bias[0] = 0.0
+    tree.leaf_labels[:] = [0, 1]
+
+    grid = rng.normal(size=feature_shape).astype(np.float32)
+    path = tree.decision_path(grid.reshape(-1))
+    node_explanations = compute_node_local_evidence_maps(tree, grid)
+
+    step = path[0]
+    node = node_explanations[0]
+    direction = 1.0 if step.went_left else -1.0
+    weight_grid = tree.node_weight_grid(step.node_index)
+    signed_local = direction * weight_grid * grid
+
+    expected = np.abs(signed_local).sum(axis=0).astype(np.float32)
+    np.testing.assert_allclose(node["raw_node_heatmap"], expected, atol=1e-5)
+
+    # Fixture must actually produce a negative signed contribution somewhere,
+    # and that cell's magnitude must still be > 0 (not clipped to 0 by max()).
+    negative_cells = np.any(signed_local < 0, axis=0)
+    assert negative_cells.any()
+    assert np.all(node["raw_node_heatmap"][negative_cells] > 0)
+
+
 def test_exact_fpn_contribution_sums_to_each_node_score_not_just_the_path():
     """Per-node claim: each node's own map is a decomposition of THAT node's
     score, not just the whole path's. Note the bias correction — `score` from
@@ -292,6 +327,7 @@ if __name__ == "__main__":
     test_map_follows_the_tree_selected_channel()
     test_map_crops_to_the_processed_box()
     test_signed_evidence_map_sums_to_the_node_score_exactly()
+    test_node_heatmap_uses_absolute_value_not_positive_only()
     test_exact_fpn_contribution_sums_to_each_node_score_not_just_the_path()
     test_path_map_is_the_per_node_panels_stacked()
     test_opposing_nodes_do_not_cancel_in_the_path_map()

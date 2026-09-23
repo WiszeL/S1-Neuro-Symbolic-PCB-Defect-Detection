@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from torchvision.ops import MultiScaleRoIAlign
 
-from neurosym.evaluation import _masked_level, _node_score_after_masking
+from neurosym.evaluation import _grid_map_on_level, _masked_level, _node_score_after_masking
 from neurosym.heatmap import _fpn_box_bounds
 from symbolic.evaluation import (
     _FAITHFULNESS_CELL_BUDGET_FRACTION,
@@ -68,6 +68,27 @@ def test_row_cell_ranking_covers_every_cell_regardless_of_sparsity():
     ranking = _row_cell_ranking(tree, feature_row)
     assert ranking.shape == (height * width,)
     assert set(ranking.tolist()) == set(range(height * width))
+
+
+def test_grid_map_on_level_fills_only_the_box():
+    # 7x7 grid map with one hot cell at its bottom-right corner.
+    grid_map = np.zeros((7, 7), dtype=np.float32)
+    grid_map[6, 6] = 1.0
+    level_hw = (16, 16)
+    inner = (4, 4, 11, 11)  # (ix1, iy1, ix2, iy2)
+    full = _grid_map_on_level(grid_map, level_hw, inner)
+
+    assert tuple(full.shape) == level_hw
+    # Nothing outside the box.
+    assert full[:4].sum().item() == 0
+    assert full[11:].sum().item() == 0
+    assert full[:, :4].sum().item() == 0
+    assert full[:, 11:].sum().item() == 0
+    # Hottest pixel lands in the box's bottom-right quadrant.
+    peak = int(torch.argmax(full.reshape(-1)))
+    peak_row, peak_col = peak // level_hw[1], peak % level_hw[1]
+    assert 8 <= peak_row < 11
+    assert 8 <= peak_col < 11
 
 
 def test_importance_ranking_is_shared_by_both_evaluators():
@@ -140,6 +161,7 @@ if __name__ == "__main__":
     test_deletion_insertion_k_schedule_matches_gradcam()
     test_full_channel_flat_indices_covers_every_channel_at_selected_cells()
     test_row_cell_ranking_covers_every_cell_regardless_of_sparsity()
+    test_grid_map_on_level_fills_only_the_box()
     test_importance_ranking_is_shared_by_both_evaluators()
     test_node_score_with_empty_level_equals_bias()
     test_node_score_at_full_deletion_or_insertion_matches_the_endpoint_it_should()

@@ -21,7 +21,13 @@ from util.heatmap_metrics import (
     topk_region_overlap,
 )
 
-from .heatmap import _fpn_box_bounds, exact_fpn_contribution, path_fpn_map, path_weight_grid
+from .heatmap import (
+    _fpn_box_bounds,
+    compute_node_local_evidence_maps,
+    exact_fpn_contribution,
+    path_fpn_map,
+    path_weight_grid,
+)
 from .hybrid import NeuroSymbolicDetector
 from .inference import explain_hybrid_detection
 
@@ -117,6 +123,24 @@ def _rank_positions_fpn(
         raise ValueError(f"Unknown ranking {ranking!r}.")
 
     return np.argsort(scores.reshape(-1))[::-1]
+
+
+def _grid_map_on_level(
+    grid_map: np.ndarray,
+    level_hw: tuple[int, int],
+    inner_bounds: tuple[int, int, int, int],
+) -> Tensor:
+    """7x7 grid map stretched over the box (no margin) on a zero level-sized map,
+    so it ranks like any FPN map; margin pixels rank last."""
+    ix1, iy1, ix2, iy2 = inner_bounds
+    full = torch.zeros(level_hw, dtype=torch.float32)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return full
+    full[iy1:iy2, ix1:ix2] = F.interpolate(
+        torch.from_numpy(np.ascontiguousarray(grid_map, dtype=np.float32))[None, None],
+        size=(iy2 - iy1, ix2 - ix1), mode="bilinear", align_corners=False,
+    )[0, 0]
+    return full
 
 
 def _mean(xs: list[float]) -> float:
@@ -253,6 +277,7 @@ def evaluate_faithfulness_fpn_masking(
     random_state: int = 42,
     per_node: bool = True,
     auc_steps: int = 5,
+    use_fpn_heatmap: bool = True,
 ) -> dict[str, Any]:
     """Necessity/sufficiency at full FPN resolution: mask top pixels, re-pool, check labels.
 
@@ -278,8 +303,19 @@ def evaluate_faithfulness_fpn_masking(
       NODE weighs decide THAT NODE's question" — the per-node panels' claim.
 
     `return["node_map_similarity"]`: mean cosine similarity between
-    consecutive nodes' exact maps along the path — evidence the six steps
-    weigh different regions (high similarity would mean nothing to show).
+    consecutive nodes' maps (exact FPN, or grid when `use_fpn_heatmap=False`)
+    along the path — evidence the six steps weigh different regions (high
+    similarity would mean nothing to show).
+
+    `use_fpn_heatmap=False`: SODT's own maps (`"exact"`, `"shuffled_w"`, and
+    the per-node ranking) are replaced by the displayed 7x7 grid heatmap
+    (`heatmap.compute_node_local_evidence_maps`'s `raw_node_heatmap`),
+    stretched over the box — the resolution ablation. Masking still happens
+    on FPN pixels, and node scores (hence `deletion_auc`/`insertion_auc`,
+    `support_fraction`, `node_necessity_ceiling`) always come from the exact
+    per-node decomposition, since those are properties of the node's real
+    routing score, not of the displayed map. `"activation_only"` and
+    `"random"` are unaffected either way.
 
     Per-node masked scores come from each node's exact map (no re-pooling); only the path-level rows re-pool.
     """
@@ -349,6 +385,17 @@ def evaluate_faithfulness_fpn_masking(
             n_pos = (fy2 - fy1) * (fx2 - fx1)
             budget = max(int(n_pos * budget_fraction), 1)
 
+            # Ablation: the displayed 7x7 grid maps, stretched over the box —
+            # one per path node, in path order (prune-free, matches `path` below).
+            grid_node_maps: list[Tensor] | None = None
+            if not use_fpn_heatmap:
+                level_hw = tuple(level_map.shape[-2:])
+                inner = _fpn_box_bounds(box_processed, padded_size, level_hw, margin=0)
+                grid_node_maps = [
+                    _grid_map_on_level(node["raw_node_heatmap"], level_hw, inner)
+                    for node in compute_node_local_evidence_maps(tree, pooled_grid)
+                ]
+
             # One map per path node, shared by the path map and the per-node block below.
             node_contribs: dict[int, Tensor] = {}
 
@@ -366,12 +413,15 @@ def evaluate_faithfulness_fpn_masking(
                 # Path map = stacked per-node panels (Σ|node map|), never a signed sum.
                 path_steps = tree.decision_path(pooled_grid.reshape(-1))
                 if "exact" in rankings:
-                    # Pruned nodes add zero, so skip them.
-                    exact_map = torch.zeros_like(level_map[0])
-                    for step in path_steps:
-                        if np.any(tree.node_weights[step.node_index] != 0.0):
-                            exact_map = exact_map + contribution_for(step).abs().sum(0)
-                    fpn_maps["exact"] = exact_map
+                    if use_fpn_heatmap:
+                        # Pruned nodes add zero, so skip them.
+                        exact_map = torch.zeros_like(level_map[0])
+                        for step in path_steps:
+                            if np.any(tree.node_weights[step.node_index] != 0.0):
+                                exact_map = exact_map + contribution_for(step).abs().sum(0)
+                        fpn_maps["exact"] = exact_map
+                    else:
+                        fpn_maps["exact"] = torch.stack(grid_node_maps).sum(0)
                 if "shuffled_w" in rankings:
                     # Same stacking, each node's own weights shuffled in place.
                     shuffled_grids = []
@@ -380,11 +430,22 @@ def evaluate_faithfulness_fpn_masking(
                         flat = node_grid.reshape(-1).copy()
                         rng.shuffle(flat)
                         shuffled_grids.append(flat.reshape(node_grid.shape))
-                    fpn_maps["shuffled_w"] = path_fpn_map(
-                        tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                        level_name, box_processed, processed_size, path=path_steps,
-                        node_weight_grids=shuffled_grids,
-                    )
+                    if use_fpn_heatmap:
+                        fpn_maps["shuffled_w"] = path_fpn_map(
+                            tree, pooled_grid, detector.roi_align, unbatched_fpn,
+                            level_name, box_processed, processed_size, path=path_steps,
+                            node_weight_grids=shuffled_grids,
+                        )
+                    else:
+                        level_hw = tuple(level_map.shape[-2:])
+                        inner = _fpn_box_bounds(box_processed, padded_size, level_hw, margin=0)
+                        fpn_maps["shuffled_w"] = torch.stack([
+                            _grid_map_on_level(
+                                np.abs(shuffled_grid * pooled_grid).sum(0),
+                                level_hw, inner,
+                            )
+                            for shuffled_grid in shuffled_grids
+                        ]).sum(0)
                 if "activation_only" in rankings:
                     fpn_maps["activation_only"] = level_map.detach().abs().sum(0)
 
@@ -422,14 +483,15 @@ def evaluate_faithfulness_fpn_masking(
                         # (same call as hybrid.py's routing-margin).
                         continue
 
-                    # Ceiling for "exact" specifically: if its top-ranked
-                    # pixels cover the node's whole nonzero support (sparse
-                    # node, common under L1), masking collapses the score to
-                    # bias alone, so flip needs sign(bias) != sign(score).
-                    # NOT a bound for "random" — a random 50% subset can flip
-                    # via unrelated cancellation even past this. Verified
-                    # against a dense-weight synthetic tree, where random's
-                    # flip rate did exceed this number.
+                    # Ceiling for "exact" specifically (support is always the
+                    # exact node support): if its top-ranked pixels cover the
+                    # node's whole nonzero support (sparse node, common under
+                    # L1), masking collapses the score to bias alone, so flip
+                    # needs sign(bias) != sign(score). NOT a bound for
+                    # "random" — a random 50% subset can flip via unrelated
+                    # cancellation even past this. Verified against a
+                    # dense-weight synthetic tree, where random's flip rate
+                    # did exceed this number.
                     bias_blocks_flip = (bias >= 0.0) == step.went_left
                     node_ceiling[depth].append(float(not bias_blocks_flip))
 
@@ -441,10 +503,19 @@ def evaluate_faithfulness_fpn_masking(
                     empty_conf = 1.0 / (1.0 + np.exp(-abs(bias)))
 
                     # A node's score is a sum over FPN pixels, so masking pixels just subtracts them — no need to re-pool.
+                    # Node scores (signed_box) always come from the exact
+                    # decomposition — it's the node's real routing score, not
+                    # a displayed map. Only the ranking map (node_map_box)
+                    # follows `use_fpn_heatmap`.
                     contribution = contribution_for(step)
                     direction = 1.0 if step.went_left else -1.0
                     signed_box = (contribution.sum(0) * direction)[fy1:fy2, fx1:fx2].detach().cpu().numpy().reshape(-1).astype(np.float64)
-                    node_map_box = contribution.abs().sum(0)[fy1:fy2, fx1:fx2].detach().cpu().numpy()
+                    exact_node_map_box = contribution.abs().sum(0)[fy1:fy2, fx1:fx2].detach().cpu().numpy()
+                    node_map_box = (
+                        exact_node_map_box
+                        if use_fpn_heatmap
+                        else grid_node_maps[depth][fy1:fy2, fx1:fx2].numpy()
+                    )
 
                     def node_score(sel_flat: np.ndarray, *, insert: bool) -> float:
                         """This node's `w.x + b` with `sel_flat` kept (insert) or masked."""
@@ -466,7 +537,9 @@ def evaluate_faithfulness_fpn_masking(
                             # "exact" when this is <= budget_fraction (its
                             # top-ranked pixels then cover the whole nonzero
                             # support); above that, the ceiling is loose.
-                            support_fraction = float((node_map_box > 0).mean())
+                            # Always the exact node support, even when
+                            # `use_fpn_heatmap=False` (the ranking map).
+                            support_fraction = float((exact_node_map_box > 0).mean())
                             node_results[name][depth]["support_fraction"].append(support_fraction)
                         else:  # "random"
                             order = rng.permutation(n_pos)

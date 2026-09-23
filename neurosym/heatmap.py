@@ -87,23 +87,27 @@ def compute_node_local_evidence_maps(
         direction = 1.0 if step.went_left else -1.0
         weight_grid = tree.node_weight_grid(step.node_index)
         signed_local = direction * weight_grid * grid
-        positive_evidence = np.maximum(signed_local, 0.0).sum(axis=0).astype(np.float32)
-        node_heatmap = _normalize_heatmap_array(positive_evidence)
+        # Magnitude, not just the positive half — matches the FPN path's
+        # `.abs().sum(0)` (heatmap.path_fpn_map / exact_fpn_contribution), so
+        # the FPN-vs-grid ablation differs only in resolution, not in whether
+        # negative contributions count.
+        evidence_magnitude = np.abs(signed_local).sum(axis=0).astype(np.float32)
+        node_heatmap = _normalize_heatmap_array(evidence_magnitude)
         node_explanations.append(
             {
                 "depth": int(depth),
                 "node_index": int(step.node_index),
                 "decision": "left" if step.went_left else "right",
                 "score": float(step.score),
-                "positive_evidence_sum": float(positive_evidence.sum()),
-                "positive_evidence_cell_count": int(
-                    np.count_nonzero(positive_evidence > 0.0)
+                "evidence_magnitude_sum": float(evidence_magnitude.sum()),
+                "evidence_magnitude_cell_count": int(
+                    np.count_nonzero(evidence_magnitude > 0.0)
                 ),
                 "active_original_feature_count": int(
                     tree.node_feature_indices(step.node_index).size
                 ),
                 "node_heatmap": node_heatmap,
-                "raw_node_heatmap": positive_evidence,
+                "raw_node_heatmap": evidence_magnitude,
                 # Signed, so it sums back to the node's score (tested).
                 "signed_evidence_map": signed_local.sum(axis=0).astype(np.float32),
                 "top_local_cells": _top_grid_cells(node_heatmap, top_k=8),

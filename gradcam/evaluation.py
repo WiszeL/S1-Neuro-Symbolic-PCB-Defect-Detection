@@ -18,7 +18,11 @@ from tqdm import tqdm
 
 from neuro.faster_rcnn import NeuroFasterRCNN
 from neurosym.evaluation import _mean, fpn_deletion_insertion_auc, fpn_necessity_sufficiency
-from neurosym.heatmap import _fpn_box_bounds, compute_exact_attribution
+from neurosym.heatmap import (
+    _fpn_box_bounds,
+    compute_exact_attribution,
+    compute_node_local_evidence_maps,
+)
 from neurosym.hybrid import NeuroSymbolicDetector
 from symbolic.evaluation import _FAITHFULNESS_CELL_BUDGET_FRACTION
 from util.geometry import project_gt_box_to_roi_grid
@@ -136,6 +140,7 @@ def evaluate_shared_localization(
     min_proposal_iou: float = 0.05,
     max_proposal_iou: float = 0.35,
     random_state: int = 42,
+    use_fpn_heatmap: bool = True,
 ) -> dict[str, Any]:
     """Pointing / IoU for SODT, Grad-CAM and random on one identical RoI list.
 
@@ -144,6 +149,11 @@ def evaluate_shared_localization(
     (tight boxes make pointing trivial) and both models call it a defect;
     each method explains its own model's class. RoIs where either map is
     empty are dropped for all three, so the lists stay identical.
+
+    `use_fpn_heatmap=False`: SODT's map is the displayed 7x7 grid heatmap
+    (`heatmap.compute_node_local_evidence_maps`'s `raw_node_heatmap`, summed
+    over the path) instead of the exact FPN attribution — the resolution
+    ablation used elsewhere in `neurosym.evaluation`.
     """
     detector = hybrid_model.detector
     tree = hybrid_model.symbolic_tree
@@ -205,18 +215,27 @@ def evaluate_shared_localization(
                 continue
 
             pooled_row = kept_local[local]
-            sodt_map = _to_grid(
-                compute_exact_attribution(
-                    tree,
-                    pooled_np[pooled_row],
-                    detector.roi_align,
-                    unbatched_fpn,
-                    featmap_names[int(level_indices[pooled_row])],
-                    proposals[row],
-                    processed_size,
-                    padded_size,
+            if use_fpn_heatmap:
+                sodt_map = _to_grid(
+                    compute_exact_attribution(
+                        tree,
+                        pooled_np[pooled_row],
+                        detector.roi_align,
+                        unbatched_fpn,
+                        featmap_names[int(level_indices[pooled_row])],
+                        proposals[row],
+                        processed_size,
+                        padded_size,
+                    )
                 )
-            )
+            else:
+                # The 7x7 map shown when use_fpn_heatmap=False; already on the proposal grid.
+                sodt_map = normalize_heatmap(
+                    sum(
+                        node["raw_node_heatmap"]
+                        for node in compute_node_local_evidence_maps(tree, pooled_np[pooled_row])
+                    )
+                )
             gradcam_map = normalize_heatmap(gradcam_maps[local])
             if sodt_map.sum() == 0 or gradcam_map.sum() == 0:
                 continue

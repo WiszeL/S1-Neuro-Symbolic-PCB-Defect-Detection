@@ -545,7 +545,7 @@ def draw_neurosymbolic_explanation(
             f"{title_prefix} — Depth {node['depth'] + 1} | Node {node['node_index']}\n"
             f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}  "
             f"margin σ={_node_margin(node['score']):.4f} "
-            f"(evidence {node.get('positive_evidence_sum', 0.0):.2f})"
+            f"(evidence {node.get('evidence_magnitude_sum', 0.0):.2f})"
         )
 
     if extra_panel_func is not None:

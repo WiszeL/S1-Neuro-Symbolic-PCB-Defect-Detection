@@ -63,15 +63,15 @@ Perkembangan teknologi elektronik meningkatkan kebutuhan terhadap komponen yang 
 
 Tahap inspeksi PCB selama ini bertumpu pada metode konvensional seperti pemeriksaan visual manual dan pengujian kelistrikan. Namun, metode-metode tersebut kerap dinilai tidak efisien, memakan biaya tinggi, dan rentan terhadap kesalahan akibat faktor manusia (Ali et al., 2024; Chen et al., 2023; Fung et al., 2024). Keterbatasan tersebut mendorong pengembangan solusi otomatis berbasis *Artificial Intelligence* (AI), khususnya pendekatan *deep learning*. Berbagai model *deep learning* seperti *You Only Look Once* (YOLO), *Single Shot MultiBox Detector* (SSD), dan *Faster* *Region-based Convolutional Neural Network* (R-CNN) telah banyak diterapkan untuk deteksi cacat PCB dan menunjukkan performa yang tinggi dalam berbagai studi (Chen et al., 2023). Sebagai contoh, Wang et al. (2024) mengembangkan YOLO-RLC, yaitu YOLOv5 dengan jaringan konvolusi kernel besar residual yang meningkatkan akurasi deteksi cacat PCB. Bahkan, penelitian oleh Fung et al. (2024) menunjukkan bahwa optimasi pada arsitektur *Faster* R-CNN dapat meningkatkan performa deteksi cacat PCB, terutama pada cacat yang berukuran kecil. Hasil beberapa penelitian tersebut menunjukkan bahwa pendekatan berbasis *deep learning* merupakan pendekatan yang dapat diandalkan untuk tahap inspeksi.
 
-Meskipun pendekatan *deep learning* menunjukkan performa deteksi tinggi, model ini memiliki kelemahan berupa sifat *black-box,* yakni ketidakmampuan model dalam memberikan penjelasan atas setiap keputusan yang dihasilkannya. Padahal, dalam industri manufaktur berisiko tinggi seperti produksi PCB, penjelasan tersebut diperlukan teknisi untuk memvalidasi dan mempertanggungjawabkan hasil deteksi  (Tzionis et al., 2026). Tanpa penjelasan yang memadai, proses validasi menjadi sulit dilakukan sehingga berpotensi menurunkan kepercayaan teknisi terhadap model (Tziolas et al., 2025). Oleh karena itu, kemampuan model dalam menjelaskan keputusan (*explainability*) menjadi kebutuhan esensial guna mendukung proses validasi teknisi dalam inspeksi cacat PCB (Saadallah et al., 2022; Chen et al., 2023).
+Meskipun pendekatan *deep learning* menunjukkan performa deteksi tinggi, model ini memiliki kelemahan berupa sifat *black-box,* yakni ketidakmampuan model dalam memberikan penjelasan atas setiap keputusan yang dihasilkannya. Padahal, dalam industri manufaktur berisiko tinggi seperti produksi PCB, penjelasan tersebut diperlukan teknisi untuk memvalidasi dan mempertanggungjawabkan hasil deteksi  (Tzionis et al., 2026). Tanpa penjelasan yang memadai, proses validasi menjadi sulit dilakukan sehingga berpotensi menurunkan kepercayaan teknisi terhadap model (Tziolas et al., 2025). Oleh karena itu, kemampuan model dalam menjelaskan keputusan (*explainability*) menjadi kebutuhan esensial guna mendukung proses validasi teknisi dalam inspeksi cacat PCB (Saadallah et al., 2022; Chen et al., 2023).
 
 Untuk merespons kebutuhan *explainability* tersebut, *Explainable Artificial Intelligence* (XAI) menjadi pendekatan yang dominan diterapkan dalam sistem inspeksi manufaktur (Tzionis et al., 2026). Pendekatan XAI menghadirkan *explainability* dengan membuat proses pengambilan keputusan model AI dapat ditelusuri dan dipahami. Dalam inspeksi PCB, penelitian Tziolas et al. (2025) menunjukkan bahwa *Deep* *Shapley Additive Explanations* (SHAP) dan *Gradient-weighted Class Activation Mapping* (Grad-CAM) dapat menyoroti area visual yang memengaruhi keputusan model CNN, sehingga meningkatkan interpretabilitas model bagi teknisi. Penelitian lain oleh Saadallah et al. (2022) menggunakan penjelasan berbasis *heatmap* yang mengungkap fitur-fitur penting pada data *Solder Paste Inspection* (SPI) PCB, sehingga membantu teknisi dalam memvalidasi relevansi fitur tersebut terhadap prediksi kualitas produk. Dengan demikian, XAI mampu memenuhi kebutuhan *explainability* pada inspeksi PCB melalui justifikasi visual atas keputusan model.
 
 Meskipun informatif, metode XAI Grad-CAM dan SHAP pada studi tersebut, masih memiliki keterbatasan berupa sifat *post-hoc*, yaitu penjelasan yang baru diberikan setelah model *black-box* menghasilkan prediksinya. Mekanisme ini menyebabkan penjelasan yang dihasilkan tidak memenuhi *faithfulness*, yaitu kemampuannya dalam merepresentasikan keputusan model yang sesungguhnya, sehingga penjelasan tersebut hanyalah berupa perkiraan (Rudin, 2019). Pada domain berisiko tinggi, peta *saliency* *post-hoc*, termasuk Grad-CAM, terbukti belum sepenuhnya dapat diandalkan (Arun et al., 2021), sehingga validasi teknisi yang bertumpu padanya dalam inspeksi PCB berpotensi mengarah pada keputusan yang salah. Dengan demikian, ketiadaan *faithfulness* dalam penjelasan *post-hoc* justru mengurangi kualitas *explainability* yang dibutuhkan untuk validasi teknisi (Rudin, 2019).
 
-Untuk mengatasi keterbatasan *faithfulness* dalam penjelasan model, arsitektur *neuro-symbolic* hadir dengan menggabungkan ekstraksi fitur dari *deep learning* dan penalaran transparan berbasis simbolik. Dalam arsitektur ini, komponen simbolik terintegrasi langsung ke dalam mekanisme pengambilan keputusan sehingga penjelasan yang dihasilkan bersifat *faithful* (d'Avila Garcez & Lamb, 2023). Arsitektur ini telah ditunjukkan oleh model *Faster*-LTN yang mengintegrasikan *Faster* R-CNN dengan *Logic Tensor Network* (LTN) untuk mempertahankan performa deteksi sekaligus memberikan penalaran terstruktur (Manigrasso et al., 2021). Sejalan dengan arah tersebut, Hada et al. (2024) serta Kairgeldin dan Carreira-Perpiñán (2025) mengembangkan integrasi CNN dengan *sparse oblique decision tree* (SODT) yang membuat proses pengambilan keputusan model lebih dapat diinterpretasikan dan divisualisasikan. Dengan demikian, ketiga penelitian tersebut berpotensi menghadirkan *faithfulness* sehingga meningkatkan kualitas *explainability* pada inspeksi PCB.
+Untuk mengatasi keterbatasan *faithfulness* dalam penjelasan model, arsitektur *neuro-symbolic* hadir dengan menggabungkan ekstraksi fitur dari *deep learning* dan penalaran transparan berbasis simbolik. Dalam arsitektur ini, komponen simbolik terintegrasi langsung ke dalam mekanisme pengambilan keputusan sehingga penjelasan yang dihasilkan bersifat *faithful* (d'Avila Garcez & Lamb, 2023). Arsitektur ini telah ditunjukkan oleh model *Faster*-LTN yang mengintegrasikan *Faster* R-CNN dengan *Logic Tensor Network* (LTN) untuk mempertahankan performa deteksi sekaligus memberikan penalaran terstruktur (Manigrasso et al., 2021). Sejalan dengan arah tersebut, Hada et al. (2024) serta Kairgeldin dan Carreira-Perpiñán (2025) mengembangkan integrasi CNN dengan *sparse oblique decision tree* (SODT) yang membuat proses pengambilan keputusan model lebih dapat diinterpretasikan dan divisualisasikan. Dengan demikian, ketiga penelitian tersebut berpotensi menghadirkan *faithfulness* sehingga meningkatkan kualitas *explainability* pada inspeksi PCB.
 
-Untuk mewujudkan *explainability* yang *faithfulness*, penelitian ini mengusulkan integrasi *Faster* R‑CNN dengan SODT sebagai sistem deteksi cacat berbasis arsitektur *neuro‑symbolic*. *Faster* R‑CNN dipilih karena terbukti efektif mendeteksi cacat berukuran kecil pada PCB melalui optimalisasi SF‑PSPyramid (Fung et al., 2024), sehingga berperan sebagai komponen ekstraksi fitur visual dan deteksi objek. Sementara itu, SODT dipilih karena kemampuannya dalam meniru (*mimic)* keputusan jaringan saraf *teacher* dengan akurasi tinggi, namun dengan mekanisme eliminasi fitur (*sparsity*) yang menghasilkan struktur pohon lebih sederhana (Hada et al., 2024; Kairgeldin & Carreira‑Perpiñán, 2025). Integrasi ini dirancang untuk mempertahankan performa deteksi tinggi dari *Faster* R‑CNN sekaligus menghadirkan penjelasan yang *faithful*. Dengan demikian, sistem ini ditujukan untuk mendukung validasi teknisi dalam inspeksi cacat PCB.
+Untuk mewujudkan *explainability* yang *faithfulness*, penelitian ini mengusulkan integrasi *Faster* R‑CNN dengan SODT sebagai sistem deteksi cacat berbasis arsitektur *neuro‑symbolic*. *Faster* R‑CNN dipilih karena terbukti efektif mendeteksi cacat berukuran kecil pada PCB melalui optimalisasi SF‑PSPyramid (Fung et al., 2024), sehingga berperan sebagai komponen ekstraksi fitur visual dan deteksi objek. Sementara itu, SODT dipilih karena kemampuannya dalam meniru (*mimic)* keputusan jaringan saraf *teacher* dengan akurasi tinggi, namun dengan mekanisme eliminasi fitur (*sparsity*) yang menghasilkan struktur pohon lebih sederhana (Hada et al., 2024; Kairgeldin & Carreira‑Perpiñán, 2025). Integrasi ini dirancang untuk mempertahankan performa deteksi tinggi dari *Faster* R‑CNN sekaligus menghadirkan penjelasan yang *faithful*. Dengan demikian, sistem ini ditujukan untuk mendukung validasi teknisi dalam inspeksi cacat PCB.
 
 ## 1.2 Rumusan Masalah
 
@@ -87,11 +87,11 @@ Agar penelitian ini tetap terarah dan fokus sesuai dengan tujuan yang telah dite
 
 1.  Objek Penelitian
 
-Penelitian difokuskan pada deteksi enam jenis cacat visual PCB, yaitu *open*, *short*, *mousebite*, *spur*, *pinhole*, dan *spurious copper*, menggunakan pendekatan *deep learning* dan *neuro‑symbolic*.
+Penelitian difokuskan pada deteksi enam jenis cacat visual PCB, yaitu *open*, *short*, *mousebite*, *spur*, *pinhole*, dan *spurious copper*, menggunakan pendekatan *deep learning* dan *neuro‑symbolic*.
 
 2.  Arsitektur Model
 
-Model merupakan integrasi Faster R‑CNN (mengacu pada implementasi Fung et al., 2024) dengan *Sparse Oblique Decision Tree* (SODT) tanpa modifikasi terhadap struktur internal kedua komponen.
+Model merupakan integrasi Faster R‑CNN (mengacu pada implementasi Fung et al., 2024) dengan *Sparse Oblique Decision Tree* (SODT) tanpa modifikasi terhadap struktur internal kedua komponen.
 
 3.  Sumber Data
 
@@ -99,7 +99,7 @@ Data yang digunakan berasal dari dataset publik DeepPCB yang memuat 1.500 pasang
 
 4.  Metode Evaluasi *Explainability*
 
-Evaluasi kualitas *explainability* dilakukan secara kuantitatif melalui perbandingan dengan Grad‑CAM sebagai *baseline post‑hoc* yang telah teruji, tanpa melibatkan studi pengguna atau wawancara teknisi.
+Evaluasi kualitas *explainability* dilakukan secara kuantitatif melalui perbandingan dengan Grad‑CAM sebagai *baseline post‑hoc* yang telah teruji, tanpa melibatkan studi pengguna atau wawancara teknisi.
 
 ## 1.4 Tujuan Penelitian
 
@@ -121,9 +121,9 @@ Evaluasi kualitas *explainability* dilakukan secara kuantitatif melalui perbandi
 
 ### 2.1.1 *Printed Circuit Board* (PCB)
 
-*Printed Circuit Board *(PCB) adalah papan dari bahan isolator yang dilapisi tembaga. PCB berfungsi sebagai jalur penghubung listrik sekaligus penyangga antarkomponen elektronik (Coombs & Holden, 2016; Khandpur, 2005).
+*Printed Circuit Board *(PCB) adalah papan dari bahan isolator yang dilapisi tembaga. PCB berfungsi sebagai jalur penghubung listrik sekaligus penyangga antarkomponen elektronik (Coombs & Holden, 2016; Khandpur, 2005).
 
-Kriteria inspeksi PCB di industri mengacu pada standar *Association Connecting Electronics Industries* (IPC), khususnya IPC-A-600 dan IPC-6012 (IPC, 2015, 2020). Standar ini menyatakan suatu kondisi sebagai cacat apabila melanggar batas toleransi, misalnya jalur konduktor yang terlalu sempit atau jarak antarjalur yang terlalu dekat. Dalam *Computer Vision*, pelanggaran tersebut dipandang sebagai cacat visual yang polanya dapat dipelajari oleh model *deep learning* (Tang et al., 2019; Chen et al., 2023). Enam jenis cacat yang umum dipakai pada penelitian deteksi PCB dirangkum pada Tabel 2.1.
+Kriteria inspeksi PCB di industri mengacu pada standar *Association Connecting Electronics Industries* (IPC), khususnya IPC-A-600 dan IPC-6012 (IPC, 2015, 2020). Standar ini menyatakan suatu kondisi sebagai cacat apabila melanggar batas toleransi, misalnya jalur konduktor yang terlalu sempit atau jarak antarjalur yang terlalu dekat. Dalam *Computer Vision*, pelanggaran tersebut dipandang sebagai cacat visual yang polanya dapat dipelajari oleh model *deep learning* (Tang et al., 2019; Chen et al., 2023). Enam jenis cacat yang umum dipakai pada penelitian deteksi PCB dirangkum pada Tabel 2.1.
 
 **Tabel 2.1 Kategori Cacat Visual Umum pada PCB.**
 
@@ -136,17 +136,17 @@ Kriteria inspeksi PCB di industri mengacu pada standar *Association Connecting 
 | *Pinhole* | Lubang kecil berbentuk lingkaran di dalam area tembaga yang seharusnya padat. |
 | *Spurious Copper* | Tembaga liar yang muncul terpisah di area non-konduktif, tidak terhubung ke jalur utama. |
 
-Keenam cacat tersebut terbagi menjadi dua kelompok pola. Kelompok pertama adalah pengurangan material (*open*, *mousebite*, *pinhole*), yaitu hilangnya sebagian tembaga. Kelompok kedua adalah penambahan material liar (*short*, *spur*, *spurious copper*), yaitu munculnya tembaga di tempat yang salah.
+Keenam cacat tersebut terbagi menjadi dua kelompok pola. Kelompok pertama adalah pengurangan material (*open*, *mousebite*, *pinhole*), yaitu hilangnya sebagian tembaga. Kelompok kedua adalah penambahan material liar (*short*, *spur*, *spurious copper*), yaitu munculnya tembaga di tempat yang salah.
 
 ### 2.1.2 Computer Vision
 
-*Computer Vision *(CV) adalah cabang ilmu komputer yang membuat komputer mampu memahami isi gambar secara otomatis (Szeliski, 2022). Berbeda dengan pengolahan citra yang hanya memanipulasi piksel, CV bertujuan menghasilkan makna atau keputusan dari isi gambar (Prince, 2023). CV mencakup tiga tugas utama yang dibedakan berdasarkan kedetailan keluarannya.
+*Computer Vision *(CV) adalah cabang ilmu komputer yang membuat komputer mampu memahami isi gambar secara otomatis (Szeliski, 2022). Berbeda dengan pengolahan citra yang hanya memanipulasi piksel, CV bertujuan menghasilkan makna atau keputusan dari isi gambar (Prince, 2023). CV mencakup tiga tugas utama yang dibedakan berdasarkan kedetailan keluarannya.
 
 1.  **Klasifikasi Citra** (*Image Classification*) memberikan satu label kelas untuk keseluruhan gambar, tanpa memperhatikan letak objek (Prince, 2023).
 
-2.  **Deteksi Objek** (*Object Detection*) mengenali objek, menentukan kelasnya, sekaligus menunjukkan posisinya menggunakan kotak pembatas (*bounding box*) (Szeliski, 2022).
+2.  **Deteksi Objek** (*Object Detection*) mengenali objek, menentukan kelasnya, sekaligus menunjukkan posisinya menggunakan kotak pembatas (*bounding box*) (Szeliski, 2022).
 
-3.  **Segmentasi Citra** (*Image Segmentation*) memberi label pada setiap piksel, sehingga batas objek tergambar lebih presisi (Minaee et al., 2021).
+3.  **Segmentasi Citra** (*Image Segmentation*) memberi label pada setiap piksel, sehingga batas objek tergambar lebih presisi (Minaee et al., 2021).
 
 Perbandingan ketiga tugas tersebut ditunjukkan pada Gambar 2.1.
 
@@ -154,7 +154,7 @@ Perbandingan ketiga tugas tersebut ditunjukkan pada Gambar 2.1.
 
 **Gambar 2.1 Perbandingan Klasifikasi, Deteksi Objek, dan Segmentasi**
 
-Deteksi objek merupakan tugas yang relevan untuk inspeksi visual, karena selain mengenali jenis cacat juga menunjukkan lokasinya. Representasi dan sistem koordinat *bounding box* ditunjukkan pada Gambar 2.2.
+Deteksi objek merupakan tugas yang relevan untuk inspeksi visual, karena selain mengenali jenis cacat juga menunjukkan lokasinya. Representasi dan sistem koordinat *bounding box* ditunjukkan pada Gambar 2.2.
 
 [Gambar 2.2]
 
@@ -162,7 +162,7 @@ Deteksi objek merupakan tugas yang relevan untuk inspeksi visual, karena selain 
 
 ### 2.1.3 Deep Learning
 
-*Deep learning *adalah cabang *machine learning* yang mempelajari representasi data secara bertingkat melalui banyak lapisan pemrosesan (Goodfellow et al., 2016). *Machine learning* konvensional bergantung pada fitur rancangan manusia, sedangkan *deep learning* memperoleh fitur secara otomatis dari data mentah (Han et al., 2017). Perbedaan alur kerja keduanya ditunjukkan pada Gambar 2.3.
+*Deep learning *adalah cabang *machine learning* yang mempelajari representasi data secara bertingkat melalui banyak lapisan pemrosesan (Goodfellow et al., 2016). *Machine learning* konvensional bergantung pada fitur rancangan manusia, sedangkan *deep learning* memperoleh fitur secara otomatis dari data mentah (Han et al., 2017). Perbedaan alur kerja keduanya ditunjukkan pada Gambar 2.3.
 
 [Gambar 2.3]
 
@@ -176,7 +176,7 @@ Propagasi maju menghasilkan prediksi dari data masukan melalui operasi berlapis.
 
 2.  **Fungsi Aktivasi**
 
-Fungsi aktivasi memberikan sifat non-linear pada jaringan sehingga model mampu memodelkan hubungan yang kompleks. Fungsi yang umum digunakan adalah *Rectified Linear Unit* (ReLU) pada Persamaan 2.1, karena ringan secara komputasi dan mengurangi masalah *vanishing gradient* (LeCun et al., 2015).
+Fungsi aktivasi memberikan sifat non-linear pada jaringan sehingga model mampu memodelkan hubungan yang kompleks. Fungsi yang umum digunakan adalah *Rectified Linear Unit* (ReLU) pada Persamaan 2.1, karena ringan secara komputasi dan mengurangi masalah *vanishing gradient* (LeCun et al., 2015).
 
 $$
 f(x) = \max(0,x)
@@ -184,11 +184,11 @@ $$
 
 (2.1)
 
-dengan $x$ nilai masukan dan $f(x)$ nilai keluaran *neuron*.
+dengan $x$ nilai masukan dan $f(x)$ nilai keluaran *neuron*.
 
 3.  ***Loss Function***
 
-Fungsi kerugian mengukur selisih antara prediksi model dan nilai sebenarnya (*ground truth*). Untuk klasifikasi banyak kelas, fungsi kerugian yang umum digunakan adalah *Cross-Entropy Loss* pada Persamaan 2.2 (Goodfellow et al., 2016).
+Fungsi kerugian mengukur selisih antara prediksi model dan nilai sebenarnya (*ground truth*). Untuk klasifikasi banyak kelas, fungsi kerugian yang umum digunakan adalah *Cross-Entropy Loss* pada Persamaan 2.2 (Goodfellow et al., 2016).
 
 $$
 L = - \sum_{i = 1}^{C}y_{i}\log\left( p_{i} \right)
@@ -196,11 +196,11 @@ $$
 
 (2.2)
 
-dengan $C$ jumlah kelas, $y_{i}$ label sebenarnya kelas ke-*i* dalam bentuk *one-hot encoding*, dan $p_{i}$ probabilitas prediksi kelas ke-*i*.
+dengan $C$ jumlah kelas, $y_{i}$ label sebenarnya kelas ke-*i* dalam bentuk *one-hot encoding*, dan $p_{i}$ probabilitas prediksi kelas ke-*i*.
 
 4.  ***Back propagation***
 
-Propagasi mundur menghitung gradien fungsi kerugian terhadap setiap parameter menggunakan aturan rantai (*chain rule*), lapisan demi lapisan dari keluaran menuju masukan (LeCun et al., 2015). Gradien terhadap parameter dipakai oleh *Stochastic Gradient Descent* (SGD) untuk memperbarui parameter, sebagaimana dinyatakan pada Persamaan 2.3 (Goodfellow et al., 2016).
+Propagasi mundur menghitung gradien fungsi kerugian terhadap setiap parameter menggunakan aturan rantai (*chain rule*), lapisan demi lapisan dari keluaran menuju masukan (LeCun et al., 2015). Gradien terhadap parameter dipakai oleh *Stochastic Gradient Descent* (SGD) untuk memperbarui parameter, sebagaimana dinyatakan pada Persamaan 2.3 (Goodfellow et al., 2016).
 
 $$
 w \leftarrow w - \eta\frac{\partial L}{\partial w}
@@ -208,7 +208,7 @@ $$
 
 (2.3)
 
-dengan $w$ parameter bobot, $\eta$ laju pembelajaran (*learning rate*), dan $\frac{\partial L}{\partial w}$ gradien fungsi kerugian terhadap bobot.
+dengan $w$ parameter bobot, $\eta$ laju pembelajaran (*learning rate*), dan $\frac{\partial L}{\partial w}$ gradien fungsi kerugian terhadap bobot.
 
 Siklus propagasi maju dan mundur diulang hingga model konvergen, sebagaimana diilustrasikan pada Gambar 2.4.
 
@@ -218,7 +218,7 @@ Siklus propagasi maju dan mundur diulang hingga model konvergen, sebagaimana dii
 
 ### 2.1.4 Convolution Neural Network (CNN)
 
-*Convolutional Neural Network *(CNN) adalah jaringan saraf tiruan yang dirancang untuk data berbentuk *grid*, seperti citra (Goodfellow et al., 2016; LeCun et al., 2015). Efisiensinya bertumpu pada konektivitas lokal, yaitu setiap neuron hanya melihat sebagian kecil citra, dan berbagi parameter, yaitu filter yang sama dipakai di seluruh citra (LeCun et al., 2015). Arsitektur umum CNN ditunjukkan pada Gambar 2.5.
+*Convolutional Neural Network *(CNN) adalah jaringan saraf tiruan yang dirancang untuk data berbentuk *grid*, seperti citra (Goodfellow et al., 2016; LeCun et al., 2015). Efisiensinya bertumpu pada konektivitas lokal, yaitu setiap neuron hanya melihat sebagian kecil citra, dan berbagi parameter, yaitu filter yang sama dipakai di seluruh citra (LeCun et al., 2015). Arsitektur umum CNN ditunjukkan pada Gambar 2.5.
 
 [Gambar 2.5]
 
@@ -232,11 +232,11 @@ Pada Gambar 2.5, arsitektur CNN terdiri atas tiga jenis lapisan utama.
 
 2.  ***Pooling Layer***
 
-Berfungsi untuk memperkecil dimensi spasial *feature map* (*downsampling*), misalnya dengan *max pooling* yang mengambil nilai terbesar pada setiap jendela, sehingga beban komputasi berkurang dan model lebih tahan terhadap pergeseran kecil.
+Berfungsi untuk memperkecil dimensi spasial *feature map* (*downsampling*), misalnya dengan *max pooling* yang mengambil nilai terbesar pada setiap jendela, sehingga beban komputasi berkurang dan model lebih tahan terhadap pergeseran kecil.
 
 3.  ***Fully Connected Layer***
 
-Berupa *Multi-Layer Perceptron* (MLP) yang menggabungkan fitur tingkat tinggi menjadi keputusan akhir (*classifier*). Masukannya berupa *flatten vector* dari *feature map*. Skor mentah (*logit*) keluaran kepala klasifikasi diubah menjadi probabilitas oleh fungsi *softmax* pada Persamaan 2.4.
+Berupa *Multi-Layer Perceptron* (MLP) yang menggabungkan fitur tingkat tinggi menjadi keputusan akhir (*classifier*). Masukannya berupa *flatten vector* dari *feature map*. Skor mentah (*logit*) keluaran kepala klasifikasi diubah menjadi probabilitas oleh fungsi *softmax* pada Persamaan 2.4.
 
 $$
 p_{i} = \frac{e^{z_{i}}}{\sum_{j = 1}^{C}e^{z_{j}}}
@@ -244,9 +244,9 @@ $$
 
 (2.4)
 
-dengan $p_{i}$ probabilitas kelas ke-*i*, $z_{i}$ *logit* kelas ke-*i*, dan $C$ jumlah kelas.
+dengan $p_{i}$ probabilitas kelas ke-*i*, $z_{i}$ *logit* kelas ke-*i*, dan $C$ jumlah kelas.
 
-Lapisan konvolusi dan *pooling* menghasilkan *feature map* berukuran $C \times H \times W$. Setiap kanal merupakan respons satu filter, sedangkan posisi $\left( h,w \right)$ menyatakan lokasi respons tersebut (Goodfellow et al., 2016). *Stride* adalah besar langkah pergeseran filter. *Stride* total lapisan ke-*l* dan posisi citra yang berkorespondensi dengan sel $\left( h,w \right)$ dinyatakan pada Persamaan 2.5 dan 2.6 (Araujo et al., 2019).
+Lapisan konvolusi dan *pooling* menghasilkan *feature map* berukuran $C \times H \times W$. Setiap kanal merupakan respons satu filter, sedangkan posisi $\left( h,w \right)$ menyatakan lokasi respons tersebut (Goodfellow et al., 2016). *Stride* adalah besar langkah pergeseran filter. *Stride* total lapisan ke-*l* dan posisi citra yang berkorespondensi dengan sel $\left( h,w \right)$ dinyatakan pada Persamaan 2.5 dan 2.6 (Araujo et al., 2019).
 
 $$
 S_{l} = \prod_{i = 1}^{l}s_{i}
@@ -260,9 +260,9 @@ $$
 
 (2.6)
 
-dengan $S_{l}$ *stride* total lapisan ke-*l*, $s_{i}$ *stride* lapisan ke-*i*, $\left( h,w \right)$ indeks baris dan kolom pada *feature map*, dan $\left( u,v \right)$ koordinat pada citra.
+dengan $S_{l}$ *stride* total lapisan ke-*l*, $s_{i}$ *stride* lapisan ke-*i*, $\left( h,w \right)$ indeks baris dan kolom pada *feature map*, dan $\left( u,v \right)$ koordinat pada citra.
 
-Persamaan 2.6 baru menetapkan titik koordinat korespondensi, belum luas *region* citra yang benar-benar memengaruhi sel tersebut. Luas tersebut dinyatakan oleh *Receptive Field*, yaitu *region* citra yang memengaruhi nilai satu sel *feature map* (Goodfellow et al., 2016; Luo et al., 2016). Ukurannya membesar seiring kedalaman jaringan, sebagaimana dinyatakan pada Persamaan 2.7 (Araujo et al., 2019).
+Persamaan 2.6 baru menetapkan titik koordinat korespondensi, belum luas *region* citra yang benar-benar memengaruhi sel tersebut. Luas tersebut dinyatakan oleh *Receptive Field*, yaitu *region* citra yang memengaruhi nilai satu sel *feature map* (Goodfellow et al., 2016; Luo et al., 2016). Ukurannya membesar seiring kedalaman jaringan, sebagaimana dinyatakan pada Persamaan 2.7 (Araujo et al., 2019).
 
 $$
 r_{l} = r_{l - 1} + \left( k_{l} - 1 \right)\prod_{i = 1}^{l - 1}s_{i},\quad r_{0} = 1
@@ -270,39 +270,39 @@ $$
 
 (2.7)
 
-dengan $r_{l}$ ukuran *receptive field* lapisan ke-*l* dalam piksel, $k_{l}$ ukuran kernel lapisan ke-*l*, dan $s_{i}$ *stride* lapisan ke-*i*.
+dengan $r_{l}$ ukuran *receptive field* lapisan ke-*l* dalam piksel, $k_{l}$ ukuran kernel lapisan ke-*l*, dan $s_{i}$ *stride* lapisan ke-*i*.
 
-*Stride *total pada Persamaan 2.5 menentukan letak pusat daerah citra yang diwakili satu sel *feature map*, sedangkan *Receptive Field* pada Persamaan 2.7 menentukan luas daerah tersebut. Keduanya membuat setiap sel dapat dipetakan kembali ke *region* citranya sendiri, sehingga bobot atau atribusi pada sel *feature map* dapat diterjemahkan menjadi penjelasan spasial pada citra di Subbab 2.1.8. Namun, *Receptive Field* antarsel saling tumpang-tindih dan pengaruh piksel di dalamnya menurun dari pusat ke tepi (Luo et al., 2016), sehingga penjelasan tersebut berlaku pada tingkat *regional*, bukan pada piksel. Ilustrasi stride dan receptive field ditunjukkan pada Gambar 2.6.
+*Stride *total pada Persamaan 2.5 menentukan letak pusat daerah citra yang diwakili satu sel *feature map*, sedangkan *Receptive Field* pada Persamaan 2.7 menentukan luas daerah tersebut. Keduanya membuat setiap sel dapat dipetakan kembali ke *region* citranya sendiri, sehingga bobot atau atribusi pada sel *feature map* dapat diterjemahkan menjadi penjelasan spasial pada citra di Subbab 2.1.8. Namun, *Receptive Field* antarsel saling tumpang-tindih dan pengaruh piksel di dalamnya menurun dari pusat ke tepi (Luo et al., 2016), sehingga penjelasan tersebut berlaku pada tingkat *regional*, bukan pada piksel. Ilustrasi stride dan receptive field ditunjukkan pada Gambar 2.6.
 
 [Gambar 2.6]
 
-**Gambar 2.6 Ilustrasi *Stride* dan *Receptive Field***
+**Gambar 2.6 Ilustrasi *Stride* dan *Receptive Field***
 
 ### 2.1.5 *Faster* R-CNN
 
-*Faster *R-CNN adalah arsitektur deteksi objek dua tahap (*two-stage*) yang menyatukan pengusulan area dan klasifikasi dalam satu jaringan yang dilatih secara *end-to-end* (Ren et al., 2017). Keunggulannya terletak pada *Region Proposal Network* (RPN) yang menggantikan metode pencarian area eksternal, sehingga seluruh komponen berbagi *feature map* yang sama. Arsitektur standarnya ditunjukkan pada Gambar 2.7.
+*Faster *R-CNN adalah arsitektur deteksi objek dua tahap (*two-stage*) yang menyatukan pengusulan area dan klasifikasi dalam satu jaringan yang dilatih secara *end-to-end* (Ren et al., 2017). Keunggulannya terletak pada *Region Proposal Network* (RPN) yang menggantikan metode pencarian area eksternal, sehingga seluruh komponen berbagi *feature map* yang sama. Arsitektur standarnya ditunjukkan pada Gambar 2.7.
 
 [Gambar 2.7]
 
 **Gambar 2.7 Arsitektur Faster R-CNN Standar**
 
-Penelitian ini menggunakan varian SF-PSPyramid (Fung et al., 2024), yaitu *Faster* R-CNN dengan *neck* yang dirancang untuk cacat berukuran mikro pada PCB, sebagaimana ditunjukkan pada Gambar 2.8.
+Penelitian ini menggunakan varian SF-PSPyramid (Fung et al., 2024), yaitu *Faster* R-CNN dengan *neck* yang dirancang untuk cacat berukuran mikro pada PCB, sebagaimana ditunjukkan pada Gambar 2.8.
 
 [Gambar 2.8]
 
 **Gambar 2.8 Arsitektur modifikasi Faster R-CNN dengan SF-PSPyramid**
 
-1.  **Backbone** 
+1.  **Backbone** 
 
-*Backbone *mengubah citra menjadi *feature map*. Penelitian ini menggunakan ResNet-50, yang terdiri atas empat kelompok lapisan ($C_{2}$, $C_{3}$, $C_{4}$, $C_{5}$) dengan resolusi menurun dan makna semantik meningkat (He et al., 2016). *Stride* total keempat kelompok tersebut berturut-turut 4, 8, 16, dan 32 piksel.
+*Backbone *mengubah citra menjadi *feature map*. Penelitian ini menggunakan ResNet-50, yang terdiri atas empat kelompok lapisan ($C_{2}$, $C_{3}$, $C_{4}$, $C_{5}$) dengan resolusi menurun dan makna semantik meningkat (He et al., 2016). *Stride* total keempat kelompok tersebut berturut-turut 4, 8, 16, dan 32 piksel.
 
 2.  ***Neck (SF-PSPyramid)***
 
-*Neck *menggabungkan fitur dari berbagai skala backbone menjadi piramida fitur. Dasarnya adalah *Feature Pyramid Network (FPN)*, yang menggabungkan jalur *bottom-up*, jalur *top-down*, dan koneksi lateral antartingkat (Lin et al., 2017). SF-PSPyramid menyempurnakan FPN dengan tiga perbedaan (Fung et al., 2024).
+*Neck *menggabungkan fitur dari berbagai skala backbone menjadi piramida fitur. Dasarnya adalah *Feature Pyramid Network (FPN)*, yang menggabungkan jalur *bottom-up*, jalur *top-down*, dan koneksi lateral antartingkat (Lin et al., 2017). SF-PSPyramid menyempurnakan FPN dengan tiga perbedaan (Fung et al., 2024).
 
 a.  ***CP Block***
 
- Resolusi diperbesar melalui penataan ulang kanal (*pixel shuffle*) (Shi et al., 2016), bukan interpolasi, sehingga bersifat terpelajar yang ditunjukkan pada Persamaan 2.8.
+ Resolusi diperbesar melalui penataan ulang kanal (*pixel shuffle*) (Shi et al., 2016), bukan interpolasi, sehingga bersifat terpelajar yang ditunjukkan pada Persamaan 2.8.
 
 $$
 PS(T)_{c,h,w} = T_{c \cdot r^{2} + r \cdot \text{mod}(h,r) + \text{mod}(w,r),\left\lfloor h/r \right\rfloor,\left\lfloor w/r \right\rfloor}
@@ -310,11 +310,11 @@ $$
 
 (2.8)
 
-dengan $T$ tensor masukan, $r$ faktor pembesaran, serta $c,h,w$ indeks kanal, baris, dan kolom keluaran.
+dengan $T$ tensor masukan, $r$ faktor pembesaran, serta $c,h,w$ indeks kanal, baris, dan kolom keluaran.
 
 b.  ***Selective Feature Attention***
 
-Dua tingkat fitur digabungkan dengan bobot terpelajar yang dinormalisasi *softmax*, mengadaptasi *Selective Kernel Network* (Li et al., 2019), sebagaimana dinyatakan pada Persamaan 2.9.
+Dua tingkat fitur digabungkan dengan bobot terpelajar yang dinormalisasi *softmax*, mengadaptasi *Selective Kernel Network* (Li et al., 2019), sebagaimana dinyatakan pada Persamaan 2.9.
 
 $$
 P' = \alpha_{1} \odot U + \alpha_{2} \odot V,\quad\left\lbrack \alpha_{1},\alpha_{2} \right\rbrack = \text{softmax}\left( W_{2}\delta\left( W_{1}z \right) \right)
@@ -322,7 +322,7 @@ $$
 
 (2.9)
 
-dengan $U$ *feature map* dari tingkat yang lebih dalam, $V$ *feature map* beresolusi lebih tinggi, $z$ vektor hasil *global average pooling*, $W_{1},W_{2}$ bobot lapisan kompresi dan perluasan, $\delta$ ReLU, dan $\odot_{}^{}{}$ perkalian per kanal.
+dengan $U$ *feature map* dari tingkat yang lebih dalam, $V$ *feature map* beresolusi lebih tinggi, $z$ vektor hasil *global average pooling*, $W_{1},W_{2}$ bobot lapisan kompresi dan perluasan, $\delta$ ReLU, dan $\odot_{}^{}{}$ perkalian per kanal.
 
 c.  **Susunan piramida tanpa koneksi lateral**
 
@@ -332,7 +332,7 @@ Keluaran neck adalah P2′, P3′, P4, P5, dan P6 (*max pooling* dari P5) dengan
 
 3.  ***Region Proposal Network* (RPN)**
 
-RPN menghasilkan usulan area kandidat objek. Pada setiap posisi *feature map* disiapkan sejumlah *anchor box* dengan beragam ukuran dan rasio, lalu setiap *anchor* memperoleh skor objektivitas dan empat nilai penyesuaian koordinat (Ren et al., 2017) pada Persamaan 2.10 sampai 2.13.
+RPN menghasilkan usulan area kandidat objek. Pada setiap posisi *feature map* disiapkan sejumlah *anchor box* dengan beragam ukuran dan rasio, lalu setiap *anchor* memperoleh skor objektivitas dan empat nilai penyesuaian koordinat (Ren et al., 2017) pada Persamaan 2.10 sampai 2.13.
 
 $$
 t_{x} = \frac{x - x_{a}}{w_{a}}
@@ -358,7 +358,7 @@ $$
 
 (2.13)
 
-dengan $x,y,w,h$ pusat, lebar, dan tinggi kotak prediksi, serta $x_{a},y_{a},w_{a},h_{a}$ milik *anchor*. Pelatihan memakai *multi-task loss* pada Persamaan 2.14 (Ren et al., 2017).
+dengan $x,y,w,h$ pusat, lebar, dan tinggi kotak prediksi, serta $x_{a},y_{a},w_{a},h_{a}$ milik *anchor*. Pelatihan memakai *multi-task loss* pada Persamaan 2.14 (Ren et al., 2017).
 
 $$
 L = \frac{1}{N_{cls}}\sum_{i}^{}L_{cls}\left( p_{i},p_{i}^{*} \right) + \lambda\frac{1}{N_{reg}}\sum_{i}^{}p_{i}^{*}L_{reg}\left( t_{i},t_{i}^{*} \right)
@@ -366,7 +366,7 @@ $$
 
 (2.14)
 
-dengan $p_{i}$ probabilitas *anchor* ke-*i* memuat objek, $p_{i}^{*}$ label sebenarnya (1 positif, 0 negatif), $N_{cls},N_{reg}$ jumlah sampel tiap suku, $L_{cls}$ *binary cross-entropy*, $L_{reg}$ kerugian regresi, dan $\lambda$ faktor penyeimbang. Kerugian regresi yang digunakan adalah L1 pada Persamaan 2.15 (Fung et al., 2024).
+dengan $p_{i}$ probabilitas *anchor* ke-*i* memuat objek, $p_{i}^{*}$ label sebenarnya (1 positif, 0 negatif), $N_{cls},N_{reg}$ jumlah sampel tiap suku, $L_{cls}$ *binary cross-entropy*, $L_{reg}$ kerugian regresi, dan $\lambda$ faktor penyeimbang. Kerugian regresi yang digunakan adalah L1 pada Persamaan 2.15 (Fung et al., 2024).
 
 $$
 L_{reg}\left( t,t^{*} \right) = \sum_{j}^{}\left| t_{j} - t_{j}^{*} \right|
@@ -378,7 +378,7 @@ dengan *j* merentang pada keempat komponen koordinat, yaitu *x*, *y*, *w*, dan *
 
 4.  ***RoI Align***
 
-*RoI Align *menyeragamkan setiap proposal menjadi *tensor* berukuran tetap tanpa pembulatan koordinat (He et al., 2020). Nilai *feature map* pada koordinat pecahan diperoleh dengan interpolasi *bilinear* pada Persamaan 2.16.
+*RoI Align *menyeragamkan setiap proposal menjadi *tensor* berukuran tetap tanpa pembulatan koordinat (He et al., 2020). Nilai *feature map* pada koordinat pecahan diperoleh dengan interpolasi *bilinear* pada Persamaan 2.16.
 
 $$
 f(x,y) = \sum_{i = 1}^{4}w_{i}f_{i}
@@ -386,9 +386,9 @@ $$
 
 (2.16)
 
-dengan $f_{i}$ nilai fitur pada empat titik grid terdekat dan $w_{i}$ bobot interpolasi yang berbanding terbalik dengan jarak.
+dengan $f_{i}$ nilai fitur pada empat titik grid terdekat dan $w_{i}$ bobot interpolasi yang berbanding terbalik dengan jarak.
 
-Setiap proposal dibagi menjadi grid $G \times G$ *bin*. Pada setiap *bin* diambil beberapa titik sampel, dan nilai *bin* adalah rata-rata titik sampelnya (Persamaan 2.17) (He et al., 2020).
+Setiap proposal dibagi menjadi grid $G \times G$ *bin*. Pada setiap *bin* diambil beberapa titik sampel, dan nilai *bin* adalah rata-rata titik sampelnya (Persamaan 2.17) (He et al., 2020).
 
 $$
 x_{c,p,q} = \frac{1}{N}\sum_{n = 1}^{N}{\sum_{i = 1}^{4}{w_{n,i}\, F_{c}\left( h_{n,i},v_{n,i} \right)}}
@@ -396,7 +396,7 @@ $$
 
 (2.17)
 
-dengan $x_{c,p,q}$ keluaran kanal ke-*c* pada *bin* $\left( p,q \right)$, $N$ jumlah titik sampel per *bin*, $w_{n,i}$ bobot interpolasi titik sampel ke-*n*, dan $F_{c}\left( h_{n,i},v_{n,i} \right)$ nilai *feature map* kanal ke-*c* pada titik grid terdekat. Dalam bentuk matriks, Persamaan 2.17 dapat ditulis sebagai Persamaan 2.18.
+dengan $x_{c,p,q}$ keluaran kanal ke-*c* pada *bin* $\left( p,q \right)$, $N$ jumlah titik sampel per *bin*, $w_{n,i}$ bobot interpolasi titik sampel ke-*n*, dan $F_{c}\left( h_{n,i},v_{n,i} \right)$ nilai *feature map* kanal ke-*c* pada titik grid terdekat. Dalam bentuk matriks, Persamaan 2.17 dapat ditulis sebagai Persamaan 2.18.
 
 $$
 x_{c} = A\, F_{c}
@@ -404,7 +404,7 @@ $$
 
 (2.18)
 
-dengan $x_{c}$ vektor keluaran kanal ke-*c* ($G \times G$ nilai), $F_{c}$ vektor nilai *feature map* kanal ke-*c*, dan $A$ matriks koefisien interpolasi yang hanya bergantung pada proposal dan sama untuk setiap kanal.
+dengan $x_{c}$ vektor keluaran kanal ke-*c* ($G \times G$ nilai), $F_{c}$ vektor nilai *feature map* kanal ke-*c*, dan $A$ matriks koefisien interpolasi yang hanya bergantung pada proposal dan sama untuk setiap kanal.
 
 Pada piramida fitur, tingkat yang dipakai untuk setiap proposal dipilih dengan Persamaan 2.19 (Lin et al., 2017).
 
@@ -414,7 +414,7 @@ $$
 
 (2.19)
 
-dengan $k$ tingkat terpilih, $k_{0} = 4$ tingkat acuan untuk proposal 224×224 piksel, serta $w,h$ lebar dan tinggi proposal.
+dengan $k$ tingkat terpilih, $k_{0} = 4$ tingkat acuan untuk proposal 224×224 piksel, serta $w,h$ lebar dan tinggi proposal.
 
 5.  ***Box Head***
 
@@ -424,7 +424,7 @@ Representasi RoI diteruskan ke dua lapisan keluaran yang bekerja berdampingan (*
 
 6.  ***Soft-*NMS**
 
-Kotak dan skor keluaran *box head* kemudian disaring dengan *Soft*-NMS, yang menurunkan skor kandidat yang tumpang-tindih secara bertahap, bukan menghapusnya seketika seperti NMS konvensional (Bodla et al., 2017), sehingga cacat yang berdekatan tidak ikut terbuang dengan menggunakan Persamaan 2.20.
+Kotak dan skor keluaran *box head* kemudian disaring dengan *Soft*-NMS, yang menurunkan skor kandidat yang tumpang-tindih secara bertahap, bukan menghapusnya seketika seperti NMS konvensional (Bodla et al., 2017), sehingga cacat yang berdekatan tidak ikut terbuang dengan menggunakan Persamaan 2.20.
 
 $$
 s_{i} = \left\{ \begin{matrix}
@@ -439,7 +439,7 @@ dengan $s_{i}$ dan $b_{i}$ skor dan kotak kandidat ke-*i*, $M$ kandidat berskor 
 
 ### 2.1.6 *Explainable Artificial Intelligence* (XAI)
 
-*Explainable Artificial Intelligence *(XAI) adalah bidang yang mengembangkan cara agar keputusan model kecerdasan buatan dapat dipahami manusia (Barredo Arrieta et al., 2020). XAI dibutuhkan karena model *deep learning* bersifat *black-box* (Samek et al., 2019). Berdasarkan waktu penjelasan dibentuk, XAI terbagi atas dua pendekatan.
+*Explainable Artificial Intelligence *(XAI) adalah bidang yang mengembangkan cara agar keputusan model kecerdasan buatan dapat dipahami manusia (Barredo Arrieta et al., 2020). XAI dibutuhkan karena model *deep learning* bersifat *black-box* (Samek et al., 2019). Berdasarkan waktu penjelasan dibentuk, XAI terbagi atas dua pendekatan.
 
 **1. Pendekatan *post-hoc***
 
@@ -453,7 +453,7 @@ Penjelasan untuk citra umumnya berupa peta atribusi (*attribution map*), yaitu p
 
 1.  ***Gradient-weighted Class Activation Mapping* (Grad-CAM)**
 
-Grad-CAM menghasilkan *attribution map* spesifik-kelas tanpa mengubah maupun melatih ulang model (Selvaraju et al., 2017). Bobot kepentingan *feature map* ke-*k* terhadap kelas *c* dan *attribution map* dinyatakan pada Persamaan 2.21 dan 2.22.
+Grad-CAM menghasilkan *attribution map* spesifik-kelas tanpa mengubah maupun melatih ulang model (Selvaraju et al., 2017). Bobot kepentingan *feature map* ke-*k* terhadap kelas *c* dan *attribution map* dinyatakan pada Persamaan 2.21 dan 2.22.
 
 $$
 \alpha_{k}^{c} = \frac{1}{Z}\sum_{i}^{}{\sum_{j}^{}\frac{\partial y^{c}}{\partial A_{ij}^{k}}}
@@ -467,7 +467,7 @@ $$
 
 (2.22)
 
-dengan $y^{c}$ skor kelas *c* sebelum *softmax*, $A^{k}$ feature map ke-*k* pada lapisan konvolusi acuan, $A_{ij}^{k}$ nilainya pada posisi $\left( i,j \right)$, dan $Z$ jumlah posisi spasial. Contoh hasil Grad-CAM ditunjukkan pada Gambar 2.9.
+dengan $y^{c}$ skor kelas *c* sebelum *softmax*, $A^{k}$ feature map ke-*k* pada lapisan konvolusi acuan, $A_{ij}^{k}$ nilainya pada posisi $\left( i,j \right)$, dan $Z$ jumlah posisi spasial. Contoh hasil Grad-CAM ditunjukkan pada Gambar 2.9.
 
 [Gambar 2.9]
 
@@ -493,7 +493,7 @@ $$
 
 (2.24)
 
-*Gradient × Input* umumnya tidak memenuhi sifat ini pada model non-linear, tetapi memenuhinya secara eksak pada model linear dengan *baseline* nol (Ancona et al., 2019), sebagaimana dinyatakan pada Persamaan 2.25.
+*Gradient × Input* umumnya tidak memenuhi sifat ini pada model non-linear, tetapi memenuhinya secara eksak pada model linear dengan *baseline* nol (Ancona et al., 2019), sebagaimana dinyatakan pada Persamaan 2.25.
 
 $$
 \sum_{j}^{}{w_{j}x_{j}} = w^{T}x = f(x) - f(0)
@@ -515,7 +515,7 @@ Arsitektur NeSy terdiri atas dua komponen utama.
 
 **1. Komponen *neural*,** berfungsi untuk mengubah data mentah menjadi representasi fitur numerik (d'Avila Garcez & Lamb, 2023).
 
-**2. Komponen simbolik,** mengolah representasi fitur melalui aturan yang dapat ditelusuri. Penjelasannya *faithful*, yaitu merupakan proses keputusan model itu sendiri, bukan aproksimasi (Rudin, 2019). Komponen ini dapat dibentuk melalui *model mimicking*, yaitu melatih model sederhana untuk meniru keluaran model kompleks (*teacher*), dengan label pelatihan berupa prediksi *teacher*, bukan label sebenarnya (Buciluǎ et al., 2006; Hinton et al., 2015).
+**2. Komponen simbolik,** mengolah representasi fitur melalui aturan yang dapat ditelusuri. Penjelasannya *faithful*, yaitu merupakan proses keputusan model itu sendiri, bukan aproksimasi (Rudin, 2019). Komponen ini dapat dibentuk melalui *model mimicking*, yaitu melatih model sederhana untuk meniru keluaran model kompleks (*teacher*), dengan label pelatihan berupa prediksi *teacher*, bukan label sebenarnya (Buciluǎ et al., 2006; Hinton et al., 2015).
 
 Pengalihan keputusan dari komponen *neural* ke komponen simbolik membawa konsekuensi pada bentuk keluarannya. Keluaran komponen *neural* bersifat kontinu, sedangkan keluaran komponen simbolik bersifat diskrit karena hanya berupa label kelas. Proses diskritisasi ini memetakan banyak nilai kontinu yang berbeda ke label yang sama, sehingga informasi tingkat keyakinan turut hilang (Provost & Domingos, 2003). Informasi tersebut masih tersimpan pada nilai keputusan sebelum diubah menjadi label, dan dapat dinyatakan melalui dua konsep berikut.
 
@@ -541,11 +541,11 @@ $$
 
 (2.27)
 
-dengan $z$ nilai masukan dan $e$ bilangan Euler.
+dengan $z$ nilai masukan dan $e$ bilangan Euler.
 
 ### 2.1.8 *Sparse Oblique Decision Tree* (SODT)
 
-*Sparse Oblique Decision Tree *(SODT) adalah pohon keputusan yang melakukan pemisahan linear multivariat (*oblique split*) pada setiap *node* internal, berbeda dengan pohon *axis-aligned* yang hanya memakai satu fitur per pemisahan (Hada et al., 2024). Setiap *node* internal meneruskan masukan ke salah satu dari dua anaknya, dan label pada *leaf*  yang dicapai menjadi prediksi pohon. Fungsi keputusan *node* internal ke-*i* dinyatakan pada Persamaan 2.28.
+*Sparse Oblique Decision Tree *(SODT) adalah pohon keputusan yang melakukan pemisahan linear multivariat (*oblique split*) pada setiap *node* internal, berbeda dengan pohon *axis-aligned* yang hanya memakai satu fitur per pemisahan (Hada et al., 2024). Setiap *node* internal meneruskan masukan ke salah satu dari dua anaknya, dan label pada *leaf*  yang dicapai menjadi prediksi pohon. Fungsi keputusan *node* internal ke-*i* dinyatakan pada Persamaan 2.28.
 
 $$
 w_{i}^{T}x + b_{i} \geq 0
@@ -553,19 +553,19 @@ $$
 
 (2.28)
 
-dengan $x$ vektor fitur berdimensi $D$, $w_{i}$ vektor bobot, dan $b_{i}$ bias *node* ke-*i*.
+dengan $x$ vektor fitur berdimensi $D$, $w_{i}$ vektor bobot, dan $b_{i}$ bias *node* ke-*i*.
 
-Arah percabangan ditentukan oleh tanda $f_{i}(x)$, dinotasikan $d_{i} = + 1$ untuk ke anak kiri dan $d_{i} = - 1$ untuk ke anak kanan. Rangkaian *node* dari *root* hingga *leaf* membentuk jalur keputusan (*decision path*) (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025). Ilustrasinya ditunjukkan pada Gambar 2.11.
+Arah percabangan ditentukan oleh tanda $f_{i}(x)$, dinotasikan $d_{i} = + 1$ untuk ke anak kiri dan $d_{i} = - 1$ untuk ke anak kanan. Rangkaian *node* dari *root* hingga *leaf* membentuk jalur keputusan (*decision path*) (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025). Ilustrasinya ditunjukkan pada Gambar 2.11.
 
 [Gambar 2.11]
 
 **Gambar 2.11 Ilustrasi SODT dan perbedaan dengan *Decision Tree* biasa**
 
-Apabila $x$ berasal dari perataan peta fitur $C \times H \times W$ (Subbab 2.1.4), setiap elemen $x$ berkorespondensi satu-satu dengan satu kanal dan posisi spasial tertentu pada peta fitur. Korespondensi yang sama berlaku pada bobot $w_{i}$ karena dikalikan pada indeks yang sama (Persamaan 2.28), sehingga vektor $w_{i}$ dapat disusun ulang ke bentuk grid $C \times H \times W$, yang menyatakan kanal dan posisi tertentu yang dipakai *node* (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025).
+Apabila $x$ berasal dari perataan peta fitur $C \times H \times W$ (Subbab 2.1.4), setiap elemen $x$ berkorespondensi satu-satu dengan satu kanal dan posisi spasial tertentu pada peta fitur. Korespondensi yang sama berlaku pada bobot $w_{i}$ karena dikalikan pada indeks yang sama (Persamaan 2.28), sehingga vektor $w_{i}$ dapat disusun ulang ke bentuk grid $C \times H \times W$, yang menyatakan kanal dan posisi tertentu yang dipakai *node* (Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025).
 
 1.  **Regularisasi L1 dan Sparsitas**
 
-Sifat *sparse* diperoleh melalui regularisasi L1 pada fungsi tujuan pelatihan pada Persamaan 2.29, yang membuat bobot fitur tidak relevan bernilai tepat nol (Hada et al., 2024).
+Sifat *sparse* diperoleh melalui regularisasi L1 pada fungsi tujuan pelatihan pada Persamaan 2.29, yang membuat bobot fitur tidak relevan bernilai tepat nol (Hada et al., 2024).
 
 $$
 E(\Theta) = \sum_{n = 1}^{N}L\left( \mathbf{y}_{n},T\left( \mathbf{x}_{n};\Theta \right) \right) + \lambda\sum_{i \in \mathcal{D}}^{}\left\| \mathbf{w}_{i} \right\|_{1}
@@ -573,11 +573,11 @@ $$
 
 (2.29)
 
-dengan $\Theta$ parameter pohon, $N$ jumlah sampel, $x_{n},y_{n}$ fitur dan label sampel ke-*n*, $T\left( x_{n};\Theta \right)$ prediksi pohon, $L$ fungsi kerugian klasifikasi, $\mathcal{D}$ himpunan *node* internal, dan $\lambda$ pengontrol sparsitas. *Node* yang seluruh bobotnya nol hanya ditentukan oleh bias, sehingga selalu mengarahkan masukan ke sisi yang sama.
+dengan $\Theta$ parameter pohon, $N$ jumlah sampel, $x_{n},y_{n}$ fitur dan label sampel ke-*n*, $T\left( x_{n};\Theta \right)$ prediksi pohon, $L$ fungsi kerugian klasifikasi, $\mathcal{D}$ himpunan *node* internal, dan $\lambda$ pengontrol sparsitas. *Node* yang seluruh bobotnya nol hanya ditentukan oleh bias, sehingga selalu mengarahkan masukan ke sisi yang sama. Bobot yang tidak bernilai nol disebut *nonzero weight*, dan jumlahnya digunakan sebagai ukuran kompleksitas pohon, yaitu banyaknya fitur yang benar-benar dipakai dalam keputusan (Hada et al., 2024). Sparsitas pohon dinyatakan sebagai proporsi bobot yang bernilai nol terhadap seluruh bobot *node* internal.
 
 2.  ***Tree Alternating Optimization (TAO)***
 
-Persamaan 2.29 tidak dapat dioptimasi dengan metode berbasis gradien karena keputusan pohon diskrit, dan tidak didukung oleh metode pembentukan pohon konvensional. *Tree Alternating Optimization* (TAO) memecahnya menjadi masalah klasifikasi biner yang diselesaikan terpisah untuk setiap *node* (Carreira-Perpiñán & Tavallali, 2018), sebagaimana dinyatakan pada Persamaan 2.30.
+Persamaan 2.29 tidak dapat dioptimasi dengan metode berbasis gradien karena keputusan pohon diskrit, dan tidak didukung oleh metode pembentukan pohon konvensional. *Tree Alternating Optimization* (TAO) memecahnya menjadi masalah klasifikasi biner yang diselesaikan terpisah untuk setiap *node* (Carreira-Perpiñán & Tavallali, 2018), sebagaimana dinyatakan pada Persamaan 2.30.
 
 $$
 E_{i}(w_{i},b_{i}) = \sum_{n \in \mathcal{R}_{i}}^{}\overset{‾}{L}({\bar{y}}_{n},g_{i}(x_{n};w_{i},b_{i})) + \lambda \parallel w_{i} \parallel_{1}
@@ -585,11 +585,11 @@ $$
 
 (2.30)
 
-dengan $\mathcal{R}_{i}$ sampel yang mencapai *node* ke-*i* (*reduced set*), ${\overline{y}}_{n}$ label semu (*pseudo-label*) arah kiri atau kanan, $g_{i}$ keputusan biner *node*, dan $\overline{L}$ kerugian 0/1.
+dengan $\mathcal{R}_{i}$ sampel yang mencapai *node* ke-*i* (*reduced set*), ${\overline{y}}_{n}$ label semu (*pseudo-label*) arah kiri atau kanan, $g_{i}$ keputusan biner *node*, dan $\overline{L}$ kerugian 0/1.
 
-Tidak semua sampel dalam $\mathcal{R}_{i}$ berpengaruh, sampel yang prediksinya sama pada kedua arah diabaikan, sedangkan sisanya (*care set*) memperoleh label semu berupa arah yang menghasilkan prediksi benar. Masalah biner tersebut diselesaikan dengan regresi logistik berregularisasi L1 sebagai pengganti (*surrogate*) kerugian 0/1, dan setiap *leaf* berlabel kelas mayoritas sampel yang mencapainya. Penyelesaian ini dilakukan bergantian antar-*node* dari yang terdalam menuju *root*. Selama pembaruan suatu *node* hanya diterima apabila memperbaiki masalah tereduksinya, nilai fungsi tujuan tidak pernah naik, sehingga TAO dijamin menurunkan fungsi tujuan secara monoton (Carreira-Perpiñán & Tavallali, 2018; Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025).
+Tidak semua sampel dalam $\mathcal{R}_{i}$ berpengaruh, sampel yang prediksinya sama pada kedua arah diabaikan, sedangkan sisanya (*care set*) memperoleh label semu berupa arah yang menghasilkan prediksi benar. Masalah biner tersebut diselesaikan dengan regresi logistik berregularisasi L1 sebagai pengganti (*surrogate*) kerugian 0/1, dan setiap *leaf* berlabel kelas mayoritas sampel yang mencapainya. Penyelesaian ini dilakukan bergantian antar-*node* dari yang terdalam menuju *root*. Selama pembaruan suatu *node* hanya diterima apabila memperbaiki masalah tereduksinya, nilai fungsi tujuan tidak pernah naik, sehingga TAO dijamin menurunkan fungsi tujuan secara monoton (Carreira-Perpiñán & Tavallali, 2018; Hada et al., 2024; Kairgeldin & Carreira-Perpiñán, 2025).
 
-Karena penalti $\lambda$ sama untuk semua *node*, *node* dengan banyak data cenderung kurang *sparse*. Kairgeldin dan Carreira-Perpiñán (2025) mengatasinya dengan membobot penalti berdasarkan jumlah sampel *node* melalui parameter $\alpha$, sebagaimana dinyatakan pada Persamaan 2.31 dan 2.32.
+Karena penalti $\lambda$ sama untuk semua *node*, *node* dengan banyak data cenderung kurang *sparse*. Kairgeldin dan Carreira-Perpiñán (2025) mengatasinya dengan membobot penalti berdasarkan jumlah sampel *node* melalui parameter $\alpha$, sebagaimana dinyatakan pada Persamaan 2.31 dan 2.32.
 
 $$
 E(\Theta) = \sum_{n = 1}^{N}{L(}\mathbf{y}_{n},T(\mathbf{x}_{n};\Theta)) + \lambda\sum_{i \in \mathcal{D}}^{}h_{\alpha}( \mid \mathcal{R}_{i} \mid ) \parallel \mathbf{w}_{i} \parallel_{1}
@@ -606,11 +606,11 @@ $$
 
 (2.32)
 
-dengan $\left. \mid\mathcal{R}_{i} \right.\mid$ jumlah sampel yang mencapai *node* ke-*i*. Nilai $\alpha > 0$ memperbesar penalti pada *node* yang menangani banyak data dibandingkan TAO standar (α = 0), sedangkan α = 1 menyamakan penalti per sampel antar-*node* (Kairgeldin & Carreira-Perpiñán, 2025).
+dengan $\left. \mid\mathcal{R}_{i} \right.\mid$ jumlah sampel yang mencapai *node* ke-*i*. Nilai $\alpha > 0$ memperbesar penalti pada *node* yang menangani banyak data dibandingkan TAO standar (α = 0), sedangkan α = 1 menyamakan penalti per sampel antar-*node* (Kairgeldin & Carreira-Perpiñán, 2025).
 
 3.  ***Class Weighting***
 
-Pada *model mimicking* (Subbab 2.1.7), label pelatihan SODT adalah prediksi *teacher*. Apabila sebagian kelas jauh lebih jarang, pohon cenderung mengabaikannya. *Cost-sensitive learning* mengatasinya dengan memberi biaya kesalahan yang berbeda antarkelas (Elkan, 2001; He & Garcia, 2009), sebagaimana dinyatakan pada Persamaan 2.33.
+Pada *model mimicking* (Subbab 2.1.7), label pelatihan SODT adalah prediksi *teacher*. Apabila sebagian kelas jauh lebih jarang, pohon cenderung mengabaikannya. *Cost-sensitive learning* mengatasinya dengan memberi biaya kesalahan yang berbeda antarkelas (Elkan, 2001; He & Garcia, 2009), sebagaimana dinyatakan pada Persamaan 2.33.
 
 $$
 E_{\omega}(\Theta) = \sum_{n = 1}^{N}{\omega_{y_{n}}L\left( y_{n},T\left( x_{n};\Theta \right) \right)}
@@ -750,13 +750,13 @@ dengan $Hits$ dan $Misses$ jumlah kasus yang titik maksimumnya berada di dalam d
 
 | **No.** | **Judul / Penulis** | **Masalah** | **Tujuan** | **Metode** | **Hasil** | **Keterkaitan** |
 |:--:|--------------|------------|-------------|------------|----------|---------|
-| 1\. | *Improving PCB defect detection using selective feature attention and pixel shuffle pyramid (Fung et al., 2024)* | Deteksi cacat mikroskopis pada sirkuit PCB memiliki tingkat *false negative* yang tinggi pada model deteksi standar. | Meningkatkan kemampuan model melokalisasi target berukuran kecil pada citra PCB. | Faster R-CNN dengan *Feature Pyramid Network* (FPN), *Pixel Shuffle Pyramid* (PSPyramid), *Selective Feature Attention,* dan *Soft-NMS*. | Terjadi peningkatan *Mean Average Precision* (mAP) yang signifikan pada pengujian dataset DeepPCB. | Penelitian ini menjadi referensi utama arsitektur dasar (*baseline*) komponen Neuro (ekstraktor fitur dan lokalisasi) yang digunakan dalam tugas akhir ini. |
-| 2\. | *Faster-LTN: a neuro-symbolic, end-to-end object detection architecture (Manigrasso et al., 2021)* | Model *deep learning* konvensional tidak mampu mengintegrasikan pengetahuan relasional dan penalaran logis ke dalam proses deteksi objek, sehingga kurang transparan dalam pengambilan keputusan. | Mengintegrasikan kemampuan penalaran logis dengan jaringan saraf konvolusional ke dalam arsitektur deteksi objek *end-to-end* untuk meningkatkan transparansi. | Faster R-CNN dengan penggantian kepala klasifikasi menjadi *Logic Tensor Networks* (LTN). | Arsitektur *end-to-end* berhasil dilatih dan mencapai performa kompetitif pada dataset PASCAL VOC. | Memberikan landasan konseptual integrasi pendekatan Neuro-Symbolic ke dalam arsitektur deteksi objek dua tahap (Faster R-CNN). |
+| 1\. | *Improving PCB defect detection using selective feature attention and pixel shuffle pyramid (Fung et al., 2024)* | Deteksi cacat mikroskopis pada sirkuit PCB memiliki tingkat *false negative* yang tinggi pada model deteksi standar. | Meningkatkan kemampuan model melokalisasi target berukuran kecil pada citra PCB. | Faster R-CNN dengan *Feature Pyramid Network* (FPN), *Pixel Shuffle Pyramid* (PSPyramid), *Selective Feature Attention,* dan *Soft-NMS*. | Terjadi peningkatan *Mean Average Precision* (mAP) yang signifikan pada pengujian dataset DeepPCB. | Penelitian ini menjadi referensi utama arsitektur dasar (*baseline*) komponen Neuro (ekstraktor fitur dan lokalisasi) yang digunakan dalam tugas akhir ini. |
+| 2\. | *Faster-LTN: a neuro-symbolic, end-to-end object detection architecture (Manigrasso et al., 2021)* | Model *deep learning* konvensional tidak mampu mengintegrasikan pengetahuan relasional dan penalaran logis ke dalam proses deteksi objek, sehingga kurang transparan dalam pengambilan keputusan. | Mengintegrasikan kemampuan penalaran logis dengan jaringan saraf konvolusional ke dalam arsitektur deteksi objek *end-to-end* untuk meningkatkan transparansi. | Faster R-CNN dengan penggantian kepala klasifikasi menjadi *Logic Tensor Networks* (LTN). | Arsitektur *end-to-end* berhasil dilatih dan mencapai performa kompetitif pada dataset PASCAL VOC. | Memberikan landasan konseptual integrasi pendekatan Neuro-Symbolic ke dalam arsitektur deteksi objek dua tahap (Faster R-CNN). |
 | 3\. | *Sparse oblique decision trees: a tool to understand and manipulate neural net features (Hada et al., 2024)* | Fitur internal jaringan *deep learning* sulit diinterpretasikan sehingga tidak diketahui fitur mana yang menentukan suatu kelas (*black-box*). | Memahami dan memanipulasi fitur internal jaringan saraf dengan meniru (*mimic*) bagian *classifier*-nya menggunakan pohon keputusan yang akurat sekaligus *interpretable*. | *Sparse Oblique Decision Tree* (SODT) dengan regularisasi L1 yang dilatih menggunakan TAO untuk meniru *classifier* jaringan saraf. | Menghasilkan pohon yang ramping dengan akurasi mendekati jaringan saraf yang ditiru, serta mengungkap subset fitur yang menentukan kelas tertentu. | Menjadi landasan teoritis komponen **Symbolic** untuk menggantikan MLP pada *RoI head* jaringan Faster R-CNN. |
 | 4\. | *Neurosymbolic models based on hybrids of convolutional neural networks and decision trees (Kairgeldin & Carreira-Perpiñán, 2025)* | Model *end-to-end* berbasis jaringan saraf tidak menyediakan penalaran yang dapat ditelusuri, sedangkan sparsitas SODT hasil TAO standar tidak merata antar-*node* (*node* dekat *root* kurang *sparse*). | Membangun model *neurosymbolic* berupa lapisan CNN yang dikomposisikan dengan SODT, serta mengatur distribusi sparsitas antar-*node*. | CNN (LeNet) dan SODT yang dilatih dengan TAO termodifikasi (hyperparameter α untuk membobot penalti L1 berdasarkan jumlah sampel *node*), serta *RF density map* per *node*. | SODT yang lebih *sparse* dengan akurasi kompetitif; sekelompok kecil neuron menentukan kelas tertentu dan *receptive field*-nya terpusat pada daerah citra yang diskriminatif. | Menjadi dasar arsitektur hibrida CNN–SODT, pembobotan penalti L1 (Persamaan 2.31 dan 2.32), dan pembanding heatmap per *node* (*RF density map*). |
-| 5\. | *Explainable Predictive Quality Inspection using Deep Learning in Electronics Manufacturing *(Saadallah et al., 2022) | Model deep learning untuk prediksi kualitas bersifat *black-box* sehingga menyulitkan teknisi memahami fitur mana yang paling berpengaruh terhadap keputusan prediksi. | Menyediakan penjelasan visual atas prediksi kualitas PCB menggunakan *heatmap* untuk membantu teknisi mengidentifikasi fitur global (kuantitas fisik SPI) dan lokal (pin) yang paling menentukan. | *1D-CNN untuk prediksi kualitas biner (OK/NOK) dan Grad-CAM untuk menghasilkan peta panas penjelasan.* | Grad-CAM berhasil menyoroti fitur SPI (DX, DY, DVolume) dan pin spesifik yang paling diskriminatif untuk kelas "NOK", membantu teknisi melacak penyebab deviasi kualitas. | Menunjukkan aplikasi Grad-CAM sebagai metode *post-hoc* untuk inspeksi kualitas PCB berbasis data SPI. |
-| 6\. | *Explainable AI Methods for Identification of Glue Volume Deficiencies in Printed Circuit Boards *(Tziolas et al., 2025) | Inspeksi volume lem pada PCB sulit dilakukan secara manual dan model *deep learning* yang digunakan tidak memberikan penjelasan atas deteksi defisiensi. | Mengidentifikasi defisiensi volume lem pada PCB menggunakan model *deep learning* dan menyediakan penjelasan visual atas prediksi model. | CenterNet-MobileNetV2 untuk lokalisasi PCB dan CNN *custom* (GlueVolNet) untuk klasifikasi volume lem ke dalam tiga kelas*, dengan Grad-CAM dan Deep SHAP untuk menghasilkan peta panas penjelasan.* | GlueVolNet mencapai akurasi 92,2% dalam mengklasifikasikan volume lem, dan Grad-CAM/Deep SHAP berhasil menyoroti area dengan volume lem tidak memadai yang menjadi dasar keputusan model. | Memperkuat justifikasi penggunaan Grad-CAM sebagai metode *post-hoc* yang telah teruji dalam inspeksi visual PCB, serta menunjukkan keterbatasan *post-hoc* yang mendorong kebutuhan pendekatan *faithful*. |
-| 7\. | *Assessing the trustworthiness of saliency maps for localizing abnormalities in medical imaging (Arun et al., 2021)* | Peta *saliency* banyak dipakai untuk menjelaskan dan melokalisasi keputusan CNN pada domain berisiko tinggi, tetapi keandalannya belum teruji secara sistematis. | Mengevaluasi keandalan (*trustworthiness*) peta *saliency* untuk lokalisasi kelainan pada citra medis. | Delapan metode *saliency*, termasuk Grad-CAM, diuji pada dua *dataset* radiologi berdasarkan utilitas lokalisasi, sensitivitas terhadap pengacakan bobot model, *repeatability*, dan *reproducibility*, lalu dibandingkan dengan jaringan lokalisasi (U-Net dan RetinaNet). | *Seluruh metode gagal pada minimal satu kriteria dan kalah dari jaringan lokalisasi. Grad-CAM lolos uji pengacakan bobot,* tetapi AUPRC lokalisasi seluruh metode *saliency* (0,160–0,519) tetap di bawah RetinaNet (0,596) pada deteksi pneumonia, begitu pula (0,024–0,224) terhadap U-Net (0,404) pada segmentasi pneumothorax. | Menunjukkan bahwa penjelasan *post-hoc*, termasuk Grad-CAM, belum dapat diandalkan pada domain berisiko tinggi, serta menjadi dasar kontrol pengacakan bobot yang juga digunakan dalam penelitian ini. |
+| 5\. | *Explainable Predictive Quality Inspection using Deep Learning in Electronics Manufacturing *(Saadallah et al., 2022) | Model deep learning untuk prediksi kualitas bersifat *black-box* sehingga menyulitkan teknisi memahami fitur mana yang paling berpengaruh terhadap keputusan prediksi. | Menyediakan penjelasan visual atas prediksi kualitas PCB menggunakan *heatmap* untuk membantu teknisi mengidentifikasi fitur global (kuantitas fisik SPI) dan lokal (pin) yang paling menentukan. | *1D-CNN untuk prediksi kualitas biner (OK/NOK) dan Grad-CAM untuk menghasilkan peta panas penjelasan.* | Grad-CAM berhasil menyoroti fitur SPI (DX, DY, DVolume) dan pin spesifik yang paling diskriminatif untuk kelas "NOK", membantu teknisi melacak penyebab deviasi kualitas. | Menunjukkan aplikasi Grad-CAM sebagai metode *post-hoc* untuk inspeksi kualitas PCB berbasis data SPI. |
+| 6\. | *Explainable AI Methods for Identification of Glue Volume Deficiencies in Printed Circuit Boards *(Tziolas et al., 2025) | Inspeksi volume lem pada PCB sulit dilakukan secara manual dan model *deep learning* yang digunakan tidak memberikan penjelasan atas deteksi defisiensi. | Mengidentifikasi defisiensi volume lem pada PCB menggunakan model *deep learning* dan menyediakan penjelasan visual atas prediksi model. | CenterNet-MobileNetV2 untuk lokalisasi PCB dan CNN *custom* (GlueVolNet) untuk klasifikasi volume lem ke dalam tiga kelas*, dengan Grad-CAM dan Deep SHAP untuk menghasilkan peta panas penjelasan.* | GlueVolNet mencapai akurasi 92,2% dalam mengklasifikasikan volume lem, dan Grad-CAM/Deep SHAP berhasil menyoroti area dengan volume lem tidak memadai yang menjadi dasar keputusan model. | Memperkuat justifikasi penggunaan Grad-CAM sebagai metode *post-hoc* yang telah teruji dalam inspeksi visual PCB, serta menunjukkan keterbatasan *post-hoc* yang mendorong kebutuhan pendekatan *faithful*. |
+| 7\. | *Assessing the trustworthiness of saliency maps for localizing abnormalities in medical imaging (Arun et al., 2021)* | Peta *saliency* banyak dipakai untuk menjelaskan dan melokalisasi keputusan CNN pada domain berisiko tinggi, tetapi keandalannya belum teruji secara sistematis. | Mengevaluasi keandalan (*trustworthiness*) peta *saliency* untuk lokalisasi kelainan pada citra medis. | Delapan metode *saliency*, termasuk Grad-CAM, diuji pada dua *dataset* radiologi berdasarkan utilitas lokalisasi, sensitivitas terhadap pengacakan bobot model, *repeatability*, dan *reproducibility*, lalu dibandingkan dengan jaringan lokalisasi (U-Net dan RetinaNet). | *Seluruh metode gagal pada minimal satu kriteria dan kalah dari jaringan lokalisasi. Grad-CAM lolos uji pengacakan bobot,* tetapi AUPRC lokalisasi seluruh metode *saliency* (0,160–0,519) tetap di bawah RetinaNet (0,596) pada deteksi pneumonia, begitu pula (0,024–0,224) terhadap U-Net (0,404) pada segmentasi pneumothorax. | Menunjukkan bahwa penjelasan *post-hoc*, termasuk Grad-CAM, belum dapat diandalkan pada domain berisiko tinggi, serta menjadi dasar kontrol pengacakan bobot yang juga digunakan dalam penelitian ini. |
 
 # BAB III METODOLOGI PENELITIAN
 
@@ -779,9 +779,9 @@ Dataset DeepPCB (Tang et al., 2019) dibagi menjadi data latih dan data uji berda
 | Data Pelatihan (Training) | *trainval.txt* | 1.000 | 66,67% |
 | Data Pengujian (Testing) | *test.txt* | 500 | 33,33% |
 
-Penelitian ini bersifat non-referensial, yaitu model mendeteksi cacat tanpa membandingkan citra uji dengan citra *template*, sesuai kondisi inspeksi nyata ketika citra referensi sering tidak tersedia. Oleh karena itu, dari setiap pasangan citra hanya citra target (*\_test.jpg*) yang dimuat, sedangkan citra templat (*\_temp.jpg*) diabaikan.
+Penelitian ini bersifat non-referensial, yaitu model mendeteksi cacat tanpa membandingkan citra uji dengan citra *template*, sesuai kondisi inspeksi nyata ketika citra referensi sering tidak tersedia. Oleh karena itu, dari setiap pasangan citra hanya citra target (*\_test.jpg*) yang dimuat, sedangkan citra templat (*\_temp.jpg*) diabaikan.
 
-Koordinat cacat pada berkas anotasi diubah menjadi *bounding box*, sedangkan ID kelas 1–6 dipakai langsung sebagai indeks kelas, yaitu *open*, *short*, *mousebite*, *spur*, *spurious copper*, dan *pinhole*. Contoh sampel beserta anotasinya ditunjukkan pada Gambar 3.2.
+Koordinat cacat pada berkas anotasi diubah menjadi *bounding box*, sedangkan ID kelas 1–6 dipakai langsung sebagai indeks kelas, yaitu *open*, *short*, *mousebite*, *spur*, *spurious copper*, dan *pinhole*. Contoh sampel beserta anotasinya ditunjukkan pada Gambar 3.2.
 
 [Gambar 3.2]
 
@@ -807,13 +807,13 @@ Citra diproses melalui dua *pipeline*. *Pipeline* di luar model mengubah citra m
 | *Multi-resolution Scaling* | Sisi terpendek: {480, 560, 640, 720, 800, 880}; sisi terpanjang maks. 880 | Ketahanan terhadap skala |
 | *Coordinate Sync* | Enabled | Penyesuaian otomatis lokasi *box* saat gambar berubah |
 
-Secara berurutan, citra diubah menjadi *tensor* berintensitas \[0,0; 1,0\], dibalik horizontal secara acak pada fase latih beserta koordinat *bounding box*-nya, lalu di dalam model dinormalisasi per kanal sesuai Tabel 3.2, diskalakan sesuai fase pada Tabel 3.3, dan disamakan ukurannya dalam satu *batch* melalui *padding*.
+Secara berurutan, citra diubah menjadi *tensor* berintensitas \[0,0; 1,0\], dibalik horizontal secara acak pada fase latih beserta koordinat *bounding box*-nya, lalu di dalam model dinormalisasi per kanal sesuai Tabel 3.2, diskalakan sesuai fase pada Tabel 3.3, dan disamakan ukurannya dalam satu *batch* melalui *padding*.
 
 ## 3.3 Model Neuro (*Faster* R-CNN)
 
 *Faster* R-CNN berperan sebagai ekstraktor fitur, pengusul area, dan model *teacher*. Arsitekturnya mengikuti SF-PSPyramid dari Fung et al. (2024) (Subbab 2.1.5), dengan satu perbedaan, yaitu jumlah kanal *neck* 64, bukan 256, agar dimensi masukan SODT tidak terlalu besar sehingga hanya menjadi ($64 \times 7 \times 7 = 3.136$).
 
-Alur modelnya mengikuti Subbab 2.1.5. *Backbone* ResNet-50 mengekstrak *feature map* C2–C5, lalu *neck* membentuk piramida P2′–P6 melalui *pixel shuffle* pada Persamaan 2.8 dan SF *Attention* pada Persamaan 2.9. RPN menghasilkan proposal dari *anchor* sesuai Persamaan 2.10 sampai 2.13, lalu *RoI Align* mengubah setiap proposal menjadi *tensor* 64×7×7 pada tingkat piramida terpilih dengan Persamaan 2.17 dan 2.19. Selanjutnya, *box head* menghasilkan skor kelas dan koordinat *bounding box*, dan Soft-NMS menyaring deteksi yang tumpang-tindih dengan Persamaan 2.20. Rincian konfigurasi tiap modul dirangkum pada Tabel 3.4.
+Alur modelnya mengikuti Subbab 2.1.5. *Backbone* ResNet-50 mengekstrak *feature map* C2–C5, lalu *neck* membentuk piramida P2′–P6 melalui *pixel shuffle* pada Persamaan 2.8 dan SF *Attention* pada Persamaan 2.9. RPN menghasilkan proposal dari *anchor* sesuai Persamaan 2.10 sampai 2.13, lalu *RoI Align* mengubah setiap proposal menjadi *tensor* 64×7×7 pada tingkat piramida terpilih dengan Persamaan 2.17 dan 2.19. Selanjutnya, *box head* menghasilkan skor kelas dan koordinat *bounding box*, dan Soft-NMS menyaring deteksi yang tumpang-tindih dengan Persamaan 2.20. Rincian konfigurasi tiap modul dirangkum pada Tabel 3.4.
 
 **Tabel 3.4 Parameter utama Faster R-CNN**
 
@@ -891,7 +891,7 @@ Alur modelnya mengikuti Subbab 2.1.5. *Backbone* ResNet-50 mengekstrak *featu
 
 ## 3.4 Pelatihan dan Evaluasi Model Neuro
 
-*Faster* R-CNN dilatih selama 15 *epoch* (Fung et al. (2024) memakai 12) dengan *Automatic Mixed Precision* (AMP) dan *gradient accumulation* untuk mengatasi keterbatasan memori GPU. Kerugian regresi memakai L1 murni pada Persamaan 2.15 mengikuti Fung et al. (2024) karena memberi penalti lebih tegas pada *cacat* kecil. Laju pembelajaran dinaikkan secara linear pada awal pelatihan (*warmup*), lalu diturunkan bertahap. *Hyperparameter* dirangkum pada Tabel 3.5.
+*Faster* R-CNN dilatih selama 15 *epoch* (Fung et al. (2024) memakai 12) dengan *Automatic Mixed Precision* (AMP) dan *gradient accumulation* untuk mengatasi keterbatasan memori GPU. Kerugian regresi memakai L1 murni pada Persamaan 2.15 mengikuti Fung et al. (2024) karena memberi penalti lebih tegas pada *cacat* kecil. Laju pembelajaran dinaikkan secara linear pada awal pelatihan (*warmup*), lalu diturunkan bertahap. *Hyperparameter* dirangkum pada Tabel 3.5.
 
 *\*
 
@@ -963,7 +963,7 @@ Alur modelnya mengikuti Subbab 2.1.5. *Backbone* ResNet-50 mengekstrak *featu
 </tbody>
 </table>
 
-Pada setiap *batch*, *multi-task loss* pada Persamaan 2.14 dengan kerugian L1 pada Persamaan 2.15 dihitung, lalu gradiennya diakumulasikan selama empat iterasi sebelum SGD memperbarui bobot sesuai Persamaan 2.3. Setelah pelatihan, model dievaluasi pada data uji dengan mAP@0,5 dan mAP@0,5:0,95, serta *Precision*, *Recall*, dan F1 pada IoU 0,5 dan skor 0,5 sesuai Persamaan 2.35 sampai 2.40, termasuk per kelas dan *confusion matrix*. Bobot model kemudian dibekukan dan disimpan sebagai model *teacher*.
+Pada setiap *batch*, *multi-task loss* pada Persamaan 2.14 dengan kerugian L1 pada Persamaan 2.15 dihitung, lalu gradiennya diakumulasikan selama empat iterasi sebelum SGD memperbarui bobot sesuai Persamaan 2.3. Setelah pelatihan, model dievaluasi pada data uji dengan mAP@0,5 dan mAP@0,5:0,95, serta *Precision*, *Recall*, dan F1 pada IoU 0,5 dan skor 0,5 sesuai Persamaan 2.35 sampai 2.40, termasuk per kelas dan *confusion matrix*. Bobot model kemudian dibekukan dan disimpan sebagai model *teacher*.
 
 ## 3.5 Ekstraksi Fitur RoI dan Hasil Klasifikasi *Faster* R-CNN
 
@@ -975,13 +975,13 @@ Label setiap proposal adalah prediksi *teacher*, termasuk *background*, bukan *g
 
 **Gambar 3.3 Pengambilan RoI Align dan Hasil dari Faster R-CNN**
 
-Berdasarkan mekanisme tersebut, pembentukan *dataset* simbolik dirangkum pada Algoritma 3.1.
+Berdasarkan mekanisme tersebut, pembentukan *dataset* simbolik dirangkum pada Algoritma 3.1.
 
 **Algoritma 3. 1 Pembentukan Dataset Simbolik**
 
-**Input:** Model *teacher* (*frozen*) serta citra latih dan uji beserta anotasinya.
+**Input:** Model *teacher* (*frozen*) serta citra latih dan uji beserta anotasinya.
 
-**Output:**  *Dataset* simbolik latih dan uji berisi fitur $64 \times 7 \times 7$, koordinat proposal, label *teacher*, dan data pendamping *ground truth*.
+**Output:**  *Dataset* simbolik latih dan uji berisi fitur $64 \times 7 \times 7$, koordinat proposal, label *teacher*, dan data pendamping *ground truth*.
 
 **Langkah-langkah:**
 
@@ -993,21 +993,21 @@ Berdasarkan mekanisme tersebut, pembentukan *dataset* simbolik dirangkum pada 
 
 ## 3.6 Model Simbolik (SODT)
 
-SODT menggantikan *classifier* pada *box head*, sehingga setiap keputusan kelas berasal dari rangkaian keputusan linear yang dapat ditelusuri di Subbab 2.1.8. Masukannya adalah *tensor* $64 \times 7 \times 7$ yang diratakan menjadi vektor berdimensi 3.136, dengan urutan yang dicatat agar setiap bobot dapat dikembalikan ke kanal dan posisi grid asalnya.
+SODT menggantikan *classifier* pada *box head*, sehingga setiap keputusan kelas berasal dari rangkaian keputusan linear yang dapat ditelusuri di Subbab 2.1.8. Masukannya adalah *tensor* $64 \times 7 \times 7$ yang diratakan menjadi vektor berdimensi 3.136, dengan urutan yang dicatat agar setiap bobot dapat dikembalikan ke kanal dan posisi grid asalnya.
 
-SODT dibentuk sebagai pohon biner lengkap dengan fungsi keputusan linear pada setiap *node* internal sesuai Persamaan 2.28 dan satu label kelas pada setiap *leaf*. Bobot dan bias setiap *node* diinisialisasi dari distribusi normal baku (Hada et al., 2024), sedangkan label *leaf* diinisialisasi secara acak, bukan dengan kelas mayoritas, agar TAO tidak terjebak pada kelas *background* yang dominan. Konfigurasinya dirangkum pada Tabel 3.6.
+SODT dibentuk sebagai pohon biner lengkap dengan fungsi keputusan linear pada setiap *node* internal sesuai Persamaan 2.28 dan satu label kelas pada setiap *leaf*. Bobot dan bias setiap *node* diinisialisasi dari distribusi normal baku (Hada et al., 2024), sedangkan label *leaf* diinisialisasi secara acak, bukan dengan kelas mayoritas, agar TAO tidak terjebak pada kelas *background* yang dominan. Konfigurasinya dirangkum pada Tabel 3.6.
 
 **Tabel 3.6 Konfigurasi struktur dan inisialisasi SODT**
 
 | **Parameter** | **Nilai** | **Keterangan** |
 |:----------------:|------------------|-------------------------------------|
-| Kedalaman pohon | 6 | Batas maksimum tingkat hierarki *node* |
+| Kedalaman pohon | 6 | Batas maksimum tingkat hierarki *node* |
 | Inisialisasi bobot dan bias | Distribusi normal baku N(0, 1) | Titik awal optimasi TAO |
-| Inisialisasi label *leaf* | Acak | Mencegah TAO terjebak pada kelas *background* yang dominan |
+| Inisialisasi label *leaf* | Acak | Mencegah TAO terjebak pada kelas *background* yang dominan |
 
 ## 3.7 Pelatihan dan Evaluasi Model Simbolik
 
-SODT dilatih dengan TAO pada *dataset* simbolik latih untuk meminimalkan fungsi tujuan yang terdiri atas kerugian berbobot kelas pada Persamaan 2.33 dan penalti L1 berbobot ukuran *reduced set* pada Persamaan 2.31 dan 2.32. Karena sebagian besar proposal berlabel *background*, distribusi kelasnya sangat timpang sehingga diperlukan *negative sampling*.
+SODT dilatih dengan TAO pada *dataset* simbolik latih untuk meminimalkan fungsi tujuan yang terdiri atas kerugian berbobot kelas pada Persamaan 2.33 dan penalti L1 berbobot ukuran *reduced set* pada Persamaan 2.31 dan 2.32. Karena sebagian besar proposal berlabel *background*, distribusi kelasnya sangat timpang sehingga diperlukan *negative sampling*.
 
 Pembobotan kelas diterapkan di dua tempat. Pada masalah tereduksi setiap node (Persamaan 2.30), setiap sampel diberi bobot pada Persamaan 3.1. Pada *leaf*, label ditentukan dengan mayoritas berbobot pada Persamaan 3.2.
 
@@ -1046,7 +1046,7 @@ Setelah TAO, pohon dipangkas dengan menghapus *dead branch* dan *pure subtree* (
 <tr>
 <td style="text-align: left;">Iterasi Maksimum TAO</td>
 <td style="text-align: left;">15</td>
-<td style="text-align: left;">Jumlah siklus pembaruan seluruh <em>node</em></td>
+<td style="text-align: left;">Jumlah siklus pembaruan seluruh <em>node</em></td>
 </tr>
 <tr>
 <td style="text-align: left;">Lambda (<em>λ</em>)</td>
@@ -1061,7 +1061,7 @@ Setelah TAO, pohon dipangkas dengan menghapus *dead branch* dan *pure subtree* (
 <tr>
 <td style="text-align: left;">Rasio Negatif</td>
 <td style="text-align: left;">2</td>
-<td style="text-align: left;">Sampel <em>background</em> terhadap sampel cacat</td>
+<td style="text-align: left;">Sampel <em>background</em> terhadap sampel cacat</td>
 </tr>
 <tr>
 <td style="text-align: left;">Bobot Kelas (<em>w</em>)</td>
@@ -1070,7 +1070,7 @@ Setelah TAO, pohon dipangkas dengan menghapus *dead branch* dan *pure subtree* (
 <em>Open</em>: 1,5<br />
 <em>Pinhole</em>: 1,25<br />
 <em>Spurious copper</em>: 1,25</td>
-<td style="text-align: left;">Biaya lebih besar untuk kelas dengan <em>recall</em> terlemah</td>
+<td style="text-align: left;">Biaya lebih besar untuk kelas dengan <em>recall</em> terlemah</td>
 </tr>
 <tr>
 <td style="text-align: left;">Toleransi Konvergensi</td>
@@ -1080,11 +1080,11 @@ Setelah TAO, pohon dipangkas dengan menghapus *dead branch* dan *pure subtree* (
 </tbody>
 </table>
 
-Fidelitas SODT diukur terhadap label *teacher* pada *dataset* simbolik uji dengan akurasi (*mimic accuracy*) dan *macro*-F1, serta kesesuaian per kelas, disertai jumlah *node* aktif dan bobot bukan nol. Seluruh tahapan pelatihan, mulai dari *negative sampling* hingga pemangkasan, dirangkum pada Algoritma 3.2.
+Fidelitas SODT diukur terhadap label *teacher* pada *dataset* simbolik uji dengan akurasi (*mimic accuracy*) dan *macro*-F1, serta kesesuaian per kelas, disertai jumlah *node* aktif dan *nonzero weight*. Seluruh tahapan pelatihan, mulai dari *negative sampling* hingga pemangkasan, dirangkum pada Algoritma 3.2.
 
 **Algoritma 3.2 Pelatihan SODT dengan TAO**
 
-**Input:**  *Dataset* simbolik latih dan uji, serta SODT terinisialisasi.
+**Input:**  *Dataset* simbolik latih dan uji, serta SODT terinisialisasi.
 
 **Output:** SODT terlatih dan hasil evaluasi fidelitasnya.
 
@@ -1098,17 +1098,17 @@ Fidelitas SODT diukur terhadap label *teacher* pada *dataset* simbolik uji d
 
 ## 3.8 Integrasi *Faster* R-CNN dan SODT
 
-Tahap ini menyatukan *Faster* R-CNN dan SODT menjadi satu alur inferensi, ditambah dua komponen, yaitu skor deteksi berbasis *routing margin* dan *heatmap* per *node*.
+Tahap ini menyatukan *Faster* R-CNN dan SODT menjadi satu alur inferensi, ditambah dua komponen, yaitu skor deteksi berbasis *routing margin* dan *heatmap* per *node*.
 
 1.  ***Hybrid* *Inference***
 
-SODT hanya menggantikan kepala klasifikasi. Koordinat *bounding box* akhir tetap dihitung oleh kepala regresi *Faster* R-CNN, sehingga sifat *faithful* berlaku pada keputusan kelas, bukan pada penyesuaian lokasi kotak. Alurnya ditunjukkan pada Gambar 3.4.
+SODT hanya menggantikan kepala klasifikasi. Koordinat *bounding box* akhir tetap dihitung oleh kepala regresi *Faster* R-CNN, sehingga sifat *faithful* berlaku pada keputusan kelas, bukan pada penyesuaian lokasi kotak. Alurnya ditunjukkan pada Gambar 3.4.
 
 [Gambar 3.4]
 
 **Gambar 3.4 Diagram integrasi Neuro-Symbolic**
 
-Penggantian kepala klasifikasi tersebut menimbulkan satu persoalan pada skor deteksi. Karena setiap *leaf*  hanya menyimpan satu label, semua deteksi yang mencapai *leaf*  berkelas sama akan memiliki skor identik di Subbab 2.1.7. Akibatnya, AP dan *Soft*-NMS kehilangan urutan skor. Oleh karena itu, skor dibentuk dari *margin* pada Persamaan 2.26 dan *sigmoid* pada Persamaan 2.27 setiap *node* pada jalur keputusan, yang selanjutnya disebut skor deteksi berbasis *routing margin*, sebagaimana dinyatakan pada Persamaan 3.3.
+Penggantian kepala klasifikasi tersebut menimbulkan satu persoalan pada skor deteksi. Karena setiap *leaf*  hanya menyimpan satu label, semua deteksi yang mencapai *leaf*  berkelas sama akan memiliki skor identik di Subbab 2.1.7. Akibatnya, AP dan *Soft*-NMS kehilangan urutan skor. Oleh karena itu, skor dibentuk dari *margin* pada Persamaan 2.26 dan *sigmoid* pada Persamaan 2.27 setiap *node* pada jalur keputusan, yang selanjutnya disebut skor deteksi berbasis *routing margin*, sebagaimana dinyatakan pada Persamaan 3.3.
 
 $$
 s(x) = \prod_{i \in P(x),\, w_{i} \neq 0}^{}{\sigma\left( \left| f_{i}(x) \right| \right)}
@@ -1184,7 +1184,7 @@ Ketelitian $H_{i}$ berada pada tingkat daerah karena perhitungan eksak berhenti 
 
 **Gambar 3.6 Alur Pembentukan *Heatmap* per *Node***
 
-Berdasarkan Persamaan 3.4 hingga 3.7, pembentukan *heatmap* untuk satu deteksi dirangkum pada Algoritma 3.4.
+Berdasarkan Persamaan 3.4 hingga 3.7, pembentukan *heatmap* untuk satu deteksi dirangkum pada Algoritma 3.4.
 
 **Algoritma 3.4 Pembentukan Heatmap per Node**
 
@@ -1212,7 +1212,7 @@ Waktu rata-rata per citra uji juga diukur untuk *Faster* R-CNN, model hibrida, d
 
 2.  **Evaluasi Penjelasan**
 
-Grad-CAM menghasilkan satu peta per deteksi, sedangkan SODT satu peta per *node*. Untuk perbandingan, *heatmap* per *node* ditumpuk menjadi satu peta dengan Persamaan 3.8.
+Grad-CAM menghasilkan satu peta per deteksi, sedangkan SODT satu peta per *node*. Untuk perbandingan, *heatmap* per *node* ditumpuk menjadi satu peta dengan Persamaan 3.8.
 
 $$
 M(p) = \sum_{i \in P(x)}^{}{H_{i}(p)}
@@ -1245,11 +1245,11 @@ Seluruhnya dibandingkan dengan Grad-CAM, yang dihitung pada *feature map* *neck*
 
 # BAB IV HASIL DAN PEMBAHASAN
 
-## 4.1 Hasil Persiapan Dataset
+## 4.1 Hasil Persiapan *Dataset*
 
-Dataset DeepPCB dipartisi menjadi 1.000 citra latih dan 500 citra uji sesuai berkas indeks pada Subbab 3.2, tanpa ada citra yang muncul di kedua himpunan. Statistik anotasi pada kedua himpunan dirangkum dalam Tabel 4.1.
+*Dataset* DeepPCB dipartisi menjadi 1.000 citra latih dan 500 citra uji sesuai Subbab 3.1 tanpa ada citra yang muncul di kedua himpunan. Statistik anotasinya dirangkum pada Tabel 4.1.
 
-**Tabel 4.1 Statistik Partisi Dataset DeepPCB**
+**Tabel 4.1 Statistik Partisi *Dataset* DeepPCB**
 
 |       **Metrik**        | ***Train Set*** | ***Test Set*** |
 |:-----------------------:|-----------------|----------------|
@@ -1260,67 +1260,67 @@ Dataset DeepPCB dipartisi menjadi 1.000 citra latih dan 500 citra uji sesuai ber
 |  Maximum Anotasi Citra  | 15              | 13             |
 |      Citra Kosong       | 0               | 0              |
 
-Setiap citra memuat 1 hingga 15 cacat dengan rata-rata 6,87 pada data latih dan 6,28 pada data uji, sehingga tidak ada citra kosong dan setiap citra merupakan kasus deteksi multi-objek. Distribusi kelas juga relatif seimbang, seperti terlihat pada Gambar 4.1 dan Gambar 4.2.
+Berdasarkan Tabel 4.1, tidak ada citra kosong dan setiap citra rata-rata memuat 6 hingga 7 cacat, sehingga seluruh data merupakan kasus deteksi multi-objek. Distribusi anotasi per kelas ditunjukkan pada Gambar 4.1 dan Gambar 4.2.
 
 [Gambar 4.1]
 
-**Gambar 4.1 Distribusi anotasi per kelas pada *training set.***
+**Gambar 4.1 Distribusi Anotasi per Kelas pada *Training Set***
 
 [Gambar 4.2]
 
-**Gambar 4.2 Distribusi anotasi per kelas pada *test set.***
+**Gambar 4.2 Distribusi Anotasi per Kelas pada *Test Set***
 
-Kelas terbanyak hanya sekitar 1,4 kali kelas tersedikit, yaitu *mousebite* (1.379) terhadap *spurious copper* (1.010) pada data latih, serta *open* (659) terhadap *spurious copper* (464) pada data uji. Dengan demikian, perbedaan kinerja antarkelas pada pembahasan berikutnya tidak dapat dijelaskan terutama oleh ketimpangan jumlah data.
+Berdasarkan Gambar 4.1 dan Gambar 4.2, kelas terbanyak hanya sekitar 1,4 kali kelas tersedikit pada kedua himpunan, sehingga perbedaan kinerja antarkelas pada pembahasan berikutnya tidak disebabkan oleh ketimpangan jumlah data.
 
-Dari sisi Anotasi, seluruh *bounding box* berada di dalam batas citra 640×640 piksel dan tidak ada yang berdimensi nol. Gambar 4.3 menunjukkan enam sampel acak dengan 5 hingga 9 anotasi per citra. Setiap *bounding box* menutupi area cacat dengan label yang sesuai, sehingga anotasi dapat langsung digunakan sebagai *ground truth*.
+Seluruh *bounding box* berada di dalam batas citra 640×640 piksel tanpa dimensi nol, dan kesesuaiannya dengan citra diperiksa melalui enam sampel acak pada Gambar 4.3.
 
 [Gambar 4.3]
 
-**Gambar 4.3 Sampel acak citra PCB dengan anotasi *bounding box ground truth***
+**Gambar 4.3 Sampel Acak Citra PCB dengan Anotasi *Bounding Box Ground Truth***
 
-## 4.2 Hasil Pra-Pemrosesan Dataset
+Berdasarkan Gambar 4.3, setiap *bounding box* pada keenam sampel menutupi area cacat dengan label yang sesuai, sehingga anotasi dapat langsung digunakan sebagai *ground truth*.
 
-Kedua transformasi pada Tabel 3.3 divisualisasikan untuk memastikan *bounding box* tetap sesuai dengan citranya. Setiap citra diproses dua kali agar pengaruh pemilihan acak dapat terlihat. Hasil *horizontal flip* ditunjukkan pada Gambar 4.4.
+## 4.2 Hasil Pra-Pemrosesan *Dataset*
+
+Kedua transformasi pada Tabel 3.3 diterapkan dua kali pada setiap citra untuk memperlihatkan keacakannya sekaligus memastikan *bounding box* tetap sesuai. Hasil *horizontal flip* ditunjukkan pada Gambar 4.4.
 
 [Gambar 4.4]
 
-**Gambar 4.4 Hasil visualisasi augmentasi pembalikan horizontal pada citra PCB**
+**Gambar 4.4 Hasil Visualisasi Augmentasi Pembalikan Horizontal pada Citra PCB**
 
-Pada Gambar 4.4, citra 00041069 dan 20085089 terbalik pada pemrosesan pertama tetapi tidak pada pemrosesan kedua, sedangkan citra 50600013 tidak terbalik sama sekali. Hal ini menunjukkan bahwa *flip* terjadi secara acak, sehingga model menerima orientasi yang berbeda setiap kali citra dimuat. Saat citra terbalik, *bounding box* ikut berpindah ke posisi cerminnya dan tetap menutupi cacat yang sama. Hasil *multi-resolution scaling* ditunjukkan pada Gambar 4.5.
+Berdasarkan Gambar 4.4, *flip* terjadi secara acak sehingga model menerima orientasi yang beragam, dan saat citra terbalik *bounding box* selalu ikut berpindah ke posisi cerminnya. Hasil *multi-resolution scaling* ditunjukkan pada Gambar 4.5.
 
 [Gambar 4.5]
 
-**Gambar 4.5 Hasil visualisasi penskalaan multi-resolusi dalam arsitektur model**
+**Gambar 4.5 Hasil Visualisasi Penskalaan Multi-Resolusi dalam Arsitektur Model**
 
-Pada Gambar 4.5, resolusi juga dipilih secara acak. Contohnya, citra 13000141 diskalakan menjadi 880×880 piksel pada pemrosesan pertama dan 720×720 piksel pada pemrosesan kedua. Citra kemudian diberi *padding* hingga ukurannya kelipatan 32, yaitu 880 menjadi 896 dan 720 menjadi 736, sedangkan 800 tidak berubah. Karena penskalaan bersifat proporsional, bentuk cacat tidak terdistorsi dan *bounding box* tetap berada pada area cacat.
+Berdasarkan Gambar 4.5, resolusi juga dipilih secara acak lalu diberi *padding* hingga kelipatan 32, tetapi penskalaan yang proporsional membuat bentuk cacat tidak terdistorsi dan *bounding box* tetap pada area cacat. Normalisasi hanya menggeser rentang nilai piksel sesuai *mean* dan *std* pada Tabel 3.2 tanpa mengubah tampilan citra. Dengan demikian, pra-pemrosesan menghasilkan variasi orientasi dan skala tanpa merusak kesesuaian anotasi.
 
-Selain diskalakan, citra juga dinormalisasi. Normalisasi tidak mengubah tampilan citra, tetapi nilai pikselnya berubah menjadi −2,12 hingga 2,64 (Gambar 4.5), sesuai dengan *mean* dan *std* pada Tabel 3.2. Dengan demikian, pra-pemrosesan menghasilkan variasi orientasi dan skala tanpa merusak kesesuaian anotasi, sehingga data siap digunakan untuk pelatihan *Faster* R-CNN.
+## 4.3 Hasil dan Evaluasi *Faster* R-CNN
 
-## 4.3 Hasil dan Evaluasi Faster RCNN
-
-*Faster* R-CNN dilatih selama 15 *epoch* dengan *hyperparameter* pada Tabel 3.5. Perkembangan *loss* total dan setiap komponennya ditunjukkan pada Gambar 4.6.
+*Faster* R-CNN dilatih selama 15 *epoch* dengan *hyperparameter* pada Tabel 3.5. Perkembangan *loss* total dan setiap komponennya ditunjukkan pada Gambar 4.6.
 
 [Gambar 4.6]
 
-Gambar 4.6 *Training Loss* *Faster* R-CNN selama 15 *Epoch*
+**Gambar 4.6 *Training Loss Faster* R-CNN selama 15 *Epoch***
 
-*Loss *total turun dari 0,817 menjadi 0,267 dan mendatar setelah epoch ke-12, sehingga model telah konvergen. Penurunan tajam pada epoch ke-9 dan ke-12 terjadi tepat setelah laju pembelajaran diturunkan (Tabel 3.5). Di antara komponennya, *loss regresi bounding box* tetap menjadi yang terbesar, yaitu 0,193, sedangkan loss RPN sudah berada di bawah 0,02 sejak epoch ke-2. Artinya, kesulitan utama model bukan menemukan cacat, melainkan menentukan batas bounding box secara presisi.
+Berdasarkan Gambar 4.6, *loss* total turun tajam setiap kali laju pembelajaran diturunkan sesuai Tabel 3.5 dan mendatar setelah *epoch* ke-12, menandakan model telah konvergen. *Loss* regresi *bounding box* tetap terbesar hingga akhir pelatihan, sedangkan *loss* RPN sudah sangat kecil sejak awal, sehingga kesulitan utama model terletak pada presisi batas *bounding box*, bukan pada menemukan cacat.
 
-Kinerja model pada data uji dirangkum dalam Tabel 4.2, bersama hasil yang dilaporkan Fung et al. (2024) pada *dataset* DeepPCB non-referensial.
+Kinerja model pada data uji dirangkum pada Tabel 4.2 bersama hasil Fung et al. (2024) pada *dataset* DeepPCB non-referensial.
 
-**Tabel 4.2 Kinerja Deteksi *\*Faster\** R-CNN pada Data Uji**
+**Tabel 4.2 Kinerja Deteksi *Faster* R-CNN pada Data Uji**
 
 | **Model** | **AP50** | **AP75** | **AP@50:5:85** | **mAP@0,5:0,95** | ***Precision*** | ***Recall*** | **F1** |
 |:------------|--------|--------|---------|----------|-----------|---------|--------|
-| *Faster* R-CNN (Fung et al., 2024) | 0,970 | 0,900 | 0,888 | \- | \- | \- | \- |
-| *Faster* R-CNN + SF-PSPyramid (Fung et al., 2024) | 0,986 | 0,946 | 0,932 | \- | \- | \- | \- |
-| *Faster* R-CNN + SF-PSPyramid (penelitian ini) | 0,979 | 0,920 | 0,901 | 0,759 | 0,910 | 0,982 | 0,945 |
+| *Faster* R-CNN (Fung et al., 2024) | 0,970 | 0,900 | 0,888 | \- | \- | \- | \- |
+| *Faster* R-CNN + SF-PSPyramid (Fung et al., 2024) | 0,986 | 0,946 | 0,932 | \- | \- | \- | \- |
+| *Faster* R-CNN + SF-PSPyramid (penelitian ini) | 0,979 | 0,920 | 0,901 | 0,759 | 0,910 | 0,982 | 0,945 |
 
-*Recall* sebesar 0,982 menunjukkan bahwa hampir seluruh cacat terdeteksi. Namun, AP turun dari 0,979 (AP50) menjadi 0,759 (mAP@0,5:0,95) saat ambang IoU dinaikkan, sejalan dengan *loss* regresi *bounding box* yang tetap tinggi. Terhadap Fung et al. (2024), AP@50:5:85 model ini berada di antara *Faster* R-CNN standar dan SF-PSPyramid. Selisih 3,1 poin dari SF-PSPyramid diduga berasal dari kanal *neck* yang dikurangi menjadi 64 di Subbab 3.4.
+Berdasarkan Tabel 4.2, hampir seluruh cacat terdeteksi, tetapi AP turun sekitar 0,22 saat ambang IoU dinaikkan dari AP50 ke mAP@0,5:0,95, sejalan dengan *loss* regresi *bounding box* yang tetap tinggi. Terhadap Fung et al. (2024), AP@50:5:85 model ini berada di antara *Faster* R-CNN standar dan SF-PSPyramid, dengan selisih 0,031 dari SF-PSPyramid yang diduga berasal dari kanal *neck* yang dikurangi menjadi 64 pada Subbab 3.3.
 
-Kinerja per kelas cacat ditunjukkan pada Tabel 4.3.
+Kinerja per kelas cacat dirangkum pada Tabel 4.3.
 
-**Tabel 4.3 Kinerja *Faster* R-CNN per Kelas Cacat**
+**Tabel 4.3 Kinerja *Faster* R-CNN per Kelas Cacat**
 
 |     **Kelas**     | **AP@0,5:0,95** | ***Precision*** | ***Recall*** |
 |:-----------------:|-----------------|-----------------|--------------|
@@ -1331,21 +1331,21 @@ Kinerja per kelas cacat ditunjukkan pada Tabel 4.3.
 |      *Open*       | 0,684           | 0,960           | 0,979        |
 |      *Short*      | 0,651           | 0,859           | 0,956        |
 
-AP tertinggi dicapai *spurious copper* dan *pinhole* yang berbentuk gumpalan atau lubang, sedangkan AP terendah terdapat pada *short* dan *open* yang berada pada jalur konduktor. Hal ini diduga karena batas cacat pada jalur lebih ambigu. Karena distribusi kelas relatif seimbang di Subbab 4.1, perbedaan ini tidak berasal dari jumlah data. Adapun *precision* terendah terdapat pada *pinhole* dengan 0,799 dan *short* dengan 0,859, yang penyebabnya terlihat pada Gambar 4.7.
+Berdasarkan Tabel 4.3, AP tertinggi dicapai *spurious copper* dan *pinhole* yang berbentuk gumpalan atau lubang, sedangkan AP terendah dicapai *short* dan *open* pada jalur konduktor yang diduga memiliki batas cacat lebih ambigu. Karena distribusi kelas relatif seimbang, perbedaan ini tidak berasal dari jumlah data. *Precision* terendah terdapat pada *pinhole* dan *short*, yang penyebabnya ditelusuri melalui *confusion matrix* pada Gambar 4.7.
 
 [Gambar 4.7]
 
-Gambar 4.7 *Confusion Matrix* *Faster* R-CNN pada Data Uji
+**Gambar 4.7 *Confusion Matrix Faster* R-CNN pada Data Uji**
 
-Sebanyak 97,8% cacat terklasifikasi benar dan hanya 0,7% tertukar antarkelas. Kesalahan utama justru berasal dari 292 area *background* yang terdeteksi sebagai cacat, terutama sebagai *pinhole* dengan 118 dan *short* dengan 73, sehingga *precision* kedua kelas tersebut rendah. Sebaliknya, cacat yang terlewat hanya 46, sehingga model lebih cenderung mendeteksi berlebih daripada melewatkan cacat. Karena SODT dilatih meniru label *teacher*, termasuk *background* di Subbab 3.6, label yang diterimanya hampir tidak tertukar antarkelas, tetapi turut membawa kecenderungan deteksi berlebih pada *pinhole* dan *short*.
+Berdasarkan Gambar 4.7, hampir seluruh cacat terklasifikasi benar dengan sangat sedikit yang tertukar antarkelas, sedangkan kesalahan utama berasal dari *background* yang terdeteksi sebagai cacat, terutama *pinhole* dan *short*, yang menjelaskan rendahnya *precision* kedua kelas tersebut. Kesalahan ini sekitar enam kali lebih banyak daripada cacat yang terlewat, sehingga model cenderung mendeteksi berlebih. Karena SODT meniru label *teacher* sesuai Subbab 3.5, label yang diterimanya hampir tidak tertukar antarkelas, tetapi membawa kecenderungan deteksi berlebih yang sama.
 
 ## 4.4 Hasil Ekstraksi Fitur *Teacher*
 
-Model *teacher* dari Subbab 4.3 selanjutnya digunakan untuk mengekstrak fitur dan label seluruh proposal RPN di Subbab 3.6, yaitu 1.000 RoI per citra. Distribusi label yang dihasilkan ditunjukkan pada Tabel 4.4.
+Model *teacher* tersebut digunakan untuk mengekstrak fitur dan label 1.000 proposal RPN per citra sesuai Subbab 3.5. Distribusi label hasil ekstraksi ditunjukkan pada Tabel 4.4.
 
-**Tabel 4.4 Distribusi Label *Teacher* pada RoI Hasil Ekstraksi**
+**Tabel 4.4 Distribusi Label *Teacher* pada RoI Hasil Ekstraksi**
 
-| **Label *Teacher*** | **Data Latih** | **Data Uji** |
+| **Label *Teacher*** | **Data Latih** | **Data Uji** |
 |:-------------------:|----------------|--------------|
 |    *Background*     | 854.164        | 431.344      |
 |       *Open*        | 29.288         | 15.116       |
@@ -1356,59 +1356,85 @@ Model *teacher* dari Subbab 4.3 selanjutnya digunakan untuk mengekstrak fitur 
 |      *Pinhole*      | 22.828         | 11.413       |
 |        Total        | 1.000.000      | 500.000      |
 
-Tabel 4.4 menunjukkan bahwa sebagian besar RoI dilabeli *background* oleh *teacher*, yaitu 85,4% pada data latih dan 86,3% pada data uji. Hal ini karena setiap citra hanya memuat sekitar 6 sampai 7 cacat, sedangkan proposalnya berjumlah 1.000. RoI berlabel cacat pun jauh lebih banyak daripada jumlah cacat sebenarnya, yaitu sekitar 21 RoI per cacat, karena satu cacat tertangkap oleh beberapa proposal yang saling tumpang-tindih. Dengan demikian, data yang akan dipelajari SODT didominasi *background*, sedangkan setiap cacat terwakili dari berbagai posisi proposal.
+Berdasarkan Tabel 4.4, lebih dari 85% RoI dilabeli *background* karena setiap citra hanya memuat 6 hingga 7 cacat dari 1.000 proposal. Selain itu, setiap cacat diwakili sekitar 21 proposal yang saling tumpang-tindih. Akibatnya, data SODT didominasi *background*, sedangkan setiap cacat terwakili dari berbagai posisi proposal.
 
-Isi fitur tersebut divisualisasikan dengan merata-ratakan 64 kanal setiap RoI menjadi *grid* 7×7, seperti pada Gambar 4.8.
+Isi fitur tersebut divisualisasikan pada Gambar 4.8 dengan merata-ratakan 64 kanal setiap RoI menjadi *grid* 7×7.
 
 [Gambar 4.8]
 
 **Gambar 4.8 Visualisasi Fitur RoI 7×7 per Kelas**
 
-Pada kelas cacat, aktivasi tinggi umumnya terkumpul di tengah grid, sedangkan pada *background* aktivasi berada di tepi atau sudut. Hal ini menunjukkan bahwa *RoI Align* mempertahankan letak cacat di dalam proposal. Namun, pola antarkelas sulit dibedakan, misalnya *open*, *short*, dan *pinhole* sama-sama tampak sebagai area terang di tengah *grid*. Hal ini terjadi karena 64 kanal tersebut merupakan hasil pembelajaran *backbone* dan *neck* yang maknanya tidak diketahui, sehingga fitur ini tetap bersifat *black-box*. Dengan demikian, fitur RoI menyimpan informasi letak, tetapi dasar keputusannya tidak dapat dibaca langsung. Hal inilah yang ditangani SODT, karena setiap bobot *node*-nya terikat pada kanal dan posisi grid tertentu sehingga dapat dipetakan kembali menjadi *heatmap* di Subbab 3.9.2.
+Berdasarkan Gambar 4.8, aktivasi kelas cacat terkumpul di tengah *grid*, sedangkan aktivasi *background* berada di tepi atau sudut, sehingga *RoI Align* terbukti mempertahankan letak cacat. Namun, pola antarkelas sulit dibedakan, misalnya *open*, *short*, dan *pinhole* sama-sama terang di tengah *grid*, karena makna 64 kanal hasil pembelajaran *backbone* dan *neck* tidak diketahui. Fitur RoI menyimpan letak cacat, tetapi dasar keputusannya tetap *black-box*. Keterbatasan ini ditangani SODT karena setiap bobot *node*-nya terikat pada kanal dan posisi *grid* tertentu sehingga dapat dipetakan menjadi *heatmap* sesuai Subbab 3.8.
 
-## 4.5 Evaluasi Model Simbolik (*Sparse Oblique Decision Tree*)
+## 4.5 Hasil dan Evaluasi Model Simbolik (*Sparse Oblique Decision Tree*)
 
-1.  **Pelatihan TAO**
+Subbab ini mengevaluasi fidelitas SODT hasil Subbab 3.7, yaitu kemampuannya meniru label *teacher* pada 500.000 RoI data uji, bukan kinerjanya terhadap *ground truth* yang dibahas pada Subbab 4.6.
 
-Proses optimasi parameter SODT menggunakan *Tree Alternating Optimization* (TAO) menunjukkan pola konvergensi yang khas, sebagaimana terlihat pada Gambar 4.10. Kurva pelatihan menggambarkan dua aspek kritis, yaitu peningkatan fidelitas model terhadap *teacher* (*Faster* R-CNN) dan penurunan jumlah bobot non-nol yang terjadi secara progresif sepanjang iterasi.
+### 4.5.1 Pelatihan dan Fidelitas SODT
 
-[Gambar 4.10]
+SODT dilatih dengan rasio negatif 2 sesuai Tabel 3.7, sehingga *background* mencakup 66,7% dari 437.508 RoI data latih. Perkembangan *mimic accuracy* dan jumlah *nonzero weight* selama pelatihan TAO ditunjukkan pada Gambar 4.9.
 
-**Gambar 4.10 Grafik TAO Training History**
+[Gambar 4.9 — SISIPKAN: grafik "SODT Training Diagnostics – TAO Training History" (notebook 03, cell training-diagnostics), run terpilih NR 2 + CW]
 
-Pada iterasi awal (0–5), terjadi peningkatan fidelitas yang tajam dari 75% menjadi 92%, diikuti oleh konvergensi bertahap menuju 96,7% pada iterasi ke-15. Pola ini mengindikasikan bahwa algoritma TAO berhasil menemukan parameter optimal yang mempertahankan kesetiaan terhadap *teacher* sambil meningkatkan sparsitas melalui penalti L₁.
+**Gambar 4.9 Perkembangan *Mimic Accuracy* dan Jumlah *Nonzero Weight* selama Pelatihan TAO**
 
-Pada iterasi terakhir, terjadi penurunan drastis jumlah bobot non-nol dari sekitar 60.000 menjadi 3.326. Fenomena ini disebabkan oleh *post-processing* berupa *node pruning* yang tidak memberikan kontribusi signifikan terhadap keputusan klasifikasi. Proses ini memastikan struktur pohon tetap ramping tanpa mengorbankan fidelitas model, sehingga menghasilkan representasi logika yang lebih mudah diinterpretasikan oleh manusia.
+Berdasarkan Gambar 4.9, *mimic accuracy* sudah di atas 95% sejak iterasi pertama dan hanya naik sekitar 1,5 poin, sedangkan *nonzero weight* berkurang hampir separuhnya, sehingga TAO lebih banyak menyederhanakan pohon daripada menaikkan fidelitas. Penurunan tipis *mimic accuracy* pada iterasi ke-5 wajar karena TAO hanya menjamin penurunan fungsi tujuan pada Persamaan 2.31 dan 2.33, bukan kenaikan akurasi. Pelatihan berhenti pada iterasi ke-8 setelah penurunan fungsi tujuan di bawah toleransi 10⁻⁶, dan titik ke-9 merupakan pemangkasan 14 *node* yang tidak mengubah keputusan pohon pada data latih.
 
-1.  **Fidelitas Terhadap *Teacher***
+Struktur dan fidelitas agregat SODT dirangkum pada Tabel 4.5. *Mimic accuracy* adalah proporsi RoI yang labelnya sama dengan *teacher*, sedangkan *agreement* per kelas adalah proporsi RoI suatu kelas menurut *teacher* yang juga diberi label tersebut oleh SODT.
 
-Evaluasi fidelitas dilakukan melalui metrik *Teacher-Student Agreement*, yang mengukur kesesuaian prediksi SODT dengan model *teacher* (Faster R-CNN). Seperti ditunjukkan pada Gambar 4.11, model mencapai tingkat kesesuaian sebesar 96,71% pada data pelatihan dan 96,77% pada data uji. Stabilitas metrik ini antara dua himpunan data membuktikan bahwa SODT berhasil meniru logika *teacher* tanpa mengalami *overfitting*.
+**Tabel 4.5 Ringkasan Struktur dan Fidelitas SODT Terpilih**
 
-[Gambar 4.11]
+|                **Metrik**                | **Nilai**                     |
+|:----------------------------------------:|-------------------------------|
+|             Kedalaman pohon              | 6                             |
+|           *Node* internal aktif          | 32 dari 63                    |
+|             *Nonzero weight*             | 4.057 dari 197.568            |
+|                Sparsitas                 | 97,9%                         |
+| Rata-rata *nonzero weight* per *node* aktif | 126,8 (4,0% dari 3.136 fitur) |
+|       *Mimic accuracy* data latih        | 96,51%                        |
+|        *Mimic accuracy* data uji         | 96,26%                        |
+|           *Macro*-F1 data uji            | 0,889                         |
 
-**Gambar 4.11 Grafik *Teacher-Student Agreement* pada Data Pelatihan dan Data Uji**
+Berdasarkan Tabel 4.5, SODT meniru *teacher* dengan fidelitas di atas 96% meskipun setiap *node* hanya memakai sekitar 4% fitur. *Agreement* per kelasnya seimbang, yaitu 95,8% pada *spur* hingga 97,2% pada *short*, dengan *short* yang tersulit bagi *teacher* pada Tabel 4.3 justru tertinggi karena memperoleh bobot kelas terbesar. Namun, *macro*-F1 jauh lebih rendah karena *agreement* hanya setara *recall* terhadap *teacher*, sedangkan F1 juga memperhitungkan *precision* yang turun akibat sekitar 16.400 RoI *background* dilabeli cacat, lebih banyak daripada RoI kelas cacat mana pun pada Tabel 4.4. Dampak kebocoran ini terhadap deteksi dievaluasi pada Subbab 4.6.
 
-Analisis lebih detail pada tingkat kelas cacat pada Gambar 4.12 menunjukkan variasi fidelitas yang moderat di antara keenam kategori. Kelas *spur* dan *background* mencatatkan kesesuaian tertinggi (97,0%), sedangkan kelas *short* menunjukkan nilai terendah (91,1%) akibat variasi geometris yang lebih kompleks. Meskipun demikian, seluruh kelas mempertahankan fidelitas di atas 90%, mengonfirmasi bahwa SODT mampu mereplikasi keputusan *teacher* secara konsisten.
+### 4.5.2 Pengaruh *Negative Ratio* dan *Class Weighting*
 
-[Gambar 4.12]
+Konfigurasi pada Tabel 3.7 dipilih melalui ablasi satu faktor dengan memvariasikan rasio negatif (NR) menjadi 1, 2, 4, dan tanpa *sampling* (*full*) dengan *class weighting* (CW) aktif, lalu menonaktifkan CW pada NR 2. Konfigurasi terbaik adalah yang paling seimbang antarkelas, ditandai oleh rentang *agreement* terkecil. Hasilnya ditunjukkan pada Tabel 4.6, dengan bobot ω yang hanya berlaku pada konfigurasi dengan CW dan konfigurasi terpilih dicetak tebal.
 
-**Gambar 4.12 *Per-Class Agreement* antara SODT dan *Teacher* pada Data *Held-out***
+**Tabel 4.6 Pengaruh *Negative Ratio* dan *Class Weighting* terhadap Fidelitas SODT (*Agreement* dalam %)**
 
-2.  ***Sparsity* Model**
+| **Kelas (ω) / Metrik** | **NR 1 + CW** | **NR 2 + CW (terpilih)** | **NR 4 + CW** | **NR *full* + CW** | **NR 2 tanpa CW** |
+|:-----------------------|------|------|------|------|------|
+| *Background* (1) | 94,3 | **96,2** | 97,7 | 98,3 | 96,9 |
+| *Open* (1,5) | 98,0 | **96,1** | 93,9 | 91,9 | 93,3 |
+| *Short* (2) | 98,3 | **97,2** | 92,8 | 90,9 | 94,1 |
+| *Mousebite* (1) | 98,3 | **96,9** | 92,7 | 91,4 | 96,3 |
+| *Spur* (1,5) | 97,2 | **95,8** | 92,9 | 91,5 | 93,5 |
+| *Spurious copper* (1,25) | 97,4 | **96,0** | 92,3 | 90,5 | 94,6 |
+| *Pinhole* (1,25) | 97,7 | **96,2** | 91,9 | 89,8 | 94,3 |
+| **Rentang** | 4,0 | **1,4** | 5,8 | 8,5 | 3,6 |
+| ***Mimic accuracy* (%)** | 94,77 | **96,26** | 97,03 | 97,34 | 96,56 |
+| ***Macro*-F1 (0–1)** | 0,855 | **0,889** | 0,905 | 0,913 | 0,894 |
 
-Sparsitas menjadi faktor krusial dalam meningkatkan interpretabilitas model. Gambar 4.13 memvisualisasikan distribusi bobot pada seluruh simpul internal pohon, menunjukkan bahwa dari total 97.216 parameter, hanya 3.326 bobot yang bernilai non-nol (96,6% sparsitas). Tingkat sparsitas ini memiliki implikasi langsung terhadap kualitas penjelasan visual yang dihasilkan.
+Berdasarkan Tabel 4.6, kenaikan NR dari NR 1 hingga NR *full* menaikkan *agreement background* sekitar 4 poin, tetapi menurunkan *agreement* kelas cacat terendah lebih dari 7 poin. Dalam jumlah RoI uji, RoI *background* yang dilabeli cacat turun dari sekitar 24.600 menjadi 7.300, sedangkan RoI cacat yang tidak ditiru naik dari sekitar 1.500 menjadi 6.100. *Mimic accuracy* dan *macro*-F1 ikut naik hanya karena *background* mengisi 86,3% data uji. Kecenderungan ini diduga terjadi karena semakin banyaknya sampel *background* pada *care set* di Persamaan 3.1 menggeser batas keputusan *node* agar menyaring *background* lebih ketat tanpa mengubah struktur pohon, seperti terlihat pada Subbab 4.5.3. Di antara keempat nilai, NR 2 menghasilkan rentang terkecil sehingga paling seimbang.
 
-[Gambar 4.13]
+Tanpa CW, rentang pada NR 2 melebar lebih dari dua kali lipat karena kelas cacat tertinggal dari *background*. CW menaikkan *agreement* kelas cacat sebanding dengan bobotnya, dari 3,1 poin pada *short* dengan ω = 2 hingga 0,6 poin pada *mousebite* dengan ω = 1, karena Persamaan 3.1 dan 3.2 membuat kesalahan pada kelas berbobot besar lebih mahal. Sebagai *trade-off* umum *cost-sensitive learning* (Elkan, 2001), *agreement background* turun 0,7 poin atau sekitar 3.000 RoI, sehingga *mimic accuracy* dan *macro*-F1 sedikit lebih rendah. Karena kriteria penelitian ini adalah keseimbangan antarkelas, NR 2 dengan CW dipilih sebagai SODT akhir, dengan catatan CW hanya diuji pada NR terpilih.
 
-**Gambar 4.13 Visualisasi *Global SODT Sparsity***
+### 4.5.3 Struktur Pohon SODT
 
-Sparsitas tinggi memaksa setiap *node* keputusan hanya bergantung pada subset fitur spasial yang paling informatif. Hal ini menghasilkan heatmap yang lebih bersih dan terlokalisasi dengan presisi, sehingga teknisi dapat dengan mudah mengidentifikasi wilayah kritis yang menjadi dasar keputusan klasifikasi. Struktur pohon yang *terpruning* seperti pada Gambar 4.14 hanya terdiri dari 12 simpul aktif, yang berada dalam batas kapasitas kognitif manusia untuk melacak jalur penalaran secara manual.
+Struktur SODT terpilih setelah pemangkasan ditunjukkan pada Gambar 4.10. Angka pada *node* menyatakan jumlah *nonzero weight*, label pada *leaf* menyatakan kelas keputusan, dan *node* dinomori per tingkat dari kiri ke kanan mulai dari N0 sebagai *root*, sehingga anak kiri dan kanan N*i* adalah N(2*i*+1) dan N(2*i*+2).
 
-[Gambar 4.14]
+[Gambar 4.10 — SISIPKAN: "Pruned SODT Tree (32 active nodes)" (notebook 03, cell tree-comparison), run terpilih NR 2 + CW]
 
-**Gambar 4.14 Diagram Struktur Pohon SODT**
+**Gambar 4.10 Struktur SODT Terpilih setelah Pemangkasan**
 
-Kombinasi antara fidelitas tinggi dan sparsitas ekstrem membuktikan bahwa SODT tidak hanya mampu mereplikasi keputusan *teacher*, tetapi juga menghasilkan penjelasan yang *faithful* dan mudah dipahami. Dengan mengeliminasi fitur yang tidak relevan, model secara alami mengarahkan perhatian teknisi ke wilayah spasial yang paling kritis untuk validasi, sehingga memenuhi tujuan utama arsitektur neuro-simbolik dalam mendukung proses inspeksi PCB yang transparan dan akuntabel.
+Berdasarkan Gambar 4.10, pintu keluar *background* tersebar pada kedalaman 3 hingga 6, sedangkan seluruh *leaf* cacat berada pada kedalaman 6 dan 10 dari 13 pasangan *leaf* terbawah berisi dua kelas cacat berbeda, sehingga *node* tingkat atas hingga tengah berperan menyaring *background* dan *node* terbawah menentukan jenis cacat. Empat *node* berbobot nol hanya menjadi jalur lewat, dan sebagian *leaf background* merupakan pengganti cabang yang tidak dilalui sampel. Pohon ketiga konfigurasi NR lainnya memiliki topologi serupa dengan 12 hingga 14 *leaf background*, karena *background* tetap menjadi kelas terbesar bahkan pada NR 1.
+
+Sebaran sparsitas pohon ini sesuai dengan prediksi Kairgeldin dan Carreira-Perpiñán (2025). Dengan α bernilai kecil, yaitu 0,15, penalti efektif per sampel $\lambda\left| \mathcal{R}_{i} \right|^{\alpha - 1}$ pada Persamaan 2.31 dan 2.32 mengecil untuk *node* yang menerima banyak sampel, sehingga *root* dan *node* di jalur utama memakai 249 hingga 534 *nonzero weight*, sedangkan *node* pada kedalaman 5 hanya 8 hingga 131. Jumlah *nonzero weight* pada *root* juga naik seiring NR, dari 340 pada NR 1 menjadi 488 pada NR *full*, sedangkan λ yang besar, yaitu 20, menjaga sparsitas keseluruhan tetap 97,9%.
+
+Namun, sub-pohon di bawah N19 dan N22 hanya berisi *leaf* cacat tanpa satu pun pintu keluar *background*. Karena *routing* bersifat *hard* tanpa mekanisme koreksi, RoI *background* yang lolos ke kedua sub-pohon tersebut pasti dilabeli cacat. Sub-pohon seperti ini muncul pada keempat konfigurasi NR, sehingga diduga menjadi salah satu sumber *false positive* tambahan di luar yang diwarisi dari *teacher*.
+
+Secara keseluruhan, SODT terpilih meniru *teacher* secara seimbang antarkelas dengan hanya 2,1% *nonzero weight*. Kebocoran sekitar 16.400 RoI *background* dan jalur tanpa pintu keluar *background* diuji dampaknya terhadap deteksi pada Subbab 4.6, sedangkan *nonzero weight* setiap *node* menjadi dasar pembentukan *heatmap* per *node* pada Subbab 4.7.
 
 ## 4.6 Evaluasi Kinerja Deteksi Neuro-Symbolic
 
@@ -1518,11 +1544,11 @@ Buciluǎ, C., Caruana, R., Niculescu-Mizil, A., 2006. Model compression. In: *Pr
 
 Canha, D., Kubler, S., Främling, K., Fagherazzi, G., 2025. A functionally-grounded benchmark framework for XAI methods: Insights and foundations from a systematic literature review. *ACM Computing Surveys* 57(12), 320.
 
-Carreira-Perpiñán, M.Á., Tavallali, P., 2018. Alternating optimization of decision trees, with application to learning sparse oblique trees. In: *Advances in Neural Information Processing Systems (NeurIPS)*, 31, pp. 1211–1221.
+Carreira-Perpiñán, M.Á., Tavallali, P., 2018. Alternating optimization of decision trees, with application to learning sparse oblique trees. In: *Advances in Neural Information Processing Systems (NeurIPS)*, 31, pp. 1211–1221.
 
 Chen, X., Wu, Y., He, X., Ming, W., 2023. A Comprehensive Review of Deep Learning-Based PCB Defect Detection. IEEE Access 11, 139017-139036.
 
-Coombs, C.F., Holden, H.T., 2016. *Printed Circuits Handbook*, 7th ed. McGraw-Hill Education, New York.
+Coombs, C.F., Holden, H.T., 2016. *Printed Circuits Handbook*, 7th ed. McGraw-Hill Education, New York.
 
 d'Avila Garcez, A., Lamb, L.C., 2023. Neurosymbolic AI: the 3rd wave. *Artificial Intelligence Review*, 56(11), pp.12387-12406.
 
@@ -1538,13 +1564,13 @@ Fung, K.C., Xue, K.-W., Lai, C.-M., Lin, K.-H., Lam, K.-M., 2024. Improving PCB 
 
 Girshick, R., 2015. Fast R-CNN. In: *Proceedings of the IEEE International Conference on Computer Vision (ICCV)*, pp. 1440–1448.
 
-Goodfellow, I., Bengio, Y., Courville, A., 2016. *Deep Learning*. MIT Press, Cambridge, MA.
+Goodfellow, I., Bengio, Y., Courville, A., 2016. *Deep Learning*. MIT Press, Cambridge, MA.
 
 Guidotti, R., Monreale, A., Ruggieri, S., Turini, F., Giannotti, F., Pedreschi, D., 2018. A survey of methods for explaining black box models. *ACM Computing Surveys* 51(5), 93.
 
 Hada, S.S., Carreira-Perpiñán, M.Á., Zharmagambetov, A., 2024. Sparse oblique decision trees: a tool to understand and manipulate neural net features. *Data Mining and Knowledge Discovery*, 38(5), pp.2863-2902.
 
-Han, Z., Hong, M., Wang, D., 2017. Deep learning and applications. In: *Signal Processing and Networking for Big Data Applications*. Cambridge University Press, Cambridge, pp. 126-168.
+Han, Z., Hong, M., Wang, D., 2017. Deep learning and applications. In: *Signal Processing and Networking for Big Data Applications*. Cambridge University Press, Cambridge, pp. 126-168.
 
 He, H., Garcia, E.A., 2009. Learning from imbalanced data. IEEE Transactions on Knowledge and Data Engineering, 21(9), pp. 1263–1284.
 
@@ -1566,7 +1592,7 @@ Khandpur, R.S., 2005. *Printed Circuit Boards: Design, Fabrication, and Assembly
 
 Kontschieder, P., Fiterau, M., Criminisi, A., Rota Bulò, S., 2015. Deep neural decision forests. In: *Proceedings of the IEEE International Conference on Computer Vision (ICCV)*, pp. 1467–1475.
 
-LeCun, Y., Bengio, Y., Hinton, G., 2015. Deep learning. *Nature*, 521(7553), pp. 436-444.
+LeCun, Y., Bengio, Y., Hinton, G., 2015. Deep learning. *Nature*, 521(7553), pp. 436-444.
 
 Li, X., Wang, W., Hu, X., Yang, J., 2019. Selective kernel networks. In: *Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)*, pp. 510–519.
 
@@ -1578,7 +1604,7 @@ Luo, W., Li, Y., Urtasun, R., Zemel, R., 2016. Understanding the effective recep
 
 Manigrasso, F., Miro, F.D., Morra, L., Lamberti, F., 2021. Faster-LTN: a neuro-symbolic, end-to-end object detection architecture. In: *International Conference on Artificial Neural Networks (ICANN)*. Springer, pp.40-52.
 
-Minaee, S., Boykov, Y., Porikli, F., Plaza, A., Kehtarnavaz, N., Terzopoulos, D., 2021. Image segmentation using deep learning: A survey. *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 44(7), pp.3523-3542.
+Minaee, S., Boykov, Y., Porikli, F., Plaza, A., Kehtarnavaz, N., Terzopoulos, D., 2021. Image segmentation using deep learning: A survey. *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 44(7), pp.3523-3542.
 
 Nauta, M., Trienes, J., Pathak, S., Nguyen, E., Peters, M., Schmitt, Y., Schlötterer, J., van Keulen, M., Seifert, C., 2023. From anecdotal evidence to quantitative evaluation methods: A systematic review on evaluating explainable AI. *ACM Computing Surveys* 55(13s), 295.
 
@@ -1610,7 +1636,7 @@ Sokolova, M., Lapalme, G., 2009. A systematic analysis of performance measures f
 
 Sundararajan, M., Taly, A., Yan, Q., 2017. Axiomatic attribution for deep networks. In: *Proceedings of the 34th International Conference on Machine Learning (ICML)*, PMLR 70, pp. 3319–3328.
 
-Szeliski, R., 2022. *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, Cham.
+Szeliski, R., 2022. *Computer Vision: Algorithms and Applications*, 2nd ed. Springer, Cham.
 
 Tang, S., He, F., Huang, X., Yang, J., 2019. Online PCB Defect Detector On A New PCB Defect Dataset. arXiv preprint arXiv:1902.06197.
 
@@ -1622,6 +1648,6 @@ Wang, Y., Huang, J., Dipu, M.S.K., Zhao, H., Gao, S., Zhang, H., Lv, P., 2024. Y
 
 Zhang, J., Bargal, S.A., Lin, Z., Brandt, J., Shen, X., Sclaroff, S., 2018. Top-down neural attention by excitation backprop. *International Journal of Computer Vision* 126(10), 1084–1102.
 
-Zhao, X., Wang, L., Zhang, Y., Han, X., Deveci, M., Parmar, M., 2024. A review of convolutional neural networks in computer vision. *Artificial Intelligence Review* 57(4), 99.
+Zhao, X., Wang, L., Zhang, Y., Han, X., Deveci, M., Parmar, M., 2024. A review of convolutional neural networks in computer vision. *Artificial Intelligence Review* 57(4), 99.
 
 Zhou, B., Khosla, A., Lapedriza, A., Oliva, A., Torralba, A., 2016. Learning deep features for discriminative localization. In: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR), pp. 2921–2929.
