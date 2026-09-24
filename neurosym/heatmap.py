@@ -6,6 +6,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
+from torchvision.ops import roi_align as _roi_align_op
+from torchvision.ops.poolers import _infer_scale
 
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 
@@ -379,6 +381,73 @@ def compute_exact_attribution(
     if fx2 <= fx1 or fy2 <= fy1:
         return np.zeros((1, 1), dtype=np.float32)
     return _normalize_heatmap_array(heatmap[fy1:fy2, fx1:fx2])
+
+
+def node_fpn_maps(
+    tree: SparseObliqueDecisionTreeClassifier,
+    feature_grid: Tensor | np.ndarray,
+    pool: Any,
+    level_feature: Tensor,
+    box_processed: Tensor,
+    processed_image_size: tuple[int, int],
+    padded_size: tuple[int, int],
+    path: list[Any] | None = None,
+) -> tuple[list[np.ndarray], np.ndarray]:
+    """Per-node exact maps and the stacked path map M in one backward pass.
+
+    Same numbers as `compute_exact_attribution` with `path=[step]` per node and
+    `path=path` for M, but on the single FPN level the RoI came from, staying on
+    that level's device, with every node read out of one batched autograd call.
+    """
+    if path is None:
+        path = tree.decision_path(_as_feature_grid(feature_grid).reshape(-1))
+    if not path:
+        return [], np.zeros((1, 1), dtype=np.float32)
+
+    device = level_feature.device
+    weights = torch.as_tensor(
+        np.stack([path_weight_grid(tree, feature_grid, path=[step]) for step in path]),
+        dtype=torch.float32,
+        device=device,
+    )  # [depth, C, 7, 7]
+    depth = weights.shape[0]
+    x1, y1, x2, y2 = box_processed.detach().to(device, torch.float32).tolist()
+    rois = torch.tensor(
+        [[node, x1, y1, x2, y2] for node in range(depth)],
+        dtype=torch.float32,
+        device=device,
+    )
+    # Same scale MultiScaleRoIAlign infers; `pool.scales` is overwritten per call.
+    scale = _infer_scale(level_feature, list(processed_image_size))
+
+    with torch.inference_mode(False), torch.enable_grad():
+        base = level_feature.detach().clone().unsqueeze(0)  # [1, C, H, W]
+        # One copy of the level per node, so each node gets its own gradient.
+        replicated = base.expand(depth, -1, -1, -1).contiguous().requires_grad_(True)
+        pooled = _roi_align_op(
+            replicated,
+            rois,
+            output_size=pool.output_size,
+            spatial_scale=scale,
+            sampling_ratio=pool.sampling_ratio,
+            aligned=False,
+        )
+        (grad,) = torch.autograd.grad(pooled, replicated, grad_outputs=weights)
+        raw = (grad * base).abs().sum(1).detach()  # [depth, H, W]
+
+    fx1, fy1, fx2, fy2 = _fpn_box_bounds(
+        box_processed, padded_size, tuple(raw.shape[-2:])
+    )
+    if fx2 <= fx1 or fy2 <= fy1:
+        empty = np.zeros((1, 1), dtype=np.float32)
+        return [empty.copy() for _ in path], empty
+
+    # Only the box crop leaves the device, like Grad-CAM's maps.
+    node_crops = raw[:, fy1:fy2, fx1:fx2].cpu().numpy().astype(np.float32)
+    node_maps = [_normalize_heatmap_array(crop) for crop in node_crops]
+    # M sums the raw node maps, then normalizes (not the normalized panels).
+    path_map = _normalize_heatmap_array(node_crops.sum(axis=0))
+    return node_maps, path_map
 
 
 def resize_heatmap_to_box(

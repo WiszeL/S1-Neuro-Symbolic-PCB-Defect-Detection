@@ -15,6 +15,7 @@ from .heatmap import (
     compute_symbolic_heatmap,
     compute_node_local_evidence_maps,
     compute_exact_attribution,
+    node_fpn_maps,
     project_heatmap_to_image,
 )
 from .hybrid import NeuroSymbolicDetector
@@ -157,6 +158,37 @@ def explain_hybrid_detection(
         explanation["exact_attribution_level"] = level_name
 
     return explanation
+
+
+def compute_node_fpn_maps(
+    model: NeuroSymbolicDetector,
+    detection: dict[str, Any],
+    detection_indices: list[int],
+) -> list[dict[str, Any]]:
+    """Explanation only: exact per-node maps and path map M, nothing for display.
+
+    Same maps as `explain_hybrid_detection`'s `exact_attribution` per node and
+    `path_exact_attribution`, without the grid maps, projections or repeat passes.
+    """
+    pool = model.detector.roi_align.pool
+    results = []
+    for index in detection_indices:
+        level_name = detection["featmap_names"][
+            int(detection["symbolic_level_indices"][index])
+        ]
+        node_maps, path_map = node_fpn_maps(
+            model.symbolic_tree,
+            detection["pooled_features"][index],
+            pool,
+            detection["fpn_features"][level_name],
+            detection["proposal_boxes_processed"][index],
+            detection["processed_image_size"],
+            detection["padded_image_size"],
+        )
+        results.append(
+            {"detection_index": int(index), "node_maps": node_maps, "path_map": path_map}
+        )
+    return results
 
 
 def select_detection_indices(

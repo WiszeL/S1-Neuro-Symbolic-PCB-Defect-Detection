@@ -19,11 +19,14 @@ class NeuroSymbolicDetector(nn.Module):
         symbolic_tree: SparseObliqueDecisionTreeClassifier,
         device: str | None = None,
         use_routing_margin: bool = True,
+        keep_fpn_on_device: bool = False,
     ) -> None:
         super().__init__()
         self.detector = detector
         self.symbolic_tree = symbolic_tree
         self.use_routing_margin = use_routing_margin
+        # True keeps the stashed FPN levels on the model's device (fast maps); default copies to CPU.
+        self.keep_fpn_on_device = keep_fpn_on_device
         self.device = select_device(device)
         if self.symbolic_tree.num_classes != self.detector.num_classes:
             raise ValueError(
@@ -120,7 +123,11 @@ class NeuroSymbolicDetector(nn.Module):
                     .cpu(),
                     # Stash FPN context so the map rebuilds without a second backbone pass.
                     "fpn_features": {
-                        name: level_map[image_index].detach().cpu()
+                        name: (
+                            level_map[image_index].detach()
+                            if self.keep_fpn_on_device
+                            else level_map[image_index].detach().cpu()
+                        )
                         for name, level_map in features.items()
                         if name in featmap_names
                     },
