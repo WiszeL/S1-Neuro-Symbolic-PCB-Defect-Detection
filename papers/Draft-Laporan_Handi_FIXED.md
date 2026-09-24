@@ -55,6 +55,30 @@ Mengetahui,
 |                     |     |                    |
 | NIP ....            |     | NIP ....           |
 
+**DETEKSI CACAT PCB DENGAN PENJELASAN YANG FAITHFUL MELALUI ARSITEKTUR NEURO-SYMBOLIC FASTER R-CNN DAN SPARSE OBLIQUE DECISION TREE**
+
+**HANDI DWI CAHYO**
+
+Program Studi Informatika Fakultas Teknologi Informasi dan Sains Data Universitas Sebelas Maret
+
+# ABSTRAK
+
+Deteksi cacat PCB berbasis *deep learning* mampu mencapai akurasi tinggi, tetapi bersifat *black-box* sehingga keputusannya sulit divalidasi teknisi. Metode *Explainable Artificial Intelligence* (XAI) *post-hoc* seperti Grad-CAM hanya memberikan perkiraan yang belum tentu mencerminkan keputusan model yang sesungguhnya atau tidak *faithful*. Penelitian ini mengusulkan arsitektur *neuro-symbolic* (NeSy) yang mengganti kepala klasifikasi *Faster* R-CNN dengan *Sparse Oblique Decision Tree* (SODT) yang dilatih meniru keputusan *Faster* R-CNN. Bobot setiap *node* pada jalur keputusan SODT dipetakan kembali ke *feature map neck* melalui *RoI Align* menjadi *heatmap* per *node* yang dihitung secara eksak dari keputusan *node* tersebut. Model dievaluasi pada *dataset* DeepPCB dengan enam kelas cacat. Hasilnya, NeSy mempertahankan akurasi *Faster* R-CNN dengan mAP@0,5 sebesar 0,974 terhadap 0,979. Penjelasannya lebih *faithful* daripada Grad-CAM, dengan *Necessity* sebesar 0,768 terhadap 0,126 dan *Deletion* AUC sebesar 0,200 terhadap 0,599, lokalisasi yang setara, dan waktu per citra yang lebih singkat. *Heatmap* per *node* juga terbukti *faithful* pada seluruh kedalaman pohon, sehingga keputusan model dapat ditelusuri langkah demi langkah untuk mendukung validasi teknisi.
+
+***Kata kunci***: deteksi cacat PCB, *neuro-symbolic*, *Faster* R-CNN, *Sparse Oblique Decision Tree*, *explainable artificial intelligence*, *faithfulness*
+
+**PCB DEFECT DETECTION WITH FAITHFUL EXPLANATIONS THROUGH A NEURO-SYMBOLIC FASTER R-CNN AND SPARSE OBLIQUE DECISION TREE ARCHITECTURE**
+
+**HANDI DWI CAHYO**
+
+Department of Informatics Faculty of Information Technology and Data Science Universitas Sebelas Maret
+
+# ABSTRACT
+
+*Deep learning-based PCB defect detection achieves high accuracy, but its black-box nature makes its decisions difficult for technicians to validate. Post-hoc Explainable Artificial Intelligence (XAI) methods such as Grad-CAM only provide approximations that may not reflect the model's actual decision, that is, they are not faithful. This study proposes a neuro-symbolic (NeSy) architecture that replaces the classification head of Faster R-CNN with a Sparse Oblique Decision Tree (SODT) trained to mimic the decisions of Faster R-CNN. The weights of each node along the SODT decision path are mapped back to the neck feature map through RoI Align, producing a per-node heatmap computed exactly from that node's decision. The model is evaluated on the DeepPCB dataset with six defect classes. NeSy maintains the accuracy of Faster R-CNN, with an mAP@0.5 of 0.974 against 0.979. Its explanations are more faithful than Grad-CAM, with a Necessity of 0.768 against 0.126 and a Deletion AUC of 0.200 against 0.599, comparable localization, and a shorter time per image. The per-node heatmaps are also faithful at every tree depth, allowing the model's decision to be traced step by step to support technician validation.*
+
+***Keywords***: *PCB defect detection, neuro-symbolic, Faster R-CNN, Sparse Oblique Decision Tree, explainable artificial intelligence, faithfulness*
+
 # BAB I PENDAHULUAN
 
 ## 1.1 Latar Belakang
@@ -753,10 +777,10 @@ dengan $Hits$ dan $Misses$ jumlah kasus yang titik maksimumnya berada di dalam d
 | 1\. | *Improving PCB defect detection using selective feature attention and pixel shuffle pyramid (Fung et al., 2024)* | Deteksi cacat mikroskopis pada sirkuit PCB memiliki tingkat *false negative* yang tinggi pada model deteksi standar. | Meningkatkan kemampuan model melokalisasi target berukuran kecil pada citra PCB. | Faster R-CNN dengan *Feature Pyramid Network* (FPN), *Pixel Shuffle Pyramid* (PSPyramid), *Selective Feature Attention,* dan *Soft-NMS*. | Terjadi peningkatan *Mean Average Precision* (mAP) yang signifikan pada pengujian dataset DeepPCB. | Penelitian ini menjadi referensi utama arsitektur dasar (*baseline*) komponen Neuro (ekstraktor fitur dan lokalisasi) yang digunakan dalam tugas akhir ini. |
 | 2\. | *Faster-LTN: a neuro-symbolic, end-to-end object detection architecture (Manigrasso et al., 2021)* | Model *deep learning* konvensional tidak mampu mengintegrasikan pengetahuan relasional dan penalaran logis ke dalam proses deteksi objek, sehingga kurang transparan dalam pengambilan keputusan. | Mengintegrasikan kemampuan penalaran logis dengan jaringan saraf konvolusional ke dalam arsitektur deteksi objek *end-to-end* untuk meningkatkan transparansi. | Faster R-CNN dengan penggantian kepala klasifikasi menjadi *Logic Tensor Networks* (LTN). | Arsitektur *end-to-end* berhasil dilatih dan mencapai performa kompetitif pada dataset PASCAL VOC. | Memberikan landasan konseptual integrasi pendekatan Neuro-Symbolic ke dalam arsitektur deteksi objek dua tahap (Faster R-CNN). |
 | 3\. | *Sparse oblique decision trees: a tool to understand and manipulate neural net features (Hada et al., 2024)* | Fitur internal jaringan *deep learning* sulit diinterpretasikan sehingga tidak diketahui fitur mana yang menentukan suatu kelas (*black-box*). | Memahami dan memanipulasi fitur internal jaringan saraf dengan meniru (*mimic*) bagian *classifier*-nya menggunakan pohon keputusan yang akurat sekaligus *interpretable*. | *Sparse Oblique Decision Tree* (SODT) dengan regularisasi L1 yang dilatih menggunakan TAO untuk meniru *classifier* jaringan saraf. | Menghasilkan pohon yang ramping dengan akurasi mendekati jaringan saraf yang ditiru, serta mengungkap subset fitur yang menentukan kelas tertentu. | Menjadi landasan teoritis komponen **Symbolic** untuk menggantikan MLP pada *RoI head* jaringan Faster R-CNN. |
-| 4\. | *Neurosymbolic models based on hybrids of convolutional neural networks and decision trees (Kairgeldin & Carreira-Perpiñán, 2025)* | Model *end-to-end* berbasis jaringan saraf tidak menyediakan penalaran yang dapat ditelusuri, sedangkan sparsitas SODT hasil TAO standar tidak merata antar-*node* (*node* dekat *root* kurang *sparse*). | Membangun model *neurosymbolic* berupa lapisan CNN yang dikomposisikan dengan SODT, serta mengatur distribusi sparsitas antar-*node*. | CNN (LeNet) dan SODT yang dilatih dengan TAO termodifikasi (hyperparameter α untuk membobot penalti L1 berdasarkan jumlah sampel *node*), serta *RF density map* per *node*. | SODT yang lebih *sparse* dengan akurasi kompetitif; sekelompok kecil neuron menentukan kelas tertentu dan *receptive field*-nya terpusat pada daerah citra yang diskriminatif. | Menjadi dasar arsitektur hibrida CNN–SODT, pembobotan penalti L1 (Persamaan 2.31 dan 2.32), dan pembanding heatmap per *node* (*RF density map*). |
+| 4\. | *Neurosymbolic models based on hybrids of convolutional neural networks and decision trees (Kairgeldin & Carreira-Perpiñán, 2025)* | Model *end-to-end* berbasis jaringan saraf tidak menyediakan penalaran yang dapat ditelusuri, sedangkan sparsitas SODT hasil TAO standar tidak merata antar-*node* (*node* dekat *root* kurang *sparse*). | Membangun model *neurosymbolic* berupa lapisan CNN yang dikomposisikan dengan SODT, serta mengatur distribusi sparsitas antar-*node*. | CNN (LeNet) dan SODT yang dilatih dengan TAO termodifikasi (hyperparameter α untuk membobot penalti L1 berdasarkan jumlah sampel *node*), serta *RF density map* per *node*. | SODT yang lebih *sparse* dengan akurasi kompetitif; sekelompok kecil neuron menentukan kelas tertentu dan *receptive field*-nya terpusat pada daerah citra yang diskriminatif. | Menjadi dasar arsitektur hibrida CNN–SODT, pembobotan penalti L1 pada Persamaan 2.31 dan 2.32, serta dasar gagasan heatmap per *node* (*RF density map*). |
 | 5\. | *Explainable Predictive Quality Inspection using Deep Learning in Electronics Manufacturing *(Saadallah et al., 2022) | Model deep learning untuk prediksi kualitas bersifat *black-box* sehingga menyulitkan teknisi memahami fitur mana yang paling berpengaruh terhadap keputusan prediksi. | Menyediakan penjelasan visual atas prediksi kualitas PCB menggunakan *heatmap* untuk membantu teknisi mengidentifikasi fitur global (kuantitas fisik SPI) dan lokal (pin) yang paling menentukan. | *1D-CNN untuk prediksi kualitas biner (OK/NOK) dan Grad-CAM untuk menghasilkan peta panas penjelasan.* | Grad-CAM berhasil menyoroti fitur SPI (DX, DY, DVolume) dan pin spesifik yang paling diskriminatif untuk kelas "NOK", membantu teknisi melacak penyebab deviasi kualitas. | Menunjukkan aplikasi Grad-CAM sebagai metode *post-hoc* untuk inspeksi kualitas PCB berbasis data SPI. |
 | 6\. | *Explainable AI Methods for Identification of Glue Volume Deficiencies in Printed Circuit Boards *(Tziolas et al., 2025) | Inspeksi volume lem pada PCB sulit dilakukan secara manual dan model *deep learning* yang digunakan tidak memberikan penjelasan atas deteksi defisiensi. | Mengidentifikasi defisiensi volume lem pada PCB menggunakan model *deep learning* dan menyediakan penjelasan visual atas prediksi model. | CenterNet-MobileNetV2 untuk lokalisasi PCB dan CNN *custom* (GlueVolNet) untuk klasifikasi volume lem ke dalam tiga kelas*, dengan Grad-CAM dan Deep SHAP untuk menghasilkan peta panas penjelasan.* | GlueVolNet mencapai akurasi 92,2% dalam mengklasifikasikan volume lem, dan Grad-CAM/Deep SHAP berhasil menyoroti area dengan volume lem tidak memadai yang menjadi dasar keputusan model. | Memperkuat justifikasi penggunaan Grad-CAM sebagai metode *post-hoc* yang telah teruji dalam inspeksi visual PCB, serta menunjukkan keterbatasan *post-hoc* yang mendorong kebutuhan pendekatan *faithful*. |
-| 7\. | *Assessing the trustworthiness of saliency maps for localizing abnormalities in medical imaging (Arun et al., 2021)* | Peta *saliency* banyak dipakai untuk menjelaskan dan melokalisasi keputusan CNN pada domain berisiko tinggi, tetapi keandalannya belum teruji secara sistematis. | Mengevaluasi keandalan (*trustworthiness*) peta *saliency* untuk lokalisasi kelainan pada citra medis. | Delapan metode *saliency*, termasuk Grad-CAM, diuji pada dua *dataset* radiologi berdasarkan utilitas lokalisasi, sensitivitas terhadap pengacakan bobot model, *repeatability*, dan *reproducibility*, lalu dibandingkan dengan jaringan lokalisasi (U-Net dan RetinaNet). | *Seluruh metode gagal pada minimal satu kriteria dan kalah dari jaringan lokalisasi. Grad-CAM lolos uji pengacakan bobot,* tetapi AUPRC lokalisasi seluruh metode *saliency* (0,160–0,519) tetap di bawah RetinaNet (0,596) pada deteksi pneumonia, begitu pula (0,024–0,224) terhadap U-Net (0,404) pada segmentasi pneumothorax. | Menunjukkan bahwa penjelasan *post-hoc*, termasuk Grad-CAM, belum dapat diandalkan pada domain berisiko tinggi, serta menjadi dasar kontrol pengacakan bobot yang juga digunakan dalam penelitian ini. |
+| 7\. | *Assessing the trustworthiness of saliency maps for localizing abnormalities in medical imaging (Arun et al., 2021)* | Peta *saliency* banyak dipakai untuk menjelaskan dan melokalisasi keputusan CNN pada domain berisiko tinggi, tetapi keandalannya belum teruji secara sistematis. | Mengevaluasi keandalan (*trustworthiness*) peta *saliency* untuk lokalisasi kelainan pada citra medis. | Delapan metode *saliency*, termasuk Grad-CAM, diuji pada dua *dataset* radiologi berdasarkan utilitas lokalisasi, sensitivitas terhadap pengacakan bobot model, *repeatability*, dan *reproducibility*, lalu dibandingkan dengan jaringan lokalisasi (U-Net dan RetinaNet). | *Seluruh metode gagal pada minimal satu kriteria dan kalah dari jaringan lokalisasi. Grad-CAM lolos uji pengacakan bobot,* tetapi AUPRC lokalisasi seluruh metode *saliency* (0,160–0,519) tetap di bawah RetinaNet (0,596) pada deteksi pneumonia, begitu pula (0,024–0,224) terhadap U-Net (0,404) pada segmentasi pneumothorax. | Menunjukkan bahwa penjelasan *post-hoc*, termasuk Grad-CAM, belum dapat diandalkan pada domain berisiko tinggi. |
 
 # BAB III METODOLOGI PENELITIAN
 
@@ -1009,7 +1033,7 @@ SODT dibentuk sebagai pohon biner lengkap dengan fungsi keputusan linear pada se
 
 SODT dilatih dengan TAO pada *dataset* simbolik latih untuk meminimalkan fungsi tujuan yang terdiri atas kerugian berbobot kelas pada Persamaan 2.33 dan penalti L1 berbobot ukuran *reduced set* pada Persamaan 2.31 dan 2.32. Karena sebagian besar proposal berlabel *background*, distribusi kelasnya sangat timpang sehingga diperlukan *negative sampling*.
 
-Pembobotan kelas diterapkan di dua tempat. Pada masalah tereduksi setiap node (Persamaan 2.30), setiap sampel diberi bobot pada Persamaan 3.1. Pada *leaf*, label ditentukan dengan mayoritas berbobot pada Persamaan 3.2.
+Pembobotan kelas diterapkan di dua tempat. Pada masalah tereduksi setiap node sesuai Persamaan 2.30, setiap sampel diberi bobot pada Persamaan 3.1. Pada *leaf*, label ditentukan dengan mayoritas berbobot pada Persamaan 3.2.
 
 $$
 u_{n} = \left| \mathcal{l}_{L}(n) - \mathcal{l}_{R}(n) \right| \cdot \omega_{y_{n}}
@@ -1025,7 +1049,7 @@ $$
 
 dengan $u_{n}$ bobot sampel ke-*n*, $\mathcal{l}_{L}(n)\ ,\mathcal{l}_{R}(n)$ kerugian 0/1 sampel ke-*n* bila diarahkan ke kiri dan ke kanan, $\omega_{c}$ bobot kelas $c$ pada Persamaan 2.33, ${\widehat{y}}_{\mathcal{l}}$ label *leaf* ke-$\mathcal{l}$, dan $N_{\mathcal{l,}c}$ jumlah sampel berlabel $c$ pada *leaf* tersebut. Faktor $\left| \mathcal{l}_{L} - \mathcal{l}_{R} \right|$ bernilai 1 hanya untuk *care set*, sehingga kesalahan pengarahan pada kelas berbobot besar menjadi lebih mahal. Bobot *background* dibiarkan netral agar *false positive* tidak meningkat.
 
-Setelah TAO, pohon dipangkas dengan menghapus *dead branch* dan *pure subtree* (Carreira-Perpiñán & Tavallali, 2018; Hada et al., 2024) tanpa mengubah keputusannya, sehingga penjelasan yang dihasilkan menjadi lebih ringkas tanpa mengorbankan fidelitas. *Hyperparameter pelatihan dirangkum pada Tabel 3.7.*
+Setelah TAO, pohon dipangkas dengan menghapus *dead branch* dan *pure subtree* (Carreira-Perpiñán & Tavallali, 2018; Hada et al., 2024) tanpa mengubah keputusannya, sehingga penjelasan yang dihasilkan menjadi lebih ringkas tanpa mengorbankan fidelitas. Nilai λ dan α ditentukan secara empiris melalui beberapa kali percobaan, dengan memilih nilai yang menghasilkan pohon *sparse* tanpa menurunkan fidelitas secara berarti, sedangkan pengaruh kedua parameter terhadap sparsitas dan akurasi telah dikaji oleh Hada et al. (2024) serta Kairgeldin dan Carreira-Perpiñán (2025). *Hyperparameter pelatihan dirangkum pada Tabel 3.7.*
 
 **Tabel 3.7 Hyperparameter pelatihan SODT**
 
@@ -1206,9 +1230,9 @@ Evaluasi mencakup dua aspek, yaitu kinerja deteksi model hibrida dan kualitas pe
 
 1.  **Evaluasi Deteksi**
 
-Model hibrida dibandingkan dengan *Faster* R-CNN menggunakan metrik pada Subbab 3.5. Untuk mengukur peran *Routing Margin*, metrik yang sama dihitung ulang dengan skor seluruh deteksi diganti menjadi 1, tanpa mengubah jalur maupun label.
+Model hibrida dibandingkan dengan *Faster* R-CNN menggunakan metrik pada Subbab 3.4. Untuk mengukur peran *Routing Margin*, metrik yang sama dihitung ulang dengan skor seluruh deteksi diganti menjadi 1, tanpa mengubah jalur maupun label.
 
-Waktu rata-rata per citra uji juga diukur untuk *Faster* R-CNN, model hibrida, dan Grad-CAM (termasuk pembentukan petanya).
+Waktu rata-rata per citra uji juga diukur untuk *Faster* R-CNN, serta untuk model hibrida dan Grad-CAM beserta pembentukan petanya.
 
 2.  **Evaluasi Penjelasan**
 
@@ -1222,9 +1246,9 @@ $$
 
 dengan $M(p)$ peta gabungan pada posisi $p$, $P(x)$ *node* pada jalur keputusan RoI $x$ pada Persamaan 3.3, dan $H_{i}$ *heatmap* *node* ke-*i* pada Persamaan 3.7. Peta $M$ hanya dipakai untuk perbandingan dengan Grad-CAM.
 
-Penjelasan diuji pada tiga hal, yaitu *faithfulness* tingkat jalur yang memeriksa apakah daerah yang disorot menentukan label, lokalisasi yang memeriksa apakah daerah tersebut jatuh pada cacat sebenarnya, dan *faithfulness* per *node* yang menguji klaim bahwa setiap *heatmap* menentukan keputusan *node*-nya. Perbandingan kualitatif melengkapinya dengan telaah per deteksi.
+Penjelasan diuji pada tiga hal, yaitu *faithfulness* tingkat jalur yang memeriksa apakah daerah yang disorot menentukan label, lokalisasi yang memeriksa apakah daerah tersebut jatuh pada cacat sebenarnya, dan *faithfulness* per *node* yang menguji klaim bahwa setiap *heatmap* menentukan keputusan *node*-nya. Perbandingan kualitatif melengkapinya dengan telaah per deteksi. Untuk menguji perlunya proyeksi ke *feature map neck*, seluruh pengujian penjelasan diulang dengan *heatmap* yang dibentuk langsung pada grid 7×7 hasil *RoI Align*.
 
-Seluruhnya dibandingkan dengan Grad-CAM, yang dihitung pada *feature map* *neck* tempat proposal di-pool, yaitu lapisan konvolusi terakhir sebelum kepala klasifikasi, sesuai anjuran Selvaraju et al. (2017), serta dengan kontrol acak (Adebayo et al., 2018) agar hasilnya tidak dapat dijelaskan oleh pola aktivasi semata. Prosedur pengujiannya dirangkum pada Algoritma 3.5.
+Seluruhnya dibandingkan dengan Grad-CAM, yang dihitung pada *feature map* *neck* tempat proposal di-pool, yaitu lapisan konvolusi terakhir sebelum kepala klasifikasi, sesuai anjuran Selvaraju et al. (2017), serta dengan kontrol posisi acak agar hasilnya dapat dibedakan dari pemilihan posisi secara kebetulan. Prosedur pengujiannya dirangkum pada Algoritma 3.5.
 
 **Algoritma 3. 5 Evaluasi Penjelasan**
 
@@ -1237,10 +1261,10 @@ Seluruhnya dibandingkan dengan Grad-CAM, yang dihitung pada *feature map* *neck*
 1. Deteksi berskor ≥ 0,5 dipilih dari 500 citra uji.
 2. Peta M pada Persamaan 3.8 dan peta Grad-CAM pada Persamaan 2.21 dan 2.22 dihitung untuk deteksi yang sama.
 3. Pada *feature map neck* di dalam proposal (diperluas 2 posisi), 50% posisi tertinggi tiap peta dipilih.
-4. Posisi tersebut dinolkan untuk *Necessity* sesuai Persamaan 2.41 dan disisakan untuk *Sufficiency* pada Persamaan 2.42, lalu *RoI Align* dijalankan ulang dan label diperiksa.
-5. Langkah 3 dan 4 diulang untuk tiga kontrol, yaitu posisi acak, bobot *node* diacak, dan pengurutan tanpa bobot pohon.
+4. Posisi tersebut dinolkan untuk *Necessity* sesuai Persamaan 2.41 dan disisakan untuk *Sufficiency* pada Persamaan 2.42, lalu *RoI Align* dijalankan ulang dan label diperiksa, kemudian *Deletion* dan *Insertion* AUC pada Persamaan 2.43 dihitung dengan menghapus atau menambahkan posisi tersebut secara bertahap dalam lima tahap.
+5. Langkah 3 dan 4 diulang dengan posisi yang dipilih secara acak sebagai kontrol.
 6. Setiap peta di-*resample* ke grid 7×7, lalu Pointing Game dan IoU Heatmap dihitung pada proposal longgar (IoU 0,05–0,35).
-7. Untuk setiap node aktif, 50% posisi tertinggi $H_{i}$ dihapus dan pembalikan tanda $f_{i}(x)$ diperiksa, lalu *Deletion* dan *Insertion* AUC (Persamaan 2.43) dihitung dalam lima tahap.
+7. Untuk setiap node aktif, 50% posisi tertinggi $H_{i}$ dihapus dan pembalikan tanda $f_{i}(x)$ diperiksa, lalu *Deletion* dan *Insertion* AUC pada Persamaan 2.43 dihitung dalam lima tahap.
 8. Deteksi kedua model dan *ground* *truth* ditampilkan berdampingan, dengan jalur keputusan dan *heatmap* setiap *node* di samping peta Grad-CAM.
 
 # BAB IV HASIL DAN PEMBAHASAN
@@ -1294,7 +1318,7 @@ Berdasarkan Gambar 4.4, *flip* terjadi secara acak sehingga model menerima orien
 
 **Gambar 4.5 Hasil Visualisasi Penskalaan Multi-Resolusi dalam Arsitektur Model**
 
-Berdasarkan Gambar 4.5, resolusi juga dipilih secara acak lalu diberi *padding* hingga kelipatan 32, tetapi penskalaan yang proporsional membuat bentuk cacat tidak terdistorsi dan *bounding box* tetap pada area cacat. Normalisasi hanya menggeser rentang nilai piksel sesuai *mean* dan *std* pada Tabel 3.2 tanpa mengubah tampilan citra. Dengan demikian, pra-pemrosesan menghasilkan variasi orientasi dan skala tanpa merusak kesesuaian anotasi.
+Berdasarkan Gambar 4.5, resolusi juga dipilih secara acak lalu diberi *padding* hingga kelipatan 32, tetapi penskalaan yang proporsional membuat bentuk cacat tidak terdistorsi dan *bounding box* tetap pada area cacat. Normalisasi hanya menggeser rentang nilai piksel sesuai *mean* dan *std* pada Tabel 3.2 tanpa mengubah tampilan citra. Kedua transformasi tersebut menghasilkan variasi orientasi dan skala tanpa merusak kesesuaian anotasi.
 
 ## 4.3 Hasil dan Evaluasi *Faster* R-CNN
 
@@ -1310,13 +1334,13 @@ Kinerja model pada data uji dirangkum pada Tabel 4.2 bersama hasil Fung et al. (
 
 **Tabel 4.2 Kinerja Deteksi *Faster* R-CNN pada Data Uji**
 
-| **Model** | **AP50** | **AP75** | **AP@50:5:85** | **mAP@0,5:0,95** | ***Precision*** | ***Recall*** | **F1** |
+| **Model** | **AP@0,5** | **AP@0,75** | **AP@0,5:0,85** | **mAP@0,5:0,95** | ***Precision*** | ***Recall*** | **F1** |
 |:------------|--------|--------|---------|----------|-----------|---------|--------|
 | *Faster* R-CNN (Fung et al., 2024) | 0,970 | 0,900 | 0,888 | \- | \- | \- | \- |
 | *Faster* R-CNN + SF-PSPyramid (Fung et al., 2024) | 0,986 | 0,946 | 0,932 | \- | \- | \- | \- |
 | *Faster* R-CNN + SF-PSPyramid (penelitian ini) | 0,979 | 0,920 | 0,901 | 0,759 | 0,910 | 0,982 | 0,945 |
 
-Berdasarkan Tabel 4.2, hampir seluruh cacat terdeteksi, tetapi AP turun sekitar 0,22 saat ambang IoU dinaikkan dari AP50 ke mAP@0,5:0,95, sejalan dengan *loss* regresi *bounding box* yang tetap tinggi. Terhadap Fung et al. (2024), AP@50:5:85 model ini berada di antara *Faster* R-CNN standar dan SF-PSPyramid, dengan selisih 0,031 dari SF-PSPyramid yang diduga berasal dari kanal *neck* yang dikurangi menjadi 64 pada Subbab 3.3.
+Berdasarkan Tabel 4.2, hampir seluruh cacat terdeteksi, tetapi AP turun sekitar 0,22 saat ambang IoU dinaikkan dari AP@0,5 ke mAP@0,5:0,95, sejalan dengan *loss* regresi *bounding box* yang tetap tinggi. Terhadap Fung et al. (2024), AP@0,5:0,85 model ini berada di antara *Faster* R-CNN standar dan SF-PSPyramid, dengan selisih 0,031 dari SF-PSPyramid, sejalan dengan kanal *neck* yang dikurangi menjadi 64 pada Subbab 3.3 untuk membatasi dimensi masukan SODT.
 
 Kinerja per kelas cacat dirangkum pada Tabel 4.3.
 
@@ -1331,7 +1355,7 @@ Kinerja per kelas cacat dirangkum pada Tabel 4.3.
 |      *Spur*       | 0,971           | 0,961           | 0,977        |
 |      *Short*      | 0,963           | 0,859           | 0,956        |
 
-Berdasarkan Tabel 4.3, seluruh kelas mencapai AP yang tinggi dengan selisih antarkelas yang kecil. AP tertinggi dicapai *pinhole* dan *spurious copper* yang berbentuk lubang atau gumpalan, sedangkan AP terendah dicapai *short* dan *spur* yang menempel pada jalur konduktor dan diduga lebih sulit dibedakan dari pola jalur normal. Karena distribusi kelas relatif seimbang, perbedaan ini tidak berasal dari jumlah data. *Precision* terendah terdapat pada *pinhole* dan *short*, yang penyebabnya ditelusuri melalui *confusion matrix* pada Gambar 4.7.
+Berdasarkan Tabel 4.3, seluruh kelas mencapai AP yang tinggi dengan selisih antarkelas yang kecil. AP tertinggi dicapai *pinhole* dan *spurious copper* yang berbentuk lubang atau gumpalan, sedangkan AP terendah dicapai *short* dan *spur* yang menempel pada jalur konduktor. Karena distribusi kelas relatif seimbang, perbedaan ini tidak berasal dari jumlah data. *Precision* terendah terdapat pada *pinhole* dan *short*, yang penyebabnya ditelusuri melalui *confusion matrix* pada Gambar 4.7.
 
 [Gambar 4.7]
 
@@ -1395,7 +1419,7 @@ Struktur dan fidelitas agregat SODT dirangkum pada Tabel 4.5. *Mimic accuracy* a
 |        *Mimic accuracy* data uji         | 96,26%                        |
 |           *Macro*-F1 data uji            | 0,889                         |
 
-Berdasarkan Tabel 4.5, SODT meniru *teacher* dengan fidelitas di atas 96% meskipun setiap *node* hanya memakai sekitar 4% fitur. *Agreement* per kelasnya seimbang, yaitu 95,8% pada *spur* hingga 97,2% pada *short*, dengan *short* yang tersulit bagi *teacher* pada Tabel 4.3 justru tertinggi karena memperoleh bobot kelas terbesar. Namun, *macro*-F1 jauh lebih rendah karena *agreement* hanya setara *recall* terhadap *teacher*, sedangkan F1 juga memperhitungkan *precision* yang turun akibat sekitar 16.400 RoI *background* dilabeli cacat, lebih banyak daripada RoI kelas cacat mana pun pada Tabel 4.4. Dampak kebocoran ini terhadap deteksi dievaluasi pada Subbab 4.6.
+Berdasarkan Tabel 4.5, SODT meniru *teacher* dengan fidelitas di atas 96% meskipun setiap *node* hanya memakai sekitar 4% fitur, sejalan dengan Hada et al. (2024) yang menunjukkan bahwa SODT yang *sparse* dapat meniru *classifier* jaringan saraf dengan akurasi yang mendekatinya. Namun, *macro*-F1 jauh lebih rendah karena *agreement* hanya setara *recall* terhadap *teacher*, sedangkan F1 juga memperhitungkan *precision* yang turun akibat sekitar 16.400 RoI *background* dilabeli cacat, lebih banyak daripada RoI kelas cacat mana pun pada Tabel 4.4. Dampak kebocoran ini terhadap deteksi dievaluasi pada Subbab 4.6.
 
 ### 4.5.2 Pengaruh *Negative Ratio* dan *Class Weighting*
 
@@ -1416,7 +1440,7 @@ Konfigurasi pada Tabel 3.7 dipilih melalui ablasi satu faktor dengan memvariasik
 | ***Mimic accuracy* (%)** | 94,77 | **96,26** | 97,03 | 97,34 | 96,56 |
 | ***Macro*-F1 (0–1)** | 0,855 | **0,889** | 0,905 | 0,913 | 0,894 |
 
-Berdasarkan Tabel 4.6, kenaikan NR dari NR 1 hingga NR *full* menaikkan *agreement background* sekitar 4 poin, tetapi menurunkan *agreement* kelas cacat terendah lebih dari 7 poin. Dalam jumlah RoI uji, RoI *background* yang dilabeli cacat turun dari sekitar 24.600 menjadi 7.300, sedangkan RoI cacat yang tidak ditiru naik dari sekitar 1.500 menjadi 6.100. *Mimic accuracy* dan *macro*-F1 ikut naik hanya karena *background* mengisi 86,3% data uji. Kecenderungan ini diduga terjadi karena semakin banyaknya sampel *background* pada *care set* di Persamaan 3.1 menggeser batas keputusan *node* agar menyaring *background* lebih ketat tanpa mengubah struktur pohon, seperti terlihat pada Subbab 4.5.3. Di antara keempat nilai, NR 2 menghasilkan rentang terkecil sehingga paling seimbang.
+Berdasarkan Tabel 4.6, kenaikan NR dari NR 1 hingga NR *full* menaikkan *agreement background* sekitar 4 poin, tetapi menurunkan *agreement* kelas cacat terendah lebih dari 7 poin. Dalam jumlah RoI uji, RoI *background* yang dilabeli cacat turun dari sekitar 24.600 menjadi 7.300, sedangkan RoI cacat yang tidak ditiru naik dari sekitar 1.500 menjadi 6.100. *Mimic accuracy* dan *macro*-F1 ikut naik hanya karena *background* mengisi 86,3% data uji. Kecenderungan ini terjadi karena makin banyak sampel *background* pada *care set* membuat fungsi tujuan pada Persamaan 3.1 makin ditentukan oleh kesalahan pada *background*, sehingga batas keputusan *node* bergeser untuk menyaring *background* lebih ketat, sedangkan topologi pohonnya tetap serupa seperti terlihat pada Subbab 4.5.3. Di antara keempat nilai, NR 2 menghasilkan rentang terkecil sehingga paling seimbang.
 
 Tanpa CW, rentang pada NR 2 melebar lebih dari dua kali lipat karena kelas cacat tertinggal dari *background*. CW menaikkan *agreement* kelas cacat sebanding dengan bobotnya, dari 3,1 poin pada *short* dengan ω = 2 hingga 0,6 poin pada *mousebite* dengan ω = 1, karena Persamaan 3.1 dan 3.2 membuat kesalahan pada kelas berbobot besar lebih mahal. Sebagai *trade-off* umum *cost-sensitive learning* (Elkan, 2001), *agreement background* turun 0,7 poin atau sekitar 3.000 RoI, sehingga *mimic accuracy* dan *macro*-F1 sedikit lebih rendah. Karena kriteria penelitian ini adalah keseimbangan antarkelas, NR 2 dengan CW dipilih sebagai SODT akhir, dengan catatan CW hanya diuji pada NR terpilih.
 
@@ -1430,15 +1454,15 @@ Struktur SODT terpilih setelah pemangkasan ditunjukkan pada Gambar 4.10. Angka p
 
 Berdasarkan Gambar 4.10, pintu keluar *background* tersebar pada kedalaman 3 hingga 6, sedangkan seluruh *leaf* cacat berada pada kedalaman 6 dan 10 dari 13 pasangan *leaf* terbawah berisi dua kelas cacat berbeda, sehingga *node* tingkat atas hingga tengah berperan menyaring *background* dan *node* terbawah menentukan jenis cacat. Empat *node* berbobot nol hanya menjadi jalur lewat, dan sebagian *leaf background* merupakan pengganti cabang yang tidak dilalui sampel. Pohon ketiga konfigurasi NR lainnya memiliki topologi serupa dengan 12 hingga 14 *leaf background*, karena *background* tetap menjadi kelas terbesar bahkan pada NR 1.
 
-Sebaran sparsitas pohon ini sesuai dengan prediksi Kairgeldin dan Carreira-Perpiñán (2025). Dengan α bernilai kecil, yaitu 0,15, penalti efektif per sampel $\lambda\left| \mathcal{R}_{i} \right|^{\alpha - 1}$ pada Persamaan 2.31 dan 2.32 mengecil untuk *node* yang menerima banyak sampel, sehingga *root* dan *node* di jalur utama memakai 249 hingga 534 *nonzero weight*, sedangkan *node* pada kedalaman 5 hanya 8 hingga 131. Jumlah *nonzero weight* pada *root* juga naik seiring NR, dari 340 pada NR 1 menjadi 488 pada NR *full*, sedangkan λ yang besar, yaitu 20, menjaga sparsitas keseluruhan tetap 97,9%.
+Sebaran sparsitas pohon ini sesuai dengan prediksi Kairgeldin dan Carreira-Perpiñán (2025). Dengan α bernilai kecil, yaitu 0,15, penalti efektif per sampel $\lambda\left| \mathcal{R}_{i} \right|^{\alpha - 1}$ pada Persamaan 2.31 dan 2.32 mengecil untuk *node* yang menerima banyak sampel, sehingga *root* dan *node* di jalur utama memakai 249 hingga 534 *nonzero weight*, sedangkan *node* pada kedalaman 5 hanya 8 hingga 131. Sementara itu, λ yang besar, yaitu 20, menjaga sparsitas keseluruhan tetap 97,9%.
 
-Namun, sub-pohon di bawah N19 dan N22 hanya berisi *leaf* cacat tanpa satu pun pintu keluar *background*. Karena *routing* bersifat *hard* tanpa mekanisme koreksi, RoI *background* yang lolos ke kedua sub-pohon tersebut pasti dilabeli cacat. Sub-pohon seperti ini muncul pada keempat konfigurasi NR, sehingga diduga menjadi salah satu sumber *false positive* tambahan di luar yang diwarisi dari *teacher*, dan satu contohnya ditunjukkan pada Subbab 4.6.2.
+Namun, sub-pohon di bawah N19 dan N22 hanya berisi *leaf* cacat tanpa satu pun pintu keluar *background*. Karena *routing* bersifat *hard* tanpa mekanisme koreksi, RoI *background* yang lolos ke kedua sub-pohon tersebut pasti dilabeli cacat. Sub-pohon seperti ini muncul pada keempat konfigurasi NR dan menjadi salah satu sumber *false positive* tambahan di luar yang diwarisi dari *teacher*, seperti ditunjukkan pada Subbab 4.6.2.
 
 Secara keseluruhan, SODT terpilih meniru *teacher* secara seimbang antarkelas dengan hanya 2,1% *nonzero weight*. Kebocoran sekitar 16.400 RoI *background* dan jalur tanpa pintu keluar *background* diuji dampaknya terhadap deteksi pada Subbab 4.6, sedangkan *nonzero weight* setiap *node* menjadi dasar pembentukan *heatmap* per *node* pada Subbab 4.7.
 
 ## 4.6 Hasil dan Evaluasi Deteksi *Neuro-Symbolic*
 
-Subbab ini mengevaluasi model hibrida, selanjutnya disebut NeSy, terhadap *ground truth* pada 500 citra uji dengan metrik pada Subbab 3.5 dan membandingkannya dengan *Faster* R-CNN. Karena *backbone*, RPN, dan kepala regresi keduanya sama, selisih kinerja sepenuhnya berasal dari penggantian kepala klasifikasi oleh SODT sesuai Subbab 3.8.
+Subbab ini mengevaluasi model hibrida, selanjutnya disebut NeSy, terhadap *ground truth* pada 500 citra uji dengan metrik pada Subbab 3.4 dan membandingkannya dengan *Faster* R-CNN. Karena *backbone*, RPN, dan kepala regresi keduanya sama, selisih kinerja sepenuhnya berasal dari penggantian kepala klasifikasi oleh SODT sesuai Subbab 3.8.
 
 ### 4.6.1 Kinerja Deteksi *Neuro-Symbolic*
 
@@ -1451,7 +1475,7 @@ Kinerja deteksi NeSy dirangkum pada Tabel 4.7 dengan *Faster* R-CNN sebagai pemb
 | *Faster* R-CNN | 0,759 | 0,979 | 0,910 | 0,982 | 0,945 | 76,9 ± 30,9 |
 | NeSy | 0,757 | 0,974 | 0,923 | 0,973 | 0,947 | 80,9 ± 11,7 |
 
-Berdasarkan Tabel 4.7, mAP NeSy hampir sama dengan *Faster* R-CNN, dengan *precision* sedikit lebih tinggi dan *recall* sedikit lebih rendah. Fidelitas SODT terhadap *teacher* pada Subbab 4.5 terbawa ke tingkat deteksi, sehingga penggantian kepala klasifikasi hanya sedikit menurunkan akurasi. NeSy juga lebih cepat, bukan karena SODT lebih ringan, sebab MLP tetap dijalankan untuk kepala regresi, melainkan diduga karena jumlah kandidat *Soft*-NMS. Setiap RoI pada NeSy hanya menghasilkan satu kandidat kelas dan RoI yang berakhir pada *leaf background* tidak diteruskan, sedangkan pada *Faster* R-CNN hampir seluruh kelas hasil *softmax* lolos ambang skor dan diproses oleh *Soft*-NMS yang berjalan sekuensial.
+Berdasarkan Tabel 4.7, mAP NeSy hampir sama dengan *Faster* R-CNN, dengan *precision* sedikit lebih tinggi dan *recall* sedikit lebih rendah. Fidelitas SODT terhadap *teacher* pada Subbab 4.5 terbawa ke tingkat deteksi, sehingga penggantian kepala klasifikasi hanya sedikit menurunkan akurasi. Meskipun sudah membentuk *heatmap* per *node*, NeSy hanya sedikit lebih lambat daripada *Faster* R-CNN tanpa penjelasan, karena bagian deteksinya lebih ringan. Setiap RoI pada NeSy hanya menghasilkan satu kandidat kelas dan RoI yang berakhir pada *leaf background* tidak lolos ambang skor, sedangkan *Faster* R-CNN meneruskan hampir seluruh kelas hasil *softmax* dari setiap RoI ke *Soft*-NMS yang berjalan sekuensial, sehingga waktunya bergantung pada jumlah kandidat setiap citra dan simpangannya lebih besar.
 
 Rincian kinerja per kelas cacat kedua model dirangkum pada Tabel 4.8 dalam bentuk AP@0,5, *precision*, dan *recall*.
 
@@ -1472,13 +1496,14 @@ Sumber perubahan *precision* dan *recall* tersebut ditelusuri melalui *confusion
 
 **Gambar 4.11 *Confusion Matrix Faster* R-CNN dan *Neuro-Symbolic***
 
-Berdasarkan Tabel 4.8 dan Gambar 4.11, penurunan *recall* NeSy berasal dari FN yang bertambah dari 46 menjadi 65, sedangkan FP *background* justru turun dari 292 menjadi 236 dan menjelaskan kenaikan *precision*. Penurunan ini diduga berasal dari kecenderungan SODT melabeli *background*, karena SODT dilatih dengan dua RoI *background* untuk setiap RoI cacat sesuai Subbab 4.5.1. Gejalanya sudah tampak pada *agreement* kelas cacat pada Tabel 4.5 yang tidak mencapai 100%, dan Subbab 4.5.2 menunjukkan bahwa makin besar porsi *background*, makin banyak RoI cacat yang tidak ditiru. RoI cacat yang tidak ditiru inilah yang muncul sebagai FN pada tingkat deteksi.
+Berdasarkan Tabel 4.8 dan Gambar 4.11, penurunan *recall* NeSy berasal dari FN yang bertambah dari 46 menjadi 65, sedangkan FP *background* justru turun dari 292 menjadi 236 dan menjelaskan kenaikan *precision*. Kenaikan FN ini berasal dari RoI cacat yang tidak ditiru SODT karena pelatihannya didominasi *background* dengan rasio negatif 2, dan Subbab 4.5.2 menunjukkan bahwa jumlah RoI cacat yang tidak ditiru bertambah seiring porsi *background*.
 
-Pada tingkat kelas, pola tersebut mengikuti *agreement* pada Tabel 4.5, meskipun selisih FN setiap kelas paling banyak enam deteksi. FN tidak bertambah pada *short*, kelas dengan bobot dan *agreement* tertinggi, maupun pada *open*, tetapi bertambah pada keempat kelas lainnya dan paling banyak pada *spur* yang *agreement*-nya terendah. Sebaliknya, kenaikan FP *background* hanya terjadi pada *short*, sesuai dengan *class weighting* yang membuat SODT lebih mudah memberi label kelas berbobot terbesar, sehingga *precision short* turun paling besar. *Precision spurious copper* dan *pinhole* justru naik karena FP *background* keduanya berkurang. Kecenderungan SODT pada Subbab 4.5, yaitu condong ke *background* dan diimbangi *class weighting* pada *short*, terbawa hingga tingkat deteksi.
+Pada tingkat kelas, pola tersebut mengikuti *agreement* pada Tabel 4.6, meskipun selisih FN setiap kelas paling banyak enam deteksi. FN tidak bertambah pada *short*, kelas dengan bobot dan *agreement* tertinggi, maupun pada *open*, tetapi bertambah pada keempat kelas lainnya dan paling banyak pada *spur* yang *agreement*-nya terendah. Sebaliknya, kenaikan FP *background* hanya terjadi pada *short*, sesuai dengan *class weighting* yang membuat SODT lebih mudah memberi label kelas berbobot terbesar, sehingga *precision short* turun paling besar. *Precision spurious copper* dan *pinhole* justru naik karena FP *background* keduanya berkurang. Kecenderungan SODT pada Subbab 4.5, yaitu condong ke *background* dan diimbangi *class weighting* pada *short*, terbawa hingga tingkat deteksi.
 
 ### 4.6.2 Pengaruh *Routing Margin*
 
 Peran skor berbasis *routing margin* diuji dengan mengganti skor seluruh deteksi menjadi 1 sesuai Subbab 3.9, tanpa mengubah jalur maupun label. Hasilnya ditunjukkan pada Tabel 4.9, dengan Δ sebagai selisih antara kondisi dengan dan tanpa *routing margin*.
+
 **Tabel 4.9 Pengaruh *Routing Margin* terhadap Kinerja Deteksi *Neuro-Symbolic***
 
 | **Metrik** | **Dengan *Routing Margin*** | **Tanpa *Routing Margin*** | **Δ** |
@@ -1508,43 +1533,178 @@ Mekanisme penyaringan tersebut diperlihatkan pada Gambar 4.13 untuk dua deteksi 
 
 **Gambar 4.13 *Routing Margin* per *Node* pada Deteksi *True Positive* dan *False Positive***
 
-Setiap panel pada Gambar 4.13 mewakili satu *node*, dengan garis diagonal sebagai *split* dan garis putus-putus sebagai jarak RoI ke *split* yang sebanding dengan $\left| f_{i}(x) \right|$ pada Persamaan 3.3. Berdasarkan Gambar 4.13, A relatif jauh dari *split* pada seluruh *node*, sedangkan B mendekati *split* pada N4, N9, dan N19. Setelah N9, *node* terakhir yang masih memiliki jalan menuju *background*, B masuk ke sub-pohon N19 dan pasti dilabeli cacat sesuai dugaan pada Subbab 4.5.3. *Routing margin* tidak mengubah label ini, tetapi menempatkan B di bawah A meskipun skornya masih lolos ambang sebagai FP. Sementara itu, A melewati sub-pohon N22 dengan yakin, jadi sub-pohon tanpa pintu keluar *background* tetap sah untuk cacat sebenarnya. Secara keseluruhan, NeSy mempertahankan akurasi *Faster* R-CNN dengan *routing margin* sebagai penyaring deteksi yang ragu, sedangkan kualitas penjelasannya dievaluasi pada Subbab 4.7.
+Setiap panel pada Gambar 4.13 mewakili satu *node*, dengan garis diagonal sebagai *split* dan garis putus-putus sebagai jarak RoI ke *split* yang sebanding dengan $\left| f_{i}(x) \right|$ pada Persamaan 3.3. Berdasarkan Gambar 4.13, A relatif jauh dari *split* pada seluruh *node*, sedangkan B mendekati *split* pada N4, N9, dan N19. Setelah N9, *node* terakhir yang masih memiliki jalan menuju *background*, B masuk ke sub-pohon N19 dan pasti dilabeli cacat sesuai Subbab 4.5.3. *Routing margin* tidak mengubah label ini, tetapi menempatkan B di bawah A meskipun skornya masih lolos ambang sebagai FP. Sementara itu, A melewati sub-pohon N22 dengan yakin, yang menunjukkan bahwa sub-pohon tanpa pintu keluar *background* tetap sah untuk cacat sebenarnya. Secara keseluruhan, NeSy mempertahankan akurasi *Faster* R-CNN dengan *routing margin* sebagai penyaring deteksi yang ragu, sedangkan kualitas penjelasannya dievaluasi pada Subbab 4.7.
 
-## 4.7 Hasil dan Evaluasi *Explanation* pada Neuro-Symbolic
+## 4.7 Hasil dan Evaluasi *Explanation* *Neuro-Symbolic*
 
-Evaluasi Explanation pada Neuro-Symbolic menggunakan metrik untuk mengukur *faithfulness* dan kualitas heatmap. Kemudian akan dibandingkan dengan GradCAM yang di mana telah disajikan pada Gambar 4.22.
+Penjelasan NeSy berupa *heatmap* setiap *node* pada jalur keputusan sesuai Subbab 3.8. Penjelasan ini dievaluasi pada deteksi berskor minimal 0,5 dari 500 citra uji dengan prosedur pada Algoritma 3.5, dengan Grad-CAM sebagai pembanding.
 
-[Gambar 4.22]
+### 4.7.1 *Faithfulness* dan Lokalisasi *Explanation*
 
-**Gambar 4.22 Perbandingan Faithfulness dan kualitas *Heatmap* pada NeuroSymbolic dan GradCAM**
+Karena Grad-CAM hanya menghasilkan satu peta per deteksi, *faithfulness* NeSy dihitung pada peta gabungan M sesuai Persamaan 3.8 yang hanya dipakai untuk perbandingan ini. Skor yang diamati juga berbeda, yaitu *routing margin* pada NeSy dan probabilitas kelas pada Grad-CAM, sehingga setiap metode dibaca terhadap kontrol posisi acaknya sendiri. Hasilnya ditunjukkan pada Tabel 4.10, dengan *Necessity*, *Sufficiency*, dan *Insertion* AUC yang lebih tinggi serta *Deletion* AUC yang lebih rendah menandakan penjelasan yang lebih *faithful*.
 
-1.  **Faithfulness**
+**Tabel 4.10 *Faithfulness Explanation Neuro-Symbolic* dan Grad-CAM**
 
-Neuro-Symbolic (SODT) mencapai Sufficiency Preservation 1,000 dan Necessity Flip Rate 0,971, menunjukkan penjelasan yang benar-benar merepresentasikan keputusan internal model. Sementara itu, Grad-CAM hanya mencapai Sufficiency 0,956 dan Necessity 0,047, mengindikasikan penjelasan yang tidak memenuhi prinsip *necessity* (hanya 4,7% kasus di mana penghapusan area penting mengubah prediksi).
+| **Metode** | ***Necessity*** | ***Sufficiency*** | ***Deletion* AUC** | ***Insertion* AUC** |
+|:------------------|------|------|------|------|
+| NeSy | 0,768 | 1,000 | 0,200 | 0,877 |
+| NeSy acak | 0,022 | 0,981 | 0,592 | 0,590 |
+| Grad-CAM | 0,126 | 0,975 | 0,599 | 0,846 |
+| Grad-CAM acak | 0,018 | 0,983 | 0,758 | 0,758 |
 
-2.  **Spatial Grounding**
+Berdasarkan Tabel 4.10, NeSy terpisah jauh dari kontrol acaknya pada *Necessity*, *Deletion* AUC, dan *Insertion* AUC, sedangkan Grad-CAM hanya sedikit lebih baik daripada kontrolnya. *Sufficiency* hampir penuh pada seluruh baris, termasuk kontrol acak, karena sebagian posisi saja sudah cukup mempertahankan label. Akibatnya, metrik ini tidak membedakan kedua metode. Peta NeSy merupakan dekomposisi eksak kontribusi fitur yang benar-benar dipakai setiap *node* sesuai Persamaan 3.5 hingga 3.7, sedangkan Grad-CAM merata-ratakan gradien per kanal dan membuang bagian negatifnya melalui ReLU. Rendahnya *Necessity* Grad-CAM menunjukkan bahwa keputusan MLP tersebar di banyak posisi, sehingga menghapus daerah yang disorot Grad-CAM jarang mengubah label. Kontrol acak NeSy yang juga sangat rendah menunjukkan bahwa *Necessity* yang tinggi tidak berasal dari pohon yang mudah berubah label oleh penghapusan sembarang.
 
-Grad-CAM memiliki IoU Heatmap (0,994) sedikit lebih tinggi dari SODT (0,920) karena *bleeding effect* (area heatmap melebar ke luar bounding box). Sementara itu, untuk Pointing Game, Kedua metode hampir identik (0,994 vs 0,983), membuktikan bahwa keduanya mampu mengidentifikasi wilayah cacat. Namun, SODT lebih *faithful* karena heatmapnya **terlokalisasi presisi** pada fitur yang secara eksplisit digunakan dalam keputusan.
+Lokalisasi diukur dengan *Pointing Game* dan IoU *Heatmap* pada proposal longgar sesuai Algoritma 3.5, bersama peta acak sebagai kontrol. Hasilnya ditunjukkan pada Tabel 4.11.
 
-3.  **Waktu komputasi**
+**Tabel 4.11 Lokalisasi *Explanation Neuro-Symbolic* dan Grad-CAM**
 
-Grad-CAM membutuhkan 12,6× lebih lama dibanding Neuro-Symbolic (5045,4 ms vs 426,2 ms) karena mekanisme komputasi yang tidak efisien seperti ditunjukkan pada Gambar 4.23.
+| **Metode** | ***Pointing Game*** | **IoU *Heatmap*** |
+|:------------------|------|------|
+| NeSy | 0,863 | 0,769 |
+| Grad-CAM | 0,882 | 0,790 |
+| Acak | 0,820 | 0,760 |
 
-[Gambar 4.23]
+Berdasarkan Tabel 4.11, lokalisasi NeSy hampir sama dengan Grad-CAM dan keduanya berada di atas peta acak. Lokalisasi di sini berfungsi sebagai pemeriksaan kewajaran, yaitu memastikan *heatmap* NeSy menunjuk daerah cacat seperti metode yang sudah umum dipakai, bukan daerah sembarang. Jarak terhadap peta acak kecil karena satu posisi *feature map neck* mencakup daerah citra yang jauh lebih luas daripada proposal, sehingga lokalisasi pada tingkat ini kasar bagi kedua metode. Dengan lokalisasi yang setara, pembeda kedua metode terletak pada *faithfulness*.
 
-**Gambar 4.23 Perbandingan inference time pada ketiga model.**
+Contoh penjelasan kedua metode untuk satu deteksi *spur* ditunjukkan pada Gambar 4.14, dengan *heatmap* setiap *node* NeSy disusun dari atas ke bawah sesuai urutan jalurnya dan peta Grad-CAM di sampingnya.
 
-Hal ini bisa terjadi karena pada Faster R-CNN, Grad-CAM harus:
+[Gambar 4.14 — SISIPKAN: heatmap per node NeSy (jalur N0–N1–N4–N10–N22–N45) + Grad-CAM Focus, deteksi spur 0,88 (notebook 06, sel 5 per-image explanation)]
 
-1.  Menjalankan satu kali ***backward pass* penuh** melalui seluruh arsitektur dua-tahap (RPN + RoI Head) untuk **setiap kotak deteksi (RoI)** yang dihasilkan.
+**Gambar 4.14 *Heatmap* per *Node Neuro-Symbolic* dan Grad-CAM pada Deteksi *Spur***
 
-2.  Menghitung gradien dari skor kelas yang diprediksi hingga ke lapisan konvolusional terakhir.
+Berdasarkan Gambar 4.14, Grad-CAM hanya memberi satu peta yang menyebar hingga keluar proposal dan di sepanjang jalur tembaga, sedangkan NeSy memperlihatkan daerah yang ditimbang pada setiap langkah keputusan. *Node* atas cenderung menimbang daerah yang luas, sedangkan *node* dalam seperti N22 dan N45 memusat pada tonjolan *spur*. Peta per *node* inilah keluaran penjelasan NeSy yang sebenarnya, sedangkan peta M hanya dipakai untuk perbandingan pada Tabel 4.10 dan 4.11. Keandalan setiap peta per *node* diuji pada Subbab 4.7.2.
 
-Proses komputasi berulang untuk setiap RoI ini sangat tidak efisien dan membebani komputasi, sehingga tidak cocok untuk skenario *real-time* seperti inspeksi PCB.
+Waktu pembentukan penjelasan diambil dari pengukuran yang sama dengan Tabel 4.7 dan dihitung hingga peta ternormalisasi, tanpa penumpangan pada citra. Grad-CAM memerlukan 102,5 ± 32,5 ms per citra, atau sekitar 1,3 kali waktu NeSy, dengan jumlah deteksi yang dijelaskan per citra hampir sama. NeSy cukup menjalankan ulang *RoI Align* pada *feature map* yang sudah tersedia dari deteksi, sedangkan Grad-CAM harus menjalankan ulang *backbone* dengan gradien, lalu melakukan propagasi mundur dari skor kelas hingga *feature map neck* untuk setiap deteksi.
+
+### 4.7.2 Analisis *Heatmap* per *Node*
+
+Keandalan *heatmap* setiap *node* diuji dengan menghapus 50% posisi tertinggi peta *node* tersebut dan memeriksa apakah keputusan *node* itu sendiri berbalik, lalu *Deletion* dan *Insertion* AUC dihitung terhadap *routing margin* *node* tersebut sesuai langkah 7 Algoritma 3.5 pada sekitar 3.310 deteksi di setiap kedalaman. Hasilnya ditunjukkan pada Tabel 4.12 dalam format NeSy / acak, dengan kolom *flip* seluruh kotak sebagai pembalikan keputusan saat seluruh isi proposal dihapus dan *support* sebagai porsi proposal yang mendapat kontribusi *node*.
+
+**Tabel 4.12 *Faithfulness* per *Node* pada Setiap Kedalaman**
+
+| **Kedalaman** | ***Flip*** | ***Flip* Seluruh Kotak** | ***Deletion* AUC** | ***Insertion* AUC** | ***Support*** |
+|:------|------|------|------|------|------|
+| 1 | 0,057 / 0,000 | 0,000 | 0,611 / 0,859 | 0,947 / 0,859 | 0,544 |
+| 2 | 0,298 / 0,001 | 0,999 | 0,641 / 0,889 | 0,948 / 0,889 | 0,544 |
+| 3 | 0,364 / 0,006 | 0,824 | 0,624 / 0,859 | 0,944 / 0,858 | 0,544 |
+| 4 | 0,336 / 0,008 | 0,623 | 0,629 / 0,886 | 0,949 / 0,885 | 0,544 |
+| 5 | 0,353 / 0,002 | 0,347 | 0,566 / 0,877 | 0,950 / 0,877 | 0,416 |
+| 6 | 0,386 / 0,011 | 0,297 | 0,570 / 0,855 | 0,951 / 0,856 | 0,297 |
+
+Berdasarkan Tabel 4.12, peta setiap *node* jauh lebih menentukan daripada posisi acak pada semua kedalaman, dengan *flip* dan *Insertion* AUC yang lebih tinggi serta *Deletion* AUC yang lebih rendah, sedangkan kontrol acak hampir tidak pernah membalik keputusan. Kedalaman 1 menjadi pengecualian karena keputusan N0 tidak berbalik bahkan ketika seluruh isi proposal dihapus. Keputusan *root* untuk deteksi cacat hampir tidak bergantung pada isi proposal, sehingga rendahnya *flip* tidak menandakan peta yang keliru. Pada kedalaman 5 dan 6, menghapus daerah yang ditimbang saja justru lebih sering membalik keputusan daripada menghapus seluruh kotak, karena bukti pendukung hilang sementara bukti ke arah sebaliknya tetap tersisa. *Support* yang menyempit pada kedua kedalaman tersebut juga menunjukkan bahwa *node* dalam menimbang daerah yang lebih kecil.
+
+Daerah yang ditimbang setiap *node* ditelaah pada dua TP per kelas yang dipilih secara acak dari deteksi berskor minimal 0,5. Panel pada setiap gambar disusun dari kedalaman 1 di atas hingga kedalaman 6 di bawah dan dinormalisasi terhadap puncaknya masing-masing, dengan warna hitam sebagai tembaga dan abu-abu sebagai substrat. *Heatmap* per *node* untuk kelas *spur* ditunjukkan pada Gambar 4.15.
+
+[Gambar 4.15 — SISIPKAN: panel heatmap per node tanpa Grad-CAM, dua TP spur berdampingan (lampiran #23 dan #37), jalur N0–N1–N4–N10–N22–N45 (notebook 06, sel 5 per-image explanation)]
+
+**Gambar 4.15 *Heatmap* per *Node* pada Dua Deteksi *Spur***
+
+Berdasarkan Gambar 4.15, kedua deteksi *spur* menempuh jalur yang sama, yaitu N0–N1–N4–N10–N22–N45. Pohon lebih dulu menimbang tembaga di sudut proposal dan pita di tepi bawahnya pada N0 dan N1, lalu berpindah ke badan tonjolan pada N4 dan N10. Pada N22 dan N45, penimbangan menyempit ke satu sisi tonjolan, sedangkan tembaga dan substrat di sekitarnya tidak lagi ditimbang.
+
+*Heatmap* per *node* untuk kelas *spurious copper* ditunjukkan pada Gambar 4.16.
+
+[Gambar 4.16 — SISIPKAN: panel heatmap per node tanpa Grad-CAM, dua TP spurious copper berdampingan (lampiran #35 dan #38), jalur N0–N1–N4–N10–N22–N45 (notebook 06, sel 5 per-image explanation)]
+
+**Gambar 4.16 *Heatmap* per *Node* pada Dua Deteksi *Spurious Copper***
+
+Berdasarkan Gambar 4.16, kedua deteksi *spurious copper* juga menempuh jalur N0–N1–N4–N10–N22–N45. Pohon lebih dulu menimbang substrat utuh di sudut proposal dan tepi bawahnya pada N0 dan N1, lalu menimbang tepi bawah gumpalan tembaga pada N4. N10 kembali menimbang substrat di sekitar gumpalan, sedangkan N45 berakhir pada tepi gumpalan. Bagian tengah gumpalan tidak pernah menjadi daerah yang dominan, yang menandakan bahwa yang ditimbang adalah batas antara tembaga berlebih dan substrat.
+
+*Heatmap* per *node* untuk kelas *pinhole* ditunjukkan pada Gambar 4.17.
+
+[Gambar 4.17 — SISIPKAN: panel heatmap per node tanpa Grad-CAM, dua TP pinhole berdampingan (lampiran #25 dan #26), jalur N0–N1–N4–N10–N22–N46 (notebook 06, sel 5 per-image explanation)]
+
+**Gambar 4.17 *Heatmap* per *Node* pada Dua Deteksi *Pinhole***
+
+Berdasarkan Gambar 4.17, kedua deteksi *pinhole* menempuh jalur N0–N1–N4–N10–N22–N46. Pohon lebih dulu menimbang tembaga utuh di sekitar lubang, yaitu sudut proposal pada N0 dan tepi bawahnya pada N1, lalu memusat ke lubang pada N4. N10 dan N22 kembali menimbang tembaga di sekeliling lubang, dan N46 berakhir pada bibir lubang, bukan pada pusatnya. Urutan ini menunjukkan bahwa pohon membandingkan lubang dengan tembaga utuh di sekitarnya sebelum menetapkan label.
+
+*Heatmap* per *node* untuk kelas *mousebite* ditunjukkan pada Gambar 4.18.
+
+[Gambar 4.18 — SISIPKAN: panel heatmap per node tanpa Grad-CAM, dua TP mousebite berdampingan (lampiran #29 dan #30), jalur N0–N1–N4–N10–N22–N46 (notebook 06, sel 5 per-image explanation)]
+
+**Gambar 4.18 *Heatmap* per *Node* pada Dua Deteksi *Mousebite***
+
+Berdasarkan Gambar 4.18, kedua deteksi *mousebite* menempuh jalur N0–N1–N4–N10–N22–N46. Pohon lebih dulu menimbang sudut proposal dan daerah di sepanjang tepi jalur yang tergigit pada N0 dan N1, lalu tertuju ke lekukan gigitan mulai N4. Pada N10 hingga N46, penimbangan menyempit ke beberapa titik pada kontur lekukan, sehingga keputusan akhirnya bertumpu pada bentuk tepi jalur yang hilang.
+
+*Heatmap* per *node* untuk kelas *open* ditunjukkan pada Gambar 4.19.
+
+[Gambar 4.19 — SISIPKAN: panel heatmap per node tanpa Grad-CAM, dua TP open berdampingan (lampiran #31 dan #36), jalur N0–N1–N4–N10–N21–N43 (notebook 06, sel 5 per-image explanation)]
+
+**Gambar 4.19 *Heatmap* per *Node* pada Dua Deteksi *Open***
+
+Berdasarkan Gambar 4.19, kedua deteksi *open* menempuh jalur N0–N1–N4–N10–N21–N43. Pohon lebih dulu menimbang sekitar celah dan tepi bawah proposal pada N0 dan N1, lalu menimbang ujung jalur yang terputus pada N4. N10 menimbang celah di antara kedua ujung tersebut, sedangkan N21 dan N43 kembali ke ujung jalur di tepi celah. Penimbangan berpindah antara ujung jalur dan celahnya, sesuai dengan ciri *open* sebagai jalur tembaga yang terputus.
+
+*Heatmap* per *node* untuk kelas *short* ditunjukkan pada Gambar 4.20.
+
+[Gambar 4.20 — SISIPKAN: panel heatmap per node tanpa Grad-CAM, dua TP short berdampingan (lampiran #27 dan #28), jalur N0–N1–N4–N9–N19–N39 (notebook 06, sel 5 per-image explanation)]
+
+**Gambar 4.20 *Heatmap* per *Node* pada Dua Deteksi *Short***
+
+Berdasarkan Gambar 4.20, kedua deteksi *short* menempuh jalur N0–N1–N4–N9–N19–N39, satu-satunya jalur yang berbelok ke N9 setelah N4. Pohon lebih dulu menimbang sudut dan tepi bawah proposal pada N0 dan N1, lalu menimbang jembatan tembaga pada N4. N9 kembali ke tepi bawah proposal, sedangkan N19 dan N39 memusat pada pita tembaga yang menghubungkan dua jalur.
+
+Pola dari Gambar 4.15 hingga 4.20 dirangkum pada Tabel 4.13 menurut kelompok kedalaman.
+
+**Tabel 4.13 Sintesis Daerah yang Ditimbang *Node* per Kelas Cacat**
+
+| **Kelas** | **Jalur** | **Kedalaman 1–2** | **Kedalaman 3–4** | **Kedalaman 5–6** |
+|:------------------|------|------|------|------|
+| *Spur* | N0–N1–N4–N10–N22–N45 | Tembaga di sudut dan tepi bawah proposal | Badan tonjolan | Satu sisi tonjolan |
+| *Spurious copper* | N0–N1–N4–N10–N22–N45 | Substrat di sudut dan tepi bawah proposal | Tepi bawah gumpalan, lalu substrat di sekitarnya | Tepi gumpalan |
+| *Pinhole* | N0–N1–N4–N10–N22–N46 | Tembaga utuh di sudut dan tepi bawah proposal | Lubang, lalu tembaga di sekelilingnya | Bibir lubang |
+| *Mousebite* | N0–N1–N4–N10–N22–N46 | Sudut proposal dan tepi jalur yang tergigit | Lekukan gigitan | Kontur lekukan |
+| *Open* | N0–N1–N4–N10–N21–N43 | Sekitar celah dan tepi bawah proposal | Ujung jalur yang terputus, lalu celahnya | Ujung jalur di tepi celah |
+| *Short* | N0–N1–N4–N9–N19–N39 | Sudut dan tepi bawah proposal | Jembatan tembaga, lalu tepi bawah proposal | Pita penghubung antarjalur |
+
+Berdasarkan Tabel 4.13, dua deteksi dari kelas yang sama selalu menempuh jalur yang sama, dan urutan penimbangannya berulang. Kedalaman 1 dan 2 menimbang konteks di sekitar cacat, terutama sudut dan tepi bawah proposal, dengan pola yang serupa untuk semua kelas. Mulai kedalaman 3, penimbangan berpindah ke cacat itu sendiri, lalu pada kedalaman 5 dan 6 menyempit ke tepi atau kontur cacat alih-alih pusatnya, sejalan dengan *support* yang menurun pada Tabel 4.12. Setiap langkah keputusan NeSy pun dapat dibaca sebagai daerah tertentu yang ditimbang, dan keandalan setiap peta tersebut telah ditunjukkan pada Tabel 4.12.
+
+### 4.7.3 Pengaruh Proyeksi FPN terhadap *Heatmap*
+
+Pilihan pada Subbab 3.8 untuk menghitung *heatmap* pada *feature map neck* diuji dengan membentuk *heatmap* langsung pada grid 7×7 hasil *RoI Align*, dengan pohon dan bobot yang sama, sedangkan penghapusan posisi tetap dilakukan pada *feature map neck*. Hasilnya dibandingkan dengan proyeksi FPN pada Tabel 4.14, dengan kolom acak untuk metrik lokalisasi.
+
+**Tabel 4.14 Pengaruh Proyeksi FPN terhadap *Faithfulness* dan Lokalisasi *Heatmap***
+
+| **Metrik** | **Dengan FPN** | **Tanpa FPN** | **Acak** |
+|:------------------------|------|------|------|
+| *Necessity* jalur | 0,768 | 0,712 | – |
+| *Deletion* AUC jalur | 0,200 | 0,222 | – |
+| *Insertion* AUC jalur | 0,877 | 0,846 | – |
+| *Pointing Game* | 0,863 | 0,777 | 0,820 |
+| IoU *Heatmap* | 0,769 | 0,757 | 0,760 |
+| *Flip* kedalaman 1 | 0,057 | 0,016 | – |
+| *Flip* kedalaman 2 | 0,298 | 0,065 | – |
+| *Flip* kedalaman 3 | 0,364 | 0,206 | – |
+| *Flip* kedalaman 4 | 0,336 | 0,235 | – |
+| *Flip* kedalaman 5 | 0,353 | 0,153 | – |
+| *Flip* kedalaman 6 | 0,386 | 0,276 | – |
+
+Berdasarkan Tabel 4.14, tanpa proyeksi FPN lokalisasi turun hingga setara dengan peta acak, bahkan *Pointing Game* jatuh di bawahnya, sedangkan *faithfulness* jalur hanya turun sedikit. *Flip* per *node* turun pada semua kedalaman, paling tajam pada kedalaman 2 dan 5. Pada grid 7×7 hasil *RoI Align*, setiap sel mewakili daerah proposal yang luas dan letak kontribusi di dalam sel hilang, sehingga peta tidak dapat menunjuk letak yang tepat. Sementara itu, *faithfulness* tetap berada di atas kontrol acak karena bobot pohonnya sama. Yang rusak adalah letak peta, bukan isi yang ditimbang.
+
+Dua deteksi *mousebite* yang sama dengan Gambar 4.18 ditampilkan kembali dengan *heatmap* tanpa proyeksi FPN pada Gambar 4.21 agar keduanya dapat dibandingkan langsung.
+
+[Gambar 4.21 — SISIPKAN: panel heatmap per node tanpa FPN (grid 7×7), tanpa Grad-CAM, dua TP mousebite yang sama dengan Gambar 4.18 (papers/figures_bab4/gambar_4.21_mousebite_a_tanpa_FPN.png dan gambar_4.21_mousebite_b_tanpa_FPN.png; notebook 06 dengan USE_FPN_HEATMAP=False)]
+
+**Gambar 4.21 *Heatmap* per *Node* tanpa Proyeksi FPN pada Dua Deteksi *Mousebite***
+
+Berdasarkan Gambar 4.21 dan Gambar 4.18, tanpa proyeksi FPN N0 dan N1 kehilangan fokus pada gigitan dan puncaknya berpindah ke sudut proposal. Puncak N10 juga berada di sudut kiri atas, bukan pada kontur gigitan seperti pada Gambar 4.18. N4, N22, dan N46 masih menunjuk gigitan, tetapi petanya lebih melebar dan kasar. Pola ini sejalan dengan *flip* yang turun pada Tabel 4.14 dan menegaskan bahwa proyeksi FPN diperlukan agar setiap peta *node* menunjuk letak yang benar.
+
+Secara keseluruhan, *heatmap* NeSy lebih *faithful* daripada Grad-CAM dengan lokalisasi yang setara, peta setiap *node* dapat diandalkan dan menunjukkan urutan penimbangan yang konsisten untuk setiap kelas, dan proyeksi FPN diperlukan agar letak peta tersebut tepat.
+
+# BAB V KESIMPULAN DAN SARAN
+
+## 5.1 Kesimpulan
+
+Penelitian ini mengintegrasikan *Faster* R-CNN dengan SODT sebagai arsitektur *neuro-symbolic* untuk deteksi cacat PCB pada *dataset* DeepPCB. SODT yang menggantikan kepala klasifikasi mampu mempertahankan akurasi *Faster* R-CNN, dengan mAP@0,5 sebesar 0,974 terhadap 0,979 dan mAP@0,5:0,95 sebesar 0,757 terhadap 0,759, serta *precision* yang justru naik dari 0,910 menjadi 0,923. Dengan akurasi yang terjaga tersebut, NeSy menghasilkan penjelasan yang lebih *faithful* daripada Grad-CAM, ditunjukkan oleh *Necessity* sebesar 0,768 terhadap 0,126 dan *Deletion* AUC sebesar 0,200 terhadap 0,599, dengan lokalisasi yang setara dan waktu per citra yang lebih singkat, yaitu 80,9 ms terhadap 102,5 ms. Penjelasan tersebut tidak hanya berupa satu peta, tetapi *heatmap* pada setiap *node* di jalur keputusan yang terbukti *faithful* pada seluruh kedalaman, sehingga keputusan model dapat ditelusuri dan diinterpretasikan langkah demi langkah, dari konteks di sekitar cacat hingga kontur cacat itu sendiri. Kemampuan ini mendukung akuntabilitas hasil deteksi dan memungkinkan teknisi menelaah lebih dalam dasar setiap keputusan saat validasi. Kedua tujuan penelitian, yaitu mempertahankan performa deteksi sekaligus menyediakan penjelasan yang *faithful* dan lebih baik daripada Grad-CAM, telah tercapai.
+
+## 5.2 Saran
+
+Penelitian ini masih memiliki beberapa keterbatasan. SODT hanya meniru label *teacher*, sehingga RoI cacat yang gagal ditiru menambah *false negative*. Kanal *neck* juga dikurangi menjadi 64 untuk membatasi dimensi masukan SODT, dan evaluasi penjelasan dilakukan secara kuantitatif tanpa melibatkan teknisi. Berdasarkan keterbatasan tersebut, saran untuk penelitian selanjutnya adalah sebagai berikut.
+
+1.  Melatih SODT langsung terhadap *ground truth* alih-alih meniru label *teacher*, agar kinerja pohon tidak lagi dibatasi oleh fidelitasnya terhadap *teacher*.
+
+2.  Menggunakan kanal *neck* penuh sebanyak 256 seperti pada Fung et al. (2024), dengan konsekuensi dimensi masukan SODT naik dari 3.136 menjadi 12.544 dan pelatihan TAO menjadi lebih berat.
+
+3.  Melakukan studi pengguna dengan teknisi inspeksi PCB untuk mengukur dampak penjelasan per *node* terhadap proses validasi hasil deteksi.
 
 # DAFTAR PUSTAKA
-
-Adebayo, J., Gilmer, J., Muelly, M., Goodfellow, I., Hardt, M., Kim, B., 2018. Sanity checks for saliency maps. In: *Advances in Neural Information Processing Systems (NeurIPS)*, 31, pp. 9525–9536.
 
 Ali, A.M.M., Ziyi, X., Sahlan, S., Khamis, N., Nor Rashid, F.’A., 2024. Transparency in Detecting Defects of a Printed Circuit Board: Harnessing XAI for Improved Quality Control in Electronic Manufacturing Industries. In: 2024 IEEE 10th International Conference on Smart Instrumentation, Measurement and Applications (ICSIMA), pp. 1-6.
 
