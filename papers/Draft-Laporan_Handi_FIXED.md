@@ -1322,16 +1322,16 @@ Kinerja per kelas cacat dirangkum pada Tabel 4.3.
 
 **Tabel 4.3 Kinerja *Faster* R-CNN per Kelas Cacat**
 
-|     **Kelas**     | **AP@0,5:0,95** | ***Precision*** | ***Recall*** |
+|     **Kelas**     | **AP@0,5**      | ***Precision*** | ***Recall*** |
 |:-----------------:|-----------------|-----------------|--------------|
-| *Spurious copper* | 0,889           | 0,933           | 0,991        |
-|     *Pinhole*     | 0,862           | 0,799           | 1,000        |
-|    *Mousebite*    | 0,743           | 0,948           | 0,986        |
-|      *Spur*       | 0,726           | 0,961           | 0,977        |
-|      *Open*       | 0,684           | 0,960           | 0,979        |
-|      *Short*      | 0,651           | 0,859           | 0,956        |
+|     *Pinhole*     | 0,992           | 0,799           | 1,000        |
+| *Spurious copper* | 0,988           | 0,933           | 0,991        |
+|    *Mousebite*    | 0,983           | 0,948           | 0,986        |
+|      *Open*       | 0,979           | 0,960           | 0,979        |
+|      *Spur*       | 0,971           | 0,961           | 0,977        |
+|      *Short*      | 0,963           | 0,859           | 0,956        |
 
-Berdasarkan Tabel 4.3, AP tertinggi dicapai *spurious copper* dan *pinhole* yang berbentuk gumpalan atau lubang, sedangkan AP terendah dicapai *short* dan *open* pada jalur konduktor yang diduga memiliki batas cacat lebih ambigu. Karena distribusi kelas relatif seimbang, perbedaan ini tidak berasal dari jumlah data. *Precision* terendah terdapat pada *pinhole* dan *short*, yang penyebabnya ditelusuri melalui *confusion matrix* pada Gambar 4.7.
+Berdasarkan Tabel 4.3, seluruh kelas mencapai AP yang tinggi dengan selisih antarkelas yang kecil. AP tertinggi dicapai *pinhole* dan *spurious copper* yang berbentuk lubang atau gumpalan, sedangkan AP terendah dicapai *short* dan *spur* yang menempel pada jalur konduktor dan diduga lebih sulit dibedakan dari pola jalur normal. Karena distribusi kelas relatif seimbang, perbedaan ini tidak berasal dari jumlah data. *Precision* terendah terdapat pada *pinhole* dan *short*, yang penyebabnya ditelusuri melalui *confusion matrix* pada Gambar 4.7.
 
 [Gambar 4.7]
 
@@ -1432,63 +1432,83 @@ Berdasarkan Gambar 4.10, pintu keluar *background* tersebar pada kedalaman 3 hin
 
 Sebaran sparsitas pohon ini sesuai dengan prediksi Kairgeldin dan Carreira-Perpiñán (2025). Dengan α bernilai kecil, yaitu 0,15, penalti efektif per sampel $\lambda\left| \mathcal{R}_{i} \right|^{\alpha - 1}$ pada Persamaan 2.31 dan 2.32 mengecil untuk *node* yang menerima banyak sampel, sehingga *root* dan *node* di jalur utama memakai 249 hingga 534 *nonzero weight*, sedangkan *node* pada kedalaman 5 hanya 8 hingga 131. Jumlah *nonzero weight* pada *root* juga naik seiring NR, dari 340 pada NR 1 menjadi 488 pada NR *full*, sedangkan λ yang besar, yaitu 20, menjaga sparsitas keseluruhan tetap 97,9%.
 
-Namun, sub-pohon di bawah N19 dan N22 hanya berisi *leaf* cacat tanpa satu pun pintu keluar *background*. Karena *routing* bersifat *hard* tanpa mekanisme koreksi, RoI *background* yang lolos ke kedua sub-pohon tersebut pasti dilabeli cacat. Sub-pohon seperti ini muncul pada keempat konfigurasi NR, sehingga diduga menjadi salah satu sumber *false positive* tambahan di luar yang diwarisi dari *teacher*.
+Namun, sub-pohon di bawah N19 dan N22 hanya berisi *leaf* cacat tanpa satu pun pintu keluar *background*. Karena *routing* bersifat *hard* tanpa mekanisme koreksi, RoI *background* yang lolos ke kedua sub-pohon tersebut pasti dilabeli cacat. Sub-pohon seperti ini muncul pada keempat konfigurasi NR, sehingga diduga menjadi salah satu sumber *false positive* tambahan di luar yang diwarisi dari *teacher*, dan satu contohnya ditunjukkan pada Subbab 4.6.2.
 
 Secara keseluruhan, SODT terpilih meniru *teacher* secara seimbang antarkelas dengan hanya 2,1% *nonzero weight*. Kebocoran sekitar 16.400 RoI *background* dan jalur tanpa pintu keluar *background* diuji dampaknya terhadap deteksi pada Subbab 4.6, sedangkan *nonzero weight* setiap *node* menjadi dasar pembentukan *heatmap* per *node* pada Subbab 4.7.
 
-## 4.6 Evaluasi Kinerja Deteksi Neuro-Symbolic
+## 4.6 Hasil dan Evaluasi Deteksi *Neuro-Symbolic*
 
-1.  **Hasil Keseluruhan**
+Subbab ini mengevaluasi model hibrida, selanjutnya disebut NeSy, terhadap *ground truth* pada 500 citra uji dengan metrik pada Subbab 3.5 dan membandingkannya dengan *Faster* R-CNN. Karena *backbone*, RPN, dan kepala regresi keduanya sama, selisih kinerja sepenuhnya berasal dari penggantian kepala klasifikasi oleh SODT sesuai Subbab 3.8.
 
-Evaluasi kinerja deteksi model Neuro-Symbolic (NeSy) secara keseluruhan diukur menggunakan berbagai metrik standar untuk melihat seberapa baik model terintegrasi ini melokalisasi dan mengklasifikasikan cacat PCB. Hasil metrik deteksi secara agregat disajikan pada Gambar 4.15.
+### 4.6.1 Perbandingan dengan *Faster* R-CNN
 
-[Gambar 4.15]
+Kinerja deteksi kedua model dirangkum pada Tabel 4.7, bersama waktu inferensi rata-rata per citra yang diukur per *batch* pada data uji.
 
-**Gambar 4.15 Metriks deteksi NeSy.**
+**Tabel 4.7 Kinerja Deteksi dan Waktu Inferensi *Faster* R-CNN dan *Neuro-Symbolic***
 
-Model NeSy mencatatkan nilai *Recall* yang sangat tinggi, yaitu 0,985, serta *F1-Score* sebesar 0,897. Nilai *Recall* yang mendekati 1,0 ini mengindikasikan bahwa model hampir tidak melewatkan cacat yang ada pada citra uji (*low false negative*). Namun, terdapat kesenjangan yang cukup signifikan pada nilai *Precision* yang bernilai 0,823 dan *mAP@0.5 yang bernilai* 0,87. Penurunan pada metrik *Precision* dan *mAP* ini tidak disebabkan oleh kegagalan model dalam mendeteksi cacat, melainkan akibat tingginya tingkat *False Positive* yang dihasilkan oleh model. Fenomena penurunan presisi dan *mAP* ini terkonfirmasi secara visual melalui Matriks Konfusi pada Gambar 4.16.
+| **Model** | **mAP@0,5:0,95** | **mAP@0,5** | ***Precision*** | ***Recall*** | **F1** | **Waktu (ms/citra)** |
+|:---------------|------|------|------|------|------|------|
+| *Faster* R-CNN | 0,759 | 0,979 | 0,910 | 0,982 | 0,945 | 85,8 |
+| NeSy | 0,757 | 0,974 | 0,923 | 0,973 | 0,947 | 68,6 |
 
-[Gambar 4.16]
+Berdasarkan Tabel 4.7, mAP NeSy hampir sama dengan *Faster* R-CNN, dengan *precision* sedikit lebih tinggi dan *recall* sedikit lebih rendah. Fidelitas SODT terhadap *teacher* pada Subbab 4.5 terbawa ke tingkat deteksi, sehingga penggantian kepala klasifikasi hanya sedikit menurunkan akurasi. NeSy juga lebih cepat, bukan karena SODT lebih ringan, sebab MLP tetap dijalankan untuk kepala regresi, melainkan diduga karena jumlah kandidat *Soft*-NMS. Setiap RoI pada NeSy hanya menghasilkan satu kandidat kelas dan RoI yang berakhir pada *leaf background* tidak diteruskan, sedangkan pada *Faster* R-CNN hampir seluruh kelas hasil *softmax* lolos ambang skor dan diproses oleh *Soft*-NMS yang berjalan sekuensial.
 
-**Gambar 4.16 *Confusion Matrix* pada Neuro-Symbolic**
+Rincian kinerja per kelas cacat kedua model dirangkum pada Tabel 4.8 dalam bentuk AP@0,5, *precision*, dan *recall*.
 
-Pada baris *\_background\_* di Gambar 4.16, terdapat total 667 *False Positive* di mana area sirkuit normal (*background*) diklasifikasikan secara keliru sebagai salah satu dari enam kelas cacat. Sebaliknya, pada baris kelas cacat, hanya terdapat 47 *False Negative* (cacat yang terlewat dan dikira background). Dominasi *False Positive* dari background inilah yang secara matematis memberikan penalti besar pada perhitungan *Precision* dan *mAP*, sehingga menyebabkan nilai keduanya lebih rendah dibandingkan *Recall.*
+**Tabel 4.8 Kinerja per Kelas Cacat *Faster* R-CNN dan *Neuro-Symbolic***
 
-Meskipun menghasilkan banyak Fal*se Positive* dari *background*, *Confusion Matrix* NeSy pada Gambar 4.16 menunjukkan jumlah True Positive pada beberapa kelas lebih tinggi dibanding model *teacher* (Faster R-CNN). Misalnya pada kelas open yang di mana pada NeSy sebanyak 650 sementara Faster RCNN sebanyak 647. Hal ini menunjukkan bahwa SODT mampu mengklasifikasikan ulang RoI yang sebelumnya salah dikategorikan oleh MLP Faster R-CNN. Namun, hal ini membuat SODT cenderung *over-sensitif* terhadap pola *background* yang kompleks dan mirip dengan cacat yang asli. Oleh karena itu, SODT berhasil memperbaiki batas keputusan untuk kasus-kasus ambigu, tetapi belum cukup selektif dalam membedakan background normal dari cacat mikro
+| **Kelas** | **AP@0,5 *Faster* R-CNN** | **AP@0,5 NeSy** | ***Precision Faster* R-CNN** | ***Precision* NeSy** | ***Recall Faster* R-CNN** | ***Recall* NeSy** |
+|:------------------|------|------|------|------|------|------|
+| *Pinhole* | 0,992 | 0,993 | 0,799 | 0,858 | 1,000 | 0,987 |
+| *Spurious copper* | 0,988 | 0,978 | 0,933 | 0,983 | 0,991 | 0,981 |
+| *Mousebite* | 0,983 | 0,979 | 0,948 | 0,947 | 0,986 | 0,978 |
+| *Open* | 0,979 | 0,977 | 0,960 | 0,964 | 0,979 | 0,979 |
+| *Spur* | 0,971 | 0,968 | 0,961 | 0,973 | 0,977 | 0,957 |
+| *Short* | 0,963 | 0,950 | 0,859 | 0,817 | 0,956 | 0,954 |
 
-Gambar 4.17 menyajikan rincian kinerja deteksi pada tingkat per-kelas. Nilai Recall untuk seluruh kelas cacat berada di atas 0,96, namun nilai Precision bervariasi. Kelas short (0,740) dan spurious_copper (0,760) memiliki presisi terendah, yang mengindikasikan bahwa kedua kelas ini paling sering memicu False Positive dari area background.
+Sumber perubahan *precision* dan *recall* tersebut ditelusuri melalui *confusion matrix* pada Gambar 4.11. Baris menyatakan kelas *ground truth* dan kolom menyatakan prediksi, sehingga baris *background* berisi *false positive* (FP), yaitu deteksi cacat pada daerah tanpa cacat, sedangkan kolom *background* berisi *false negative* (FN), yaitu cacat yang tidak terdeteksi.
 
-[Gambar 4.17]
+[Gambar 4.11 — SISIPKAN: confusion matrix FRCNN | NeSy (notebook 06, sel "Detection Metrics Bar Chart + Confusion Matrix", panel 2–3), run NR 2 + CW]
 
-**Gambar 4.17 Rincian *Precision* dan *Recall* per kelas cacat.**
+**Gambar 4.11 *Confusion Matrix Faster* R-CNN dan *Neuro-Symbolic***
 
-Untuk memvalidasi temuan kuantitatif tersebut secara visual, Gambar 4.18 menyajikan perbandingan hasil inferensi antara Faster R-CNN, NeSy, dan *Ground Truth* (GT). Berdasarkan gambar tersebut, terlihat bahwa NeSy secara umum berhasil mendeteksi mayoritas cacat yang sejalan dengan GT, membuktikan bahwa substitusi MLP dengan SODT tidak mengganggu kemampuan deteksi spasial. Namun, pada beberapa sampel seperti pada Gambar 4.19, NeSy menghasilkan *bounding box* tambahan pada area sirkuit normal, yang secara visual mengonfirmasi bahwa penurunan *Precision* murni disebabkan oleh sensitivitas berlebih terhadap *background*, bukan karena kegagalan melokalisasi cacat yang sebenarnya.
+Berdasarkan Tabel 4.8 dan Gambar 4.11, penurunan *recall* NeSy berasal dari FN yang bertambah dari 46 menjadi 65, sedangkan FP *background* justru turun dari 292 menjadi 236 dan menjelaskan kenaikan *precision*. Penurunan ini diduga berasal dari kecenderungan SODT melabeli *background*, karena SODT dilatih dengan dua RoI *background* untuk setiap RoI cacat sesuai Subbab 4.5.1. Gejalanya sudah tampak pada *agreement* kelas cacat pada Tabel 4.5 yang tidak mencapai 100%, dan Subbab 4.5.2 menunjukkan bahwa makin besar porsi *background*, makin banyak RoI cacat yang tidak ditiru. RoI cacat yang tidak ditiru inilah yang muncul sebagai FN pada tingkat deteksi.
 
-[Gambar 4.18]
+Pada tingkat kelas, pola tersebut mengikuti *agreement* pada Tabel 4.5, meskipun selisih FN setiap kelas paling banyak enam deteksi. FN tidak bertambah pada *short*, kelas dengan bobot dan *agreement* tertinggi, maupun pada *open*, tetapi bertambah pada keempat kelas lainnya dan paling banyak pada *spur* yang *agreement*-nya terendah. Sebaliknya, kenaikan FP *background* hanya terjadi pada *short*, sesuai dengan *class weighting* yang membuat SODT lebih mudah memberi label kelas berbobot terbesar, sehingga *precision short* turun paling besar. *Precision spurious copper* dan *pinhole* justru naik karena FP *background* keduanya berkurang. Kecenderungan SODT pada Subbab 4.5, yaitu condong ke *background* dan diimbangi *class weighting* pada *short*, terbawa hingga tingkat deteksi.
 
-**Gambar 4.18 Perbandingan keberhasilan deteksi pada Neuro-Symbolic dengan Faster RCNN dan *Ground* *Truth*.**
+### 4.6.2 Pengaruh *Routing Margin*
 
-[Gambar 4.19]
+Peran skor berbasis *routing margin* diuji dengan mengganti skor seluruh deteksi menjadi 1 sesuai Subbab 3.9, tanpa mengubah jalur maupun label. Hasilnya ditunjukkan pada Tabel 4.9, dengan Δ sebagai selisih antara kondisi dengan dan tanpa *routing margin*.
+**Tabel 4.9 Pengaruh *Routing Margin* terhadap Kinerja Deteksi *Neuro-Symbolic***
 
-**Gambar 4.19 Perbandingan kegagalan deteksi pada Neuro-Symbolic dengan Faster RCNN dan *Ground* *Truth*.**
+| **Metrik** | **Dengan *Routing Margin*** | **Tanpa *Routing Margin*** | **Δ** |
+|:------------------------|------|------|------|
+| mAP@0,5 | 0,974 | 0,821 | +0,153 |
+| *Precision* | 0,923 | 0,787 | +0,135 |
+| *Recall* | 0,973 | 0,983 | −0,010 |
+| F1 | 0,947 | 0,874 | +0,073 |
+| AP@0,5 *open* | 0,977 | 0,855 | +0,122 |
+| AP@0,5 *short* | 0,950 | 0,706 | +0,244 |
+| AP@0,5 *mousebite* | 0,979 | 0,873 | +0,106 |
+| AP@0,5 *spur* | 0,968 | 0,842 | +0,126 |
+| AP@0,5 *spurious copper* | 0,978 | 0,847 | +0,131 |
+| AP@0,5 *pinhole* | 0,993 | 0,801 | +0,192 |
 
-2.  **Analisis Kegagalan Deteksi NeSy**
+*Confusion matrix* NeSy tanpa *routing margin* ditunjukkan pada Gambar 4.12 dengan cara baca yang sama seperti Gambar 4.11.
 
-Berdasarkan evaluasi pada subbab sebelumnya, penurunan *Precision* dan *mAP* secara fundamental disebabkan oleh tingginya *False Positive* yang berasal dari area *background*. Kesalahan ini tidak terjadi secara acak, melainkan dipicu oleh pola-pola spesifik pada area sirkuit normal. Analisis difokuskan pada empat kelas dengan tingkat kesalahan signifikan, yaitu *short*, *spur*, *pinhole*, dan *spurious_copper*. Untuk mengungkap akar masalah ini, komparasi visual antara prediksi NeSy, *Ground Truth*, dan pola unik pada sirkuit yang disajikan pada gambar-gambar berikut.
+[Gambar 4.12 — SISIPKAN: confusion matrix "NeSy — margin OFF" (notebook 06, sel ablation routing-margin, panel 3), run NR 2 + CW]
 
-a.  Kelas Short
+**Gambar 4.12 *Confusion Matrix Neuro-Symbolic* tanpa *Routing Margin***
 
-Tingginya tingkat *False Positive* pada kelas *short* berbanding lurus dengan rendahnya jumlah RoI untuk kelas ini, yang hanya mencapai 1,87% pada data pelatihan dan merupakan yang paling rendah dibandingkan kelas lainnya sebagaimana dirangkum pada Tabel 4.4. Ketidakseimbangan data ini menyebabkan SODT kesulitan mempelajari variasi pola *short* secara komprehensif. Untuk memvisualisasikan dampak keterbatasan ini, Gambar 4.20 menyajikan komparasi visual deteksi pada kelas *short*.
+Berdasarkan Tabel 4.9 dan Gambar 4.12, tanpa *routing margin* mAP dan *precision* turun tajam, sedangkan *recall* sedikit naik. FP *background* naik dari 236 menjadi 817, atau sekitar 3,5 kali, dan salah kelas antarcacat naik dari 27 menjadi 127. Dengan skor yang seragam, deteksi yang ragu tidak lagi tersaring oleh ambang skor dan AP kehilangan urutan antara deteksi yang yakin dan yang ragu, sedangkan *recall* naik karena lebih sedikit deteksi yang jatuh di bawah ambang. Penurunan AP terbesar terjadi pada *short* dan *pinhole*, dua kelas dengan FP *background* terbanyak. Kebocoran RoI *background* pada Subbab 4.5.1 memang terbawa ke deteksi, dan *routing margin* yang menekannya.
 
-*Gambar 4.20 Komparasi visual False Positive pada kelas short.*
+Mekanisme penyaringan tersebut diperlihatkan pada Gambar 4.13 untuk dua deteksi *pinhole*, yaitu deteksi A berupa *true positive* dan deteksi B berupa *false positive* pada daerah *background*.
 
-Berdasarkan Gambar 4.20, SODT cenderung gagal mendeteksi *short* yang memiliki benjolan atau terlalu pendek. Sebaliknya, SODT lebih mampu mendeteksi *short* yang relatif panjang dan tidak memiliki timbulan.
+[Gambar 4.13 — SISIPKAN: panel "Routing margin per node" saja, tanpa pohon; baris A = deteksi #7 pinhole 0,91 (TP, jalur N0–N1–N4–N10–N22–N46), baris B = deteksi #15 pinhole 0,55 (FP background, jalur N0–N1–N4–N9–N19–N40); skor dan jalur ditulis pada judul tiap baris panel (notebook 06, sel 5 per-image explanation)]
 
-b.  Kelas Spur
+**Gambar 4.13 *Routing Margin* per *Node* pada Deteksi *True Positive* dan *False Positive***
 
-Meskipun jumlah *Region of Interest* untuk kelas *spur* tergolong seimbang dengan persentase 2,15% pada data pelatihan seperti pada Tabel 4.4, SODT menunjukkan keterbatasan dalam menangani variasi orientasi geometris cacat ini. Pola kesalahan deteksi pada kelas *spur* diilustrasikan secara visual pada Gambar 4.21.
-
-c.  
+Setiap panel pada Gambar 4.13 mewakili satu *node*, dengan garis diagonal sebagai *split* dan garis putus-putus sebagai jarak RoI ke *split* yang sebanding dengan $\left| f_{i}(x) \right|$ pada Persamaan 3.3. Berdasarkan Gambar 4.13, A relatif jauh dari *split* pada seluruh *node*, sedangkan B mendekati *split* pada N4, N9, dan N19. Setelah N9, *node* terakhir yang masih memiliki jalan menuju *background*, B masuk ke sub-pohon N19 dan pasti dilabeli cacat sesuai dugaan pada Subbab 4.5.3. *Routing margin* tidak mengubah label ini, tetapi menempatkan B di bawah A meskipun skornya masih lolos ambang sebagai FP. Sementara itu, A melewati sub-pohon N22 dengan yakin, jadi sub-pohon tanpa pintu keluar *background* tetap sah untuk cacat sebenarnya. Secara keseluruhan, NeSy mempertahankan akurasi *Faster* R-CNN dengan *routing margin* sebagai penyaring deteksi yang ragu, sedangkan kualitas penjelasannya dievaluasi pada Subbab 4.7.
 
 ## 4.7 Hasil dan Evaluasi *Explanation* pada Neuro-Symbolic
 
