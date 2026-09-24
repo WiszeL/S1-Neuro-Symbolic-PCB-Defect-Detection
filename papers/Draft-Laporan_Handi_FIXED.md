@@ -1440,16 +1440,16 @@ Secara keseluruhan, SODT terpilih meniru *teacher* secara seimbang antarkelas de
 
 Subbab ini mengevaluasi model hibrida, selanjutnya disebut NeSy, terhadap *ground truth* pada 500 citra uji dengan metrik pada Subbab 3.5 dan membandingkannya dengan *Faster* R-CNN. Karena *backbone*, RPN, dan kepala regresi keduanya sama, selisih kinerja sepenuhnya berasal dari penggantian kepala klasifikasi oleh SODT sesuai Subbab 3.8.
 
-### 4.6.1 Perbandingan dengan *Faster* R-CNN
+### 4.6.1 Kinerja Deteksi *Neuro-Symbolic*
 
-Kinerja deteksi kedua model dirangkum pada Tabel 4.7, bersama waktu inferensi rata-rata per citra yang diukur per *batch* pada data uji.
+Kinerja deteksi NeSy dirangkum pada Tabel 4.7 dengan *Faster* R-CNN sebagai pembanding, bersama waktu rata-rata per citra dari tiga kali pengukuran pada data uji. Waktu NeSy sudah mencakup pembentukan *heatmap* per *node*, sedangkan waktu *Faster* R-CNN hanya mencakup deteksi.
 
 **Tabel 4.7 Kinerja Deteksi dan Waktu Inferensi *Faster* R-CNN dan *Neuro-Symbolic***
 
 | **Model** | **mAP@0,5:0,95** | **mAP@0,5** | ***Precision*** | ***Recall*** | **F1** | **Waktu (ms/citra)** |
 |:---------------|------|------|------|------|------|------|
-| *Faster* R-CNN | 0,759 | 0,979 | 0,910 | 0,982 | 0,945 | 85,8 |
-| NeSy | 0,757 | 0,974 | 0,923 | 0,973 | 0,947 | 68,6 |
+| *Faster* R-CNN | 0,759 | 0,979 | 0,910 | 0,982 | 0,945 | 76,9 ± 30,9 |
+| NeSy | 0,757 | 0,974 | 0,923 | 0,973 | 0,947 | 80,9 ± 11,7 |
 
 Berdasarkan Tabel 4.7, mAP NeSy hampir sama dengan *Faster* R-CNN, dengan *precision* sedikit lebih tinggi dan *recall* sedikit lebih rendah. Fidelitas SODT terhadap *teacher* pada Subbab 4.5 terbawa ke tingkat deteksi, sehingga penggantian kepala klasifikasi hanya sedikit menurunkan akurasi. NeSy juga lebih cepat, bukan karena SODT lebih ringan, sebab MLP tetap dijalankan untuk kepala regresi, melainkan diduga karena jumlah kandidat *Soft*-NMS. Setiap RoI pada NeSy hanya menghasilkan satu kandidat kelas dan RoI yang berakhir pada *leaf background* tidak diteruskan, sedangkan pada *Faster* R-CNN hampir seluruh kelas hasil *softmax* lolos ambang skor dan diproses oleh *Soft*-NMS yang berjalan sekuensial.
 
