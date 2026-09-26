@@ -1258,7 +1258,7 @@ Seluruhnya dibandingkan dengan Grad-CAM, yang dihitung pada *feature map neck* t
 4. Posisi tersebut dinolkan untuk *Necessity* sesuai Persamaan 2.41 dan disisakan untuk *Sufficiency* sesuai Persamaan 2.42, lalu *RoI Align* dijalankan ulang dan label diperiksa, kemudian *Deletion* dan *Insertion* AUC pada Persamaan 2.43 dihitung dengan menghapus atau menambahkan posisi tersebut secara bertahap dalam lima tahap.
 5. Langkah 3 dan 4 diulang dengan posisi yang dipilih secara acak sebagai *random control*.
 6. Setiap peta di-*resample* ke grid 7×7, lalu *Pointing Game* dan IoU *Heatmap* dihitung pada proposal ber-IoU rendah (*low-IoU proposal*), yaitu proposal dengan IoU 0,05–0,35 terhadap *ground truth* dan dilabeli cacat oleh kedua model, agar *Pointing Game* tidak trivial.
-7. Untuk setiap *node* aktif, 50% posisi tertinggi $H_{i}$ dihapus dan pembalikan tanda $f_{i}(x)$ diperiksa, lalu *Deletion* dan *Insertion* AUC terhadap *routing margin* *node* dihitung dalam lima tahap.
+7. Untuk setiap *node* aktif, 50% posisi tertinggi $H_{i}$ dihapus dan pembalikan tanda $f_{i}(x)$ diperiksa sebagai *Necessity* sesuai Persamaan 2.41, lalu *Deletion* dan *Insertion* AUC terhadap *routing margin* *node* dihitung dalam lima tahap.
 8. Deteksi kedua model dan *ground truth* ditampilkan berdampingan, dengan *decision path* dan *heatmap* setiap *node* di samping peta Grad-CAM.
 
 # BAB IV HASIL DAN PEMBAHASAN
@@ -1535,7 +1535,7 @@ Setiap panel pada Gambar 4.13 mewakili satu *node*, dengan garis diagonal sebaga
 
 ### 4.7.1 *Faithfulness* dan Lokalisasi *Explanation*
 
-Karena Grad-CAM hanya menghasilkan satu peta per deteksi, *faithfulness* NeSy dihitung pada peta gabungan M sesuai Persamaan 3.8, dan setiap metode dibaca terhadap *random control* masing-masing sesuai Subbab 3.9. Hasilnya ditunjukkan pada Tabel 4.10, dengan *Necessity*, *Sufficiency*, dan *Insertion* AUC yang lebih tinggi serta *Deletion* AUC yang lebih rendah menandakan *explanation* yang lebih *faithful*.
+Karena Grad-CAM hanya menghasilkan satu peta per deteksi, *faithfulness* NeSy dibandingkan pada peta gabungan M sesuai Persamaan 3.8, dengan *random control* masing-masing sesuai Subbab 3.9. Hasilnya ditunjukkan pada Tabel 4.10.
 
 **Tabel 4.10 *Faithfulness Explanation Neuro-Symbolic* dan Grad-CAM**
 
@@ -1546,11 +1546,32 @@ Karena Grad-CAM hanya menghasilkan satu peta per deteksi, *faithfulness* NeSy di
 | Grad-CAM | 0,126 | 0,975 | 0,599 | 0,846 |
 | Grad-CAM acak | 0,018 | 0,983 | 0,758 | 0,758 |
 
-Berdasarkan Tabel 4.10, NeSy terpisah jauh dari NeSy acak pada *Necessity*, *Deletion* AUC, dan *Insertion* AUC, sedangkan Grad-CAM hanya sedikit lebih baik daripada Grad-CAM acak. *Sufficiency* hampir penuh pada seluruh baris, termasuk *random control*, karena sebagian posisi saja sudah cukup mempertahankan label, sehingga metrik ini tidak membedakan kedua metode. Peta NeSy merupakan dekomposisi eksak kontribusi fitur yang benar-benar dipakai setiap *node* sesuai Persamaan 3.5 hingga 3.7, sedangkan Grad-CAM merata-ratakan gradien per kanal dan membuang bagian negatifnya melalui ReLU. Rendahnya *Necessity* Grad-CAM menunjukkan bahwa keputusan MLP tersebar di banyak posisi, sehingga menghapus *region* yang disorot Grad-CAM jarang mengubah label. *Necessity* NeSy acak yang sangat rendah menunjukkan bahwa *Necessity* yang tinggi tidak berasal dari pohon yang mudah berubah label oleh penghapusan sembarang.
+Berdasarkan Tabel 4.10, NeSy terpisah jauh dari NeSy acak pada *Necessity*, *Deletion* AUC, dan *Insertion* AUC, sedangkan Grad-CAM hanya sedikit lebih baik daripada Grad-CAM acak. Peta NeSy merupakan dekomposisi eksak kontribusi fitur setiap *node* sesuai Persamaan 3.5 hingga 3.7, sedangkan Grad-CAM merata-ratakan gradien per kanal dan membuang bagian negatifnya melalui ReLU, sehingga menghapus *region* yang disorotnya jarang mengubah label. *Sufficiency* hampir penuh pada seluruh baris, termasuk *random control*, sehingga metrik ini tidak membedakan kedua metode.
 
-Lokalisasi diukur dengan *Pointing Game* dan IoU *Heatmap* pada *low-IoU proposal* sesuai Algoritma 3.5, bersama peta acak sebagai *random control*. Hasilnya ditunjukkan pada Tabel 4.11.
+Peta M hanya dipakai untuk perbandingan tersebut, sedangkan keluaran *explanation* NeSy yang sebenarnya adalah *heatmap* setiap *node*. Keandalannya diuji sesuai langkah 7 Algoritma 3.5 pada sekitar 3.310 deteksi di setiap kedalaman, sebagaimana ditunjukkan pada Tabel 4.11, dengan *Necessity* seluruh kotak sebagai *Necessity* saat seluruh isi proposal dihapus dan *support* sebagai porsi proposal yang mendapat kontribusi *node*.
 
-**Tabel 4.11 Lokalisasi *Explanation Neuro-Symbolic* dan Grad-CAM**
+**Tabel 4.11 *Faithfulness* per *Node* pada Setiap Kedalaman**
+
+| **Kedalaman** | **Peta** | ***Necessity*** | ***Necessity* Seluruh Kotak** | ***Deletion* AUC** | ***Insertion* AUC** | ***Support*** |
+|:------|:------|------|------|------|------|------|
+| 1 | NeSy | 0,057 | 0,000 | 0,611 | 0,947 | 0,544 |
+|   | Acak | 0,000 | – | 0,859 | 0,859 | – |
+| 2 | NeSy | 0,298 | 0,999 | 0,641 | 0,948 | 0,544 |
+|   | Acak | 0,001 | – | 0,889 | 0,889 | – |
+| 3 | NeSy | 0,364 | 0,824 | 0,624 | 0,944 | 0,544 |
+|   | Acak | 0,006 | – | 0,859 | 0,858 | – |
+| 4 | NeSy | 0,336 | 0,623 | 0,629 | 0,949 | 0,544 |
+|   | Acak | 0,008 | – | 0,886 | 0,885 | – |
+| 5 | NeSy | 0,353 | 0,347 | 0,566 | 0,950 | 0,416 |
+|   | Acak | 0,002 | – | 0,877 | 0,877 | – |
+| 6 | NeSy | 0,386 | 0,297 | 0,570 | 0,951 | 0,297 |
+|   | Acak | 0,011 | – | 0,855 | 0,856 | – |
+
+Berdasarkan Tabel 4.11, peta setiap *node* lebih *faithful* daripada posisi acak pada semua kedalaman, sedangkan *random control* hampir tidak pernah membalik keputusan. Rendahnya *Necessity* pada kedalaman 1 tidak menandakan peta yang keliru, karena keputusan N0 tidak berbalik bahkan ketika seluruh isi proposal dihapus. Pada kedalaman 5 dan 6, *Necessity* justru melebihi *Necessity* seluruh kotak karena bukti pendukung hilang sementara bukti ke arah sebaliknya tetap tersisa, dan *support* yang menyempit menunjukkan bahwa *node* dalam menimbang *region* yang lebih kecil.
+
+Lokalisasi diukur dengan *Pointing Game* dan IoU *Heatmap* pada *low-IoU proposal* sesuai Algoritma 3.5, sebagaimana ditunjukkan pada Tabel 4.12.
+
+**Tabel 4.12 Lokalisasi *Explanation Neuro-Symbolic* dan Grad-CAM**
 
 | **Metode** | ***Pointing Game*** | **IoU *Heatmap*** |
 |:------------------|------|------|
@@ -1558,34 +1579,19 @@ Lokalisasi diukur dengan *Pointing Game* dan IoU *Heatmap* pada *low-IoU proposa
 | Grad-CAM | 0,882 | 0,790 |
 | Acak | 0,820 | 0,760 |
 
-Berdasarkan Tabel 4.11, lokalisasi NeSy hampir sama dengan Grad-CAM dan keduanya berada di atas peta acak. Lokalisasi di sini berfungsi sebagai pemeriksaan kewajaran, yaitu memastikan *heatmap* NeSy menunjuk *region* cacat seperti metode yang sudah umum dipakai, bukan *region* sembarang. Jarak terhadap peta acak kecil karena satu posisi *feature map neck* mencakup *region* citra yang jauh lebih luas daripada proposal, sehingga lokalisasi pada tingkat ini kasar bagi kedua metode. Dengan lokalisasi yang setara, pembeda kedua metode terletak pada *faithfulness*.
+Berdasarkan Tabel 4.12, lokalisasi NeSy hampir sama dengan Grad-CAM dan keduanya berada di atas peta acak, sehingga *heatmap* NeSy menunjuk *region* cacat seperti metode yang umum dipakai. Jaraknya terhadap peta acak kecil karena satu posisi *feature map neck* mencakup *region* citra yang jauh lebih luas daripada proposal. Dengan lokalisasi yang setara, pembeda kedua metode terletak pada *faithfulness*.
 
-Contoh *explanation* kedua metode untuk satu deteksi *spur* ditunjukkan pada Gambar 4.14, dengan *heatmap* setiap *node* NeSy disusun dari atas ke bawah sesuai urutan *decision path* dan peta Grad-CAM di sampingnya.
+Pada pengukuran yang sama dengan Tabel 4.7, *Faster* R-CNN dengan Grad-CAM memerlukan 102,5 ± 32,5 ms per citra, atau sekitar 1,3 kali waktu NeSy. NeSy cukup menjalankan ulang *RoI Align* pada *feature map* yang sudah tersedia, sedangkan Grad-CAM harus menjalankan ulang *backbone* dan propagasi mundur hingga *feature map neck* untuk setiap deteksi.
+
+### 4.7.2 Analisis *Heatmap* per *Node*
+
+Perbedaan *explanation* NeSy dan Grad-CAM secara visual ditunjukkan pada Gambar 4.14 untuk satu deteksi *spur*, dengan *heatmap* setiap *node* NeSy disusun sesuai urutan *decision path* dan peta Grad-CAM di sampingnya.
 
 [Gambar 4.14 — SISIPKAN: heatmap per node NeSy (jalur N0–N1–N4–N10–N22–N45) + Grad-CAM Focus, deteksi spur 0,88 (notebook 06, sel 5 per-image explanation)]
 
 **Gambar 4.14 *Heatmap* per *Node Neuro-Symbolic* dan Grad-CAM pada Deteksi *Spur***
 
-Berdasarkan Gambar 4.14, Grad-CAM hanya memberi satu peta yang menyebar hingga keluar proposal dan di sepanjang jalur tembaga, sedangkan NeSy memperlihatkan *region* yang ditimbang pada setiap langkah keputusan. *Node* atas cenderung menimbang *region* yang luas, sedangkan *node* dalam seperti N22 dan N45 memusat pada tonjolan *spur*. Peta per *node* inilah keluaran *explanation* NeSy yang sebenarnya, sedangkan peta M hanya dipakai untuk perbandingan pada Tabel 4.10 dan 4.11. Keandalan setiap peta per *node* diuji pada Subbab 4.7.2.
-
-Waktu deteksi beserta *explanation* diambil dari pengukuran yang sama dengan Tabel 4.7 sesuai Subbab 3.9. *Faster* R-CNN dengan Grad-CAM memerlukan 102,5 ± 32,5 ms per citra, atau sekitar 1,3 kali waktu NeSy, dengan jumlah deteksi yang dijelaskan per citra hampir sama. NeSy cukup menjalankan ulang *RoI Align* pada *feature map* yang sudah tersedia dari deteksi, sedangkan Grad-CAM harus menjalankan ulang *backbone* dengan gradien, lalu melakukan propagasi mundur dari skor kelas hingga *feature map neck* untuk setiap deteksi.
-
-### 4.7.2 Analisis *Heatmap* per *Node*
-
-Keandalan *heatmap* setiap *node* diuji sesuai langkah 7 Algoritma 3.5 pada sekitar 3.310 deteksi di setiap kedalaman. Hasilnya ditunjukkan pada Tabel 4.12 dalam format NeSy / acak, dengan kolom *flip* seluruh kotak sebagai pembalikan keputusan saat seluruh isi proposal dihapus dan *support* sebagai porsi proposal yang mendapat kontribusi *node*.
-
-**Tabel 4.12 *Faithfulness* per *Node* pada Setiap Kedalaman**
-
-| **Kedalaman** | ***Flip*** | ***Flip* Seluruh Kotak** | ***Deletion* AUC** | ***Insertion* AUC** | ***Support*** |
-|:------|------|------|------|------|------|
-| 1 | 0,057 / 0,000 | 0,000 | 0,611 / 0,859 | 0,947 / 0,859 | 0,544 |
-| 2 | 0,298 / 0,001 | 0,999 | 0,641 / 0,889 | 0,948 / 0,889 | 0,544 |
-| 3 | 0,364 / 0,006 | 0,824 | 0,624 / 0,859 | 0,944 / 0,858 | 0,544 |
-| 4 | 0,336 / 0,008 | 0,623 | 0,629 / 0,886 | 0,949 / 0,885 | 0,544 |
-| 5 | 0,353 / 0,002 | 0,347 | 0,566 / 0,877 | 0,950 / 0,877 | 0,416 |
-| 6 | 0,386 / 0,011 | 0,297 | 0,570 / 0,855 | 0,951 / 0,856 | 0,297 |
-
-Berdasarkan Tabel 4.12, peta setiap *node* jauh lebih menentukan daripada posisi acak pada semua kedalaman, dengan *flip* dan *Insertion* AUC yang lebih tinggi serta *Deletion* AUC yang lebih rendah, sedangkan *random control* hampir tidak pernah membalik keputusan. Kedalaman 1 menjadi pengecualian karena keputusan N0 tidak berbalik bahkan ketika seluruh isi proposal dihapus. Keputusan *root* untuk deteksi cacat hampir tidak bergantung pada isi proposal, sehingga rendahnya *flip* tidak menandakan peta yang keliru. Pada kedalaman 5 dan 6, menghapus *region* yang ditimbang saja justru lebih sering membalik keputusan daripada menghapus seluruh kotak, karena bukti pendukung hilang sementara bukti ke arah sebaliknya tetap tersisa. *Support* yang menyempit pada kedua kedalaman tersebut juga menunjukkan bahwa *node* dalam menimbang *region* yang lebih kecil.
+Berdasarkan Gambar 4.14, Grad-CAM hanya memberi satu peta yang menyebar hingga keluar proposal dan di sepanjang jalur tembaga, sedangkan NeSy memperlihatkan *region* yang ditimbang pada setiap langkah keputusan.
 
 *Region* yang ditimbang setiap *node* ditelaah pada dua TP per kelas yang dipilih secara acak dari deteksi berskor minimal 0,5. Panel pada setiap gambar disusun dari kedalaman 1 di atas hingga kedalaman 6 di bawah dan dinormalisasi terhadap puncaknya masing-masing, dengan warna hitam sebagai tembaga dan abu-abu sebagai substrat. *Heatmap* per *node* untuk kelas *spur* ditunjukkan pada Gambar 4.15.
 
@@ -1648,7 +1654,7 @@ Pola dari Gambar 4.15 hingga 4.20 dirangkum pada Tabel 4.13 menurut kelompok ked
 | *Open* | N0–N1–N4–N10–N21–N43 | Sekitar celah dan tepi bawah proposal | Ujung jalur yang terputus, lalu celahnya | Ujung jalur di tepi celah |
 | *Short* | N0–N1–N4–N9–N19–N39 | Sudut dan tepi bawah proposal | Jembatan tembaga, lalu tepi bawah proposal | Pita penghubung antarjalur |
 
-Berdasarkan Tabel 4.13, dua deteksi dari kelas yang sama selalu menempuh *decision path* yang sama, dan urutan penimbangannya berulang. Kedalaman 1 dan 2 menimbang konteks di sekitar cacat, terutama sudut dan tepi bawah proposal, dengan pola yang serupa untuk semua kelas. Mulai kedalaman 3, penimbangan berpindah ke cacat itu sendiri, lalu pada kedalaman 5 dan 6 menyempit ke tepi atau kontur cacat alih-alih pusatnya, sejalan dengan *support* yang menurun pada Tabel 4.12. Setiap langkah keputusan NeSy pun dapat dibaca sebagai *region* tertentu yang ditimbang, dan keandalan setiap peta tersebut telah ditunjukkan pada Tabel 4.12.
+Berdasarkan Tabel 4.13, dua deteksi dari kelas yang sama selalu menempuh *decision path* yang sama, dan urutan penimbangannya berulang. Kedalaman 1 dan 2 menimbang konteks di sekitar cacat, terutama sudut dan tepi bawah proposal, dengan pola yang serupa untuk semua kelas. Mulai kedalaman 3, penimbangan berpindah ke cacat itu sendiri, lalu pada kedalaman 5 dan 6 menyempit ke tepi atau kontur cacat alih-alih pusatnya, sejalan dengan *support* yang menurun pada Tabel 4.11. Setiap langkah keputusan NeSy pun dapat dibaca sebagai *region* tertentu yang ditimbang, dan keandalan setiap peta tersebut telah ditunjukkan pada Tabel 4.11.
 
 ### 4.7.3 Pengaruh Proyeksi FPN terhadap *Heatmap*
 
@@ -1663,22 +1669,22 @@ Pilihan pada Subbab 3.8 untuk menghitung *heatmap* pada *feature map neck*, sela
 | *Insertion* AUC tingkat *decision path* | 0,877 | 0,846 | – |
 | *Pointing Game* | 0,863 | 0,777 | 0,820 |
 | IoU *Heatmap* | 0,769 | 0,757 | 0,760 |
-| *Flip* kedalaman 1 | 0,057 | 0,016 | – |
-| *Flip* kedalaman 2 | 0,298 | 0,065 | – |
-| *Flip* kedalaman 3 | 0,364 | 0,206 | – |
-| *Flip* kedalaman 4 | 0,336 | 0,235 | – |
-| *Flip* kedalaman 5 | 0,353 | 0,153 | – |
-| *Flip* kedalaman 6 | 0,386 | 0,276 | – |
+| *Necessity* kedalaman 1 | 0,057 | 0,016 | – |
+| *Necessity* kedalaman 2 | 0,298 | 0,065 | – |
+| *Necessity* kedalaman 3 | 0,364 | 0,206 | – |
+| *Necessity* kedalaman 4 | 0,336 | 0,235 | – |
+| *Necessity* kedalaman 5 | 0,353 | 0,153 | – |
+| *Necessity* kedalaman 6 | 0,386 | 0,276 | – |
 
-Berdasarkan Tabel 4.14, tanpa proyeksi FPN lokalisasi turun hingga setara dengan peta acak, bahkan *Pointing Game* jatuh di bawahnya, sedangkan *faithfulness* tingkat *decision path* hanya turun sedikit. *Flip* per *node* turun pada semua kedalaman, paling tajam pada kedalaman 2 dan 5. Pada grid 7×7 hasil *RoI Align*, setiap sel mewakili *region* proposal yang luas dan letak kontribusi di dalam sel hilang, sehingga peta tidak dapat menunjuk letak yang tepat. Sementara itu, *faithfulness* tetap berada di atas *random control* karena bobot pohonnya sama. Yang rusak adalah letak peta, bukan isi yang ditimbang.
+Berdasarkan Tabel 4.14, tanpa proyeksi FPN lokalisasi turun hingga setara dengan peta acak, bahkan *Pointing Game* jatuh di bawahnya, sedangkan *faithfulness* tingkat *decision path* hanya turun sedikit. *Necessity* per *node* turun pada semua kedalaman, paling tajam pada kedalaman 2 dan 5. Pada grid 7×7 hasil *RoI Align*, setiap sel mewakili *region* proposal yang luas dan letak kontribusi di dalam sel hilang, sehingga peta tidak dapat menunjuk letak yang tepat. Sementara itu, *faithfulness* tetap berada di atas *random control* karena bobot pohonnya sama. Yang rusak adalah letak peta, bukan isi yang ditimbang.
 
-Dua deteksi *mousebite* yang sama dengan Gambar 4.18 ditampilkan kembali dengan *heatmap* tanpa proyeksi FPN pada Gambar 4.21 agar keduanya dapat dibandingkan langsung.
+Satu deteksi *mousebite* ditampilkan dengan *heatmap* tanpa dan dengan proyeksi FPN secara berdampingan pada Gambar 4.21.
 
-[Gambar 4.21 — SISIPKAN: panel heatmap per node tanpa FPN (grid 7×7), tanpa Grad-CAM, dua TP mousebite yang sama dengan Gambar 4.18 (papers/figures_bab4/gambar_4.21_mousebite_a_tanpa_FPN.png dan gambar_4.21_mousebite_b_tanpa_FPN.png; notebook 06 dengan USE_FPN_HEATMAP=False)]
+[Gambar 4.21 — SISIPKAN: panel heatmap per node satu TP mousebite, kolom kiri tanpa FPN (grid 7×7) dan kolom kanan dengan FPN, jalur N0–N1–N4–N10–N22–N46]
 
-**Gambar 4.21 *Heatmap* per *Node* tanpa Proyeksi FPN pada Dua Deteksi *Mousebite***
+**Gambar 4.21 *Heatmap* per *Node* tanpa dan dengan Proyeksi FPN pada Deteksi *Mousebite***
 
-Berdasarkan Gambar 4.21 dan Gambar 4.18, tanpa proyeksi FPN N0 dan N1 kehilangan fokus pada gigitan dan puncaknya berpindah ke sudut proposal. Puncak N10 juga berada di sudut kiri atas, bukan pada kontur gigitan seperti pada Gambar 4.18. N4, N22, dan N46 masih menunjuk gigitan, tetapi petanya lebih melebar dan kasar. Pola ini sejalan dengan *flip* yang turun pada Tabel 4.14 dan menegaskan bahwa proyeksi FPN diperlukan agar setiap peta *node* menunjuk letak yang benar.
+Berdasarkan Gambar 4.21, tanpa proyeksi FPN N0 kehilangan penimbangan pada pangkal gigitan sehingga yang tersisa hanya sudut proposal. Peta N4 menyusut menjadi satu titik di pangkal gigitan, padahal dengan proyeksi FPN mencakup seluruh lekukan. N22 melebar ke substrat di kiri gigitan dan tepi kanan proposal, sedangkan dengan proyeksi FPN memusat pada pangkal gigitan. N1, N10, dan N46 menunjuk *region* yang hampir sama pada kedua peta. Pola ini sejalan dengan *Necessity* per *node* yang turun pada Tabel 4.14 dan menegaskan bahwa proyeksi FPN diperlukan agar setiap peta *node* menunjuk letak yang benar.
 
 # BAB V KESIMPULAN DAN SARAN
 
