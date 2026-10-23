@@ -26,8 +26,8 @@ preprocessing:
   std: [0.229, 0.224, 0.225]
 
 train:
-  epochs: 15
-  grad_accumulation_steps: 4
+  epochs: 12
+  grad_accumulation_steps: 2
 
   # Optimizer
   opt_lr: 0.02

@@ -1,14 +1,16 @@
 net:
   backbone_pretrained: true
   backbone_freeze_batch_norm: true
+  out_channels: 64
+  sf_upsample: nearest
 
 anchors:
   sizes:
-    - [16]
     - [32]
     - [64]
     - [128]
     - [256]
+    - [512]
   aspect_ratios:
     - [0.5, 1.0, 2.0]
     - [0.5, 1.0, 2.0]

@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 # Model config
 
@@ -6,6 +6,9 @@ from typing import Literal, TypedDict
 class NetConfig(TypedDict):
     backbone_pretrained: bool
     backbone_freeze_batch_norm: bool
+    # Absent in checkpoints saved before these knobs: read as 64 / "nearest".
+    out_channels: NotRequired[int]
+    sf_upsample: NotRequired[Literal["cp", "nearest"]]
 
 
 class AnchorConfig(TypedDict):
