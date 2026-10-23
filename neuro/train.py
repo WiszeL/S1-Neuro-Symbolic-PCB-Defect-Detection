@@ -81,10 +81,7 @@ def train_one_epoch(
         mininterval=1.0,
     )
     for batch_index, (images, targets) in enumerate(progress):
-        # Warmup counts optimizer steps (as mmdet does), not micro-batches.
-        global_step = (
-            epoch_index * len(data_loader) + batch_index
-        ) // grad_accumulation_steps
+        global_step = epoch_index * len(data_loader) + batch_index
         current_lr = set_scheduled_learning_rate(
             optimizer=optimizer,
             base_lrs=base_lrs,

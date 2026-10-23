@@ -33,16 +33,11 @@ class ResNet50Extractor(nn.Module):
         freeze_batch_norm: bool = True,
     ) -> None:
         super().__init__()
-        # V1 is the weight mmdet's Faster R-CNN recipe starts from.
-        weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
+        weights = ResNet50_Weights.DEFAULT if pretrained else None
         backbone = resnet50(weights=weights)
 
         if freeze_batch_norm:
             self.replace_batch_norm_with_frozen_batch_norm(backbone)
-
-        # mmdet frozen_stages=1: the stem and layer1 stay fixed.
-        for module in (backbone.conv1, backbone.bn1, backbone.layer1):
-            module.requires_grad_(False)
 
         self.body = IntermediateLayerGetter(
             backbone,
@@ -130,21 +125,14 @@ class SFPSPyramid(nn.Module):
         # Paper never sizes this bottleneck, so fixed at 32.
         HIDDEN_CHANNELS = 32
 
-        def __init__(self, channels: int, upsample: str = "nearest") -> None:
+        def __init__(self, channels: int) -> None:
             super().__init__()
-            # Fig. 5 upsamples with a CP block; Table 12's parameter count fits
-            # "nearest" better, so both stay selectable.
-            self.cp_upsample = (
-                SFPSPyramid.CPBlock(channels, channels) if upsample == "cp" else None
-            )
             self.compress = nn.Linear(channels, self.HIDDEN_CHANNELS)
             self.expand = nn.Linear(self.HIDDEN_CHANNELS, channels * 2)
             self.activation = nn.ReLU(inplace=True)
 
         def forward(self, semantic_feature: Tensor, spatial_feature: Tensor) -> Tensor:
-            if self.cp_upsample is not None:
-                semantic_feature = self.cp_upsample(semantic_feature)
-            elif semantic_feature.shape[-2:] != spatial_feature.shape[-2:]:
+            if semantic_feature.shape[-2:] != spatial_feature.shape[-2:]:
                 semantic_feature = F.interpolate(
                     semantic_feature,
                     size=spatial_feature.shape[-2:],
@@ -164,19 +152,22 @@ class SFPSPyramid(nn.Module):
 
             return weights[:, 0] * semantic_feature + weights[:, 1] * spatial_feature
 
-    def __init__(self, out_channels: int = 64, sf_upsample: str = "nearest") -> None:
+    # Keep in step with BoxHead.POOLED_CHANNELS.
+    OUT_CHANNELS = 64
+
+    def __init__(self) -> None:
         super().__init__()
-        self.out_channels = out_channels
+        self.out_channels = self.OUT_CHANNELS
 
-        self.c5_to_p5 = self.MConv(2048, out_channels)
-        self.c2_to_p1 = self.MConv(256, out_channels)
+        self.c5_to_p5 = self.MConv(2048, self.OUT_CHANNELS)
+        self.c2_to_p1 = self.MConv(256, self.OUT_CHANNELS)
 
-        self.c5_to_p4 = self.CPBlock(2048, out_channels)
-        self.c4_to_p3 = self.CPBlock(1024, out_channels)
-        self.c3_to_p2 = self.CPBlock(512, out_channels)
+        self.c5_to_p4 = self.CPBlock(2048, self.OUT_CHANNELS)
+        self.c4_to_p3 = self.CPBlock(1024, self.OUT_CHANNELS)
+        self.c3_to_p2 = self.CPBlock(512, self.OUT_CHANNELS)
 
-        self.p3_attention = self.SFAttention(out_channels, sf_upsample)
-        self.p2_attention = self.SFAttention(out_channels, sf_upsample)
+        self.p3_attention = self.SFAttention(self.OUT_CHANNELS)
+        self.p2_attention = self.SFAttention(self.OUT_CHANNELS)
 
     def forward(self, stages: dict[str, Tensor]) -> FeatureMap:
         """Build p2-p6 exactly from the c2-c5 ResNet stage maps."""
@@ -218,15 +209,13 @@ class BackboneWithNeck(nn.Module):
         self,
         pretrained: bool = True,
         freeze_batch_norm: bool = True,
-        out_channels: int = 64,
-        sf_upsample: str = "nearest",
     ) -> None:
         super().__init__()
         self.extractor = ResNet50Extractor(
             pretrained=pretrained,
             freeze_batch_norm=freeze_batch_norm,
         )
-        self.neck = SFPSPyramid(out_channels, sf_upsample)
+        self.neck = SFPSPyramid()
         self.out_channels = self.neck.out_channels
 
     def forward(self, images: Tensor) -> FeatureMap:
@@ -237,37 +226,15 @@ class BackboneWithNeck(nn.Module):
         return self.neck(stages)
 
 
-class MinIoUMatcher(det_utils.Matcher):
-    """Best-anchor-per-GT rescue only counts at IoU >= min_pos_iou (mmdet 0.3)."""
-
-    def __init__(self, high: float, low: float, min_pos_iou: float) -> None:
-        super().__init__(high, low, allow_low_quality_matches=True)
-        self.min_pos_iou = min_pos_iou
-
-    def set_low_quality_matches_(
-        self,
-        matches: Tensor,
-        all_matches: Tensor,
-        match_quality_matrix: Tensor,
-    ) -> None:
-        best_per_gt, _ = match_quality_matrix.max(dim=1)
-        rescued = (match_quality_matrix == best_per_gt[:, None]) & (
-            best_per_gt[:, None] >= self.min_pos_iou
-        )
-        anchor_indices = torch.where(rescued)[1]
-        matches[anchor_indices] = all_matches[anchor_indices]
-
-
 class L1RegionProposalNetwork(RegionProposalNetwork):
     """RPN with plain L1 box loss — tighter boxes on PCB."""
 
     # YAML covers anchors and thresholds; these extras stay hardcoded.
     BATCH_SIZE_PER_IMAGE = 256
     POSITIVE_FRACTION = 0.5
-    MIN_POS_IOU = 0.3
     PRE_NMS_TOP_N_TRAIN = 2000
     PRE_NMS_TOP_N_TEST = 1000
-    POST_NMS_TOP_N_TRAIN = 1000
+    POST_NMS_TOP_N_TRAIN = 2000
     POST_NMS_TOP_N_TEST = 1000
     NMS_THRESH = 0.7
     SCORE_THRESH = 0.0
@@ -294,7 +261,7 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
             num_anchors=anchor_generator.num_anchors_per_location()[0],
         )
 
-        rpn = L1RegionProposalNetwork(
+        return L1RegionProposalNetwork(
             anchor_generator=anchor_generator,
             head=rpn_head,
             fg_iou_thresh=neuro_config["proposal"]["positive_iou"],
@@ -312,12 +279,6 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
             nms_thresh=L1RegionProposalNetwork.NMS_THRESH,
             score_thresh=L1RegionProposalNetwork.SCORE_THRESH,
         )
-        rpn.proposal_matcher = MinIoUMatcher(
-            neuro_config["proposal"]["positive_iou"],
-            neuro_config["proposal"]["negative_iou"],
-            L1RegionProposalNetwork.MIN_POS_IOU,
-        )
-        return rpn
 
     def compute_loss(
         self,
@@ -370,7 +331,7 @@ class RoIAlign(nn.Module):
         proposal_boxes: list[Tensor],
         image_shapes: list[tuple[int, int]],
     ) -> Tensor:
-        """Return true RoI Align pooled features: [total_rois, C, 7, 7]."""
+        """Return true RoI Align pooled features: [total_rois, 64, 7, 7]."""
 
         return self.pool(features, proposal_boxes, image_shapes)
 
@@ -401,12 +362,14 @@ class RoIAlign(nn.Module):
 class BoxHead(nn.Module):
     """Two FC layers turning each grid into one vector."""
 
+    # Keep in step with SFPSPyramid.OUT_CHANNELS.
+    POOLED_CHANNELS = 64
     POOLED_SIZE = 7
     REPRESENTATION_SIZE = 1024
 
-    def __init__(self, pooled_channels: int = 64) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        input_size = pooled_channels * self.POOLED_SIZE * self.POOLED_SIZE
+        input_size = self.POOLED_CHANNELS * self.POOLED_SIZE * self.POOLED_SIZE
         self.fc6 = nn.Linear(input_size, self.REPRESENTATION_SIZE)
         self.fc7 = nn.Linear(self.REPRESENTATION_SIZE, self.REPRESENTATION_SIZE)
         self.representation_size = self.REPRESENTATION_SIZE
@@ -494,20 +457,16 @@ class NeuroFasterRCNN(nn.Module):
         self.soft_nms_score_thresh = neuro_config["soft_nms"]["score_thresh"]
 
         self.transform = RCNNPreprocessing(train_config)
-        net_config = neuro_config["net"]
         self.backbone = BackboneWithNeck(
-            pretrained=net_config["backbone_pretrained"],
-            freeze_batch_norm=net_config["backbone_freeze_batch_norm"],
-            # Checkpoints saved before these knobs existed were 64-ch / nearest.
-            out_channels=net_config.get("out_channels", 64),
-            sf_upsample=net_config.get("sf_upsample", "nearest"),
+            pretrained=neuro_config["net"]["backbone_pretrained"],
+            freeze_batch_norm=neuro_config["net"]["backbone_freeze_batch_norm"],
         )
         self.rpn = L1RegionProposalNetwork.build(
             self.backbone.out_channels,
             neuro_config=neuro_config,
         )
         self.roi_align = RoIAlign()
-        self.box_head = BoxHead(self.backbone.out_channels)
+        self.box_head = BoxHead()
         self.box_predictor = BoxPredictor(
             representation_size=self.box_head.representation_size,
             num_classes=self.num_classes,
