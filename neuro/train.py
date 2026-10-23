@@ -344,6 +344,133 @@ def _confusion_and_per_class(
     return {"confusion": conf, "class_tp": cp, "class_fp": cfp, "class_fn": cfn}
 
 
+# IoU grid every VOC number below is read from: 0.50, 0.55, ..., 0.95.
+VOC_IOU_GRID = [round(0.5 + 0.05 * step, 2) for step in range(10)]
+
+
+class VOCMeanAP:
+    """mmdet `eval_map` (VOC style): greedy one-to-one matching, no fallback GT.
+
+    Labels are 1..num_classes (0 is background). `legacy` adds +1 to box sides.
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        iou_thresholds: list[float],
+        mode: str = "area",
+        legacy: bool = True,
+    ) -> None:
+        self.num_classes = num_classes
+        self.iou_thresholds = iou_thresholds
+        self.mode = mode
+        self.legacy = legacy
+        self.num_gts = np.zeros(num_classes, dtype=np.int64)
+        self._scores: list[list[np.ndarray]] = [[] for _ in range(num_classes)]
+        self._tp: list[list[np.ndarray]] = [[] for _ in range(num_classes)]
+        self._fp: list[list[np.ndarray]] = [[] for _ in range(num_classes)]
+
+    def _iou(self, det_boxes: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
+        extra = 1.0 if self.legacy else 0.0
+        det_area = (det_boxes[:, 2] - det_boxes[:, 0] + extra) * (
+            det_boxes[:, 3] - det_boxes[:, 1] + extra
+        )
+        gt_area = (gt_boxes[:, 2] - gt_boxes[:, 0] + extra) * (
+            gt_boxes[:, 3] - gt_boxes[:, 1] + extra
+        )
+        top_left = np.maximum(det_boxes[:, None, :2], gt_boxes[None, :, :2])
+        bottom_right = np.minimum(det_boxes[:, None, 2:], gt_boxes[None, :, 2:])
+        wh = np.clip(bottom_right - top_left + extra, 0, None)
+        overlap = wh[..., 0] * wh[..., 1]
+        union = np.maximum(det_area[:, None] + gt_area[None, :] - overlap, np.finfo(np.float32).eps)
+        return overlap / union
+
+    def update(
+        self,
+        predictions: list[dict[str, Tensor]],
+        targets: list[dict[str, Tensor]],
+    ) -> None:
+        for prediction, target in zip(predictions, targets):
+            pred_boxes = prediction["boxes"].detach().cpu().numpy().astype(np.float64)
+            pred_scores = prediction["scores"].detach().cpu().numpy().astype(np.float64)
+            pred_labels = prediction["labels"].detach().cpu().numpy()
+            gt_boxes = target["boxes"].detach().cpu().numpy().astype(np.float64)
+            gt_labels = target["labels"].detach().cpu().numpy()
+
+            for class_index in range(self.num_classes):
+                label = class_index + 1
+                class_gt = gt_boxes[gt_labels == label]
+                self.num_gts[class_index] += class_gt.shape[0]
+
+                det_mask = pred_labels == label
+                det_count = int(det_mask.sum())
+                if det_count == 0:
+                    continue
+                class_det = pred_boxes[det_mask]
+                class_scores = pred_scores[det_mask]
+
+                tp = np.zeros((len(self.iou_thresholds), det_count))
+                fp = np.zeros_like(tp)
+                if class_gt.shape[0] == 0:
+                    fp[:] = 1.0
+                else:
+                    overlaps = self._iou(class_det, class_gt)
+                    best_iou = overlaps.max(axis=1)
+                    best_gt = overlaps.argmax(axis=1)
+                    order = np.argsort(-class_scores, kind="stable")
+                    for t, threshold in enumerate(self.iou_thresholds):
+                        covered = np.zeros(class_gt.shape[0], dtype=bool)
+                        for k in order:
+                            if best_iou[k] >= threshold and not covered[best_gt[k]]:
+                                covered[best_gt[k]] = True
+                                tp[t, k] = 1.0
+                            else:
+                                fp[t, k] = 1.0
+
+                self._scores[class_index].append(class_scores)
+                self._tp[class_index].append(tp)
+                self._fp[class_index].append(fp)
+
+    def _average_precision(self, recalls: np.ndarray, precisions: np.ndarray) -> np.ndarray:
+        rows = recalls.shape[0]
+        if self.mode == "11points":
+            ap = np.zeros(rows)
+            for t in range(rows):
+                for point in np.arange(0.0, 1.1, 0.1):
+                    reached = precisions[t][recalls[t] >= point]
+                    ap[t] += reached.max() if reached.size else 0.0
+            return ap / 11.0
+
+        mrec = np.hstack((np.zeros((rows, 1)), recalls, np.ones((rows, 1))))
+        mpre = np.hstack((np.zeros((rows, 1)), precisions, np.zeros((rows, 1))))
+        mpre = np.maximum.accumulate(mpre[:, ::-1], axis=1)[:, ::-1]
+        ap = np.zeros(rows)
+        for t in range(rows):
+            changed = np.where(mrec[t, 1:] != mrec[t, :-1])[0]
+            ap[t] = np.sum((mrec[t, changed + 1] - mrec[t, changed]) * mpre[t, changed + 1])
+        return ap
+
+    def compute(self) -> np.ndarray:
+        """AP as [num_thresholds, num_classes]; NaN where a class has no GT."""
+
+        ap = np.full((len(self.iou_thresholds), self.num_classes), np.nan)
+        eps = np.finfo(np.float32).eps
+        for class_index in range(self.num_classes):
+            if self.num_gts[class_index] == 0:
+                continue
+            if not self._scores[class_index]:
+                ap[:, class_index] = 0.0
+                continue
+            scores = np.concatenate(self._scores[class_index])
+            order = np.argsort(-scores, kind="stable")
+            tp = np.cumsum(np.concatenate(self._tp[class_index], axis=1)[:, order], axis=1)
+            fp = np.cumsum(np.concatenate(self._fp[class_index], axis=1)[:, order], axis=1)
+            recalls = tp / np.maximum(self.num_gts[class_index], eps)
+            precisions = tp / np.maximum(tp + fp, eps)
+            ap[:, class_index] = self._average_precision(recalls, precisions)
+        return ap
+
+
 @torch.inference_mode()
 def evaluate_model(
     model: torch.nn.Module,
@@ -357,27 +484,9 @@ def evaluate_model(
     class_names = train_config["dataset"]["class_names"]
 
     model.eval()
-    coco_metric = MeanAveragePrecision(
-        iou_type="bbox",
-        backend="pycocotools",
-        class_metrics=evaluation_config["class_metrics"],
-    )
-    paper_metric = MeanAveragePrecision(
-        iou_type="bbox",
-        backend="pycocotools",
-        iou_thresholds=evaluation_config["iou_thresholds"],
-    )
-
-    ap50_metric = (
-        MeanAveragePrecision(
-            iou_type="bbox",
-            backend="pycocotools",
-            iou_thresholds=[0.5],
-            class_metrics=True,
-        )
-        if evaluation_config["class_metrics"]
-        else None
-    )
+    # Headline numbers are mmdet-style VOC AP; COCO 101-point is kept as coco_*.
+    coco_metric = MeanAveragePrecision(iou_type="bbox", backend="pycocotools")
+    voc_metric = VOCMeanAP(len(class_names), VOC_IOU_GRID, mode="area", legacy=True)
 
     num_classes = len(class_names) + 1
     conf_matrix = torch.zeros(num_classes, num_classes, dtype=torch.int64)
@@ -421,12 +530,12 @@ def evaluate_model(
             class_fn += pc["class_fn"]
 
         coco_metric.update(predictions_for_metric, targets_for_metric)
-        paper_metric.update(predictions_for_metric, targets_for_metric)
-        if ap50_metric is not None:
-            ap50_metric.update(predictions_for_metric, targets_for_metric)
+        voc_metric.update(predictions_for_metric, targets_for_metric)
 
     coco_output = coco_metric.compute()
-    paper_output = paper_metric.compute()
+    voc_ap = voc_metric.compute()
+    grid_rows = {threshold: row for row, threshold in enumerate(VOC_IOU_GRID)}
+    paper_rows = [grid_rows[round(t, 2)] for t in evaluation_config["iou_thresholds"]]
     total_true_positives = int(class_tp.sum())
     total_false_positives = int(class_fp.sum())
     total_false_negatives = int(class_fn.sum())
@@ -436,10 +545,13 @@ def evaluate_model(
     recall = total_true_positives / max(total_true_positives + total_false_negatives, 1)
 
     summary: dict[str, Any] = {
-        "mAP@0.5:0.95": coco_output["map"].item(),
-        "mAP@0.5": coco_output["map_50"].item(),
-        "AP75": coco_output["map_75"].item(),
-        "AP@50:5:85": paper_output["map"].item(),
+        "mAP@0.5:0.95": float(np.nanmean(voc_ap)),
+        "mAP@0.5": float(np.nanmean(voc_ap[grid_rows[0.5]])),
+        "AP75": float(np.nanmean(voc_ap[grid_rows[0.75]])),
+        "AP@50:5:85": float(np.nanmean(voc_ap[paper_rows])),
+        "coco_mAP@0.5": coco_output["map_50"].item(),
+        "coco_mAP@0.5:0.95": coco_output["map"].item(),
+        "eval_protocol": "voc_area_legacy",
         "precision": precision,
         "recall": recall,
         "mar_100": coco_output["mar_100"].item(),
@@ -468,26 +580,14 @@ def evaluate_model(
     summary["per_class_precision"] = per_class_precision
     summary["per_class_recall"] = per_class_recall
 
-    if (
-        evaluation_config["class_metrics"]
-        and "map_per_class" in coco_output
-        and "classes" in coco_output
-    ):
-        per_class_ap: dict[str, float] = {}
-        for class_id, class_ap in zip(
-            coco_output["classes"].tolist(),
-            coco_output["map_per_class"].tolist(),
-        ):
-            per_class_ap[class_names[int(class_id) - 1]] = float(class_ap)
-        summary["per_class_AP"] = per_class_ap
-
-        ap50_output = ap50_metric.compute()
+    if evaluation_config["class_metrics"]:
+        summary["per_class_AP"] = {
+            name: float(np.nanmean(voc_ap[:, index]))
+            for index, name in enumerate(class_names)
+        }
         summary["per_class_AP50"] = {
-            class_names[int(class_id) - 1]: float(class_ap)
-            for class_id, class_ap in zip(
-                ap50_output["classes"].tolist(),
-                ap50_output["map_per_class"].tolist(),
-            )
+            name: float(voc_ap[grid_rows[0.5], index])
+            for index, name in enumerate(class_names)
         }
 
     return summary
