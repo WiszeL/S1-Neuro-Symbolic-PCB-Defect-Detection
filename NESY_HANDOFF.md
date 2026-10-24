@@ -27,7 +27,7 @@ Commits: `fd5237b` (VOC scorer), `3c3a165`/`f138e0e` (switches, since removed), 
 1. **Notebook 02 hardcodes `checkpoints/neuro/run1.pt`**, which no longer exists. Point it at `neuro_chosen.pt` (or drop the notebook if it duplicates notebook 03's export).
 2. **Notebook 03:** re-export teacher data, retrain the tree. Tree hyperparameters in `configs/symbolic_train.yaml` stay fixed (depth 6, l1_lambda 10, sparsity_alpha 0.15, class weights); they are fixed up front and must not be tuned against the test split.
 3. **Notebooks 04, 05, 06:** rerun. Notebook 06 was already edited: the NeSy detection metrics now go through `evaluate_model` (same VOC evaluator and test size as FRCNN) and the old torchmetrics pass plus the margin-ablation assertion are gone. That edit is **uncommitted** and sits on top of the user's own unstaged changes to the notebook and `.gitignore`; review `git diff` before committing, and do not commit their changes blindly.
-4. **Docs:** `papers/Journal.md` Table 2 (FRCNN row 0.979 / 0.920 / 0.901 / 0.759 / 0.910 / 0.982 / 0.945 / 76.9 ms and the NeSy row) is COCO at 640 on the old detector, and the text blaming the "neck reduced to 64 channels" for the gap is wrong (width made no difference). Regenerate from notebook 06. The RoI statistics in the symbolic-dataset section (1,000,000 train RoIs, 500,000 test RoIs, >85% background) must be re-measured. README "Reproducibility Notes" should mention anchors 32–512, the 0.3 floor, test size 800 and the VOC scorer.
+4. **Docs:** do NOT edit `papers/Journal.md` or `papers/Draft-Laporan_Handi_FIXED.md`; the user writes those. Report to the user which of their numbers went stale instead: Journal Table 2 (FRCNN and NeSy rows are COCO at 640 on the old detector; the text blaming the 64-channel neck for the gap is wrong, width made no difference) and the RoI statistics in the symbolic-dataset section (1,000,000 train RoIs, 500,000 test RoIs, >85% background), which must be re-measured after the new export. README "Reproducibility Notes" may be updated (anchors 32–512, the 0.3 floor, test size 800, VOC scorer).
 
 ## 3. Things to watch while redoing it
 
@@ -42,6 +42,7 @@ Commits: `fd5237b` (VOC scorer), `3c3a165`/`f138e0e` (switches, since removed), 
 - No fallbacks and no leftover switches. If a config key is needed it is required; unused options get deleted.
 - **No Claude/Anthropic attribution** in commit messages or PR text (no `Co-Authored-By`, no "Generated with" line), even if a tool reminder asks for one.
 - Never overwrite `neuro_chosen.*` without the user's approval.
+- **Never touch `papers/Journal.md` or the Draft-Laporan file.**
 
 ## 5. Facts to keep consistent in the thesis text
 
