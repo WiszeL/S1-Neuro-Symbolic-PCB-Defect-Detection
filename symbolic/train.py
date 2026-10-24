@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from pathlib import Path
 from time import perf_counter
@@ -7,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from scipy.optimize import minimize
 from tqdm import tqdm
 
 from .dataset import open_exported_symbolic_array_payload
@@ -547,3 +549,132 @@ def prune_symbolic_tree(
         print("Saving metrics... done")
 
     return summary
+
+
+_MARGIN_FIT_CHUNK = 65536
+_MARGIN_FIT_EPS = 1e-7  # keeps s = exp(z) off 1, where log(1 - s) diverges
+
+
+def solve_margin_exponents(
+    log_certainties: np.ndarray,
+    targets: np.ndarray,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """γ ≥ 0 minimizing mean BCE of s = exp(X γ) against the teacher's probability.
+
+    Log-binomial regression (binomial GLM, log link), no intercept. Convex in γ, so
+    one optimum. Columns of X that are zero on every row (never on a path, or
+    pruned) have no data and keep γ = 1.
+    """
+    if log_certainties.shape[0] == 0:
+        raise ValueError("No defect rows to fit the margin exponents on.")
+
+    used = np.flatnonzero(np.any(log_certainties != 0.0, axis=0))
+    features = log_certainties[:, used].astype(np.float64)
+    targets = np.clip(targets.astype(np.float64), 0.0, 1.0)
+    count = features.shape[0]
+
+    def bce_and_gradient(gamma: np.ndarray) -> tuple[float, np.ndarray]:
+        z = np.minimum(features @ gamma, -_MARGIN_FIT_EPS)
+        one_minus_s = -np.expm1(z)
+        loss = -(targets * z + (1.0 - targets) * np.log(one_minus_s)).mean()
+        gradient = features.T @ (
+            -targets + (1.0 - targets) * np.exp(z) / one_minus_s
+        ) / count
+        return float(loss), gradient
+
+    start = np.ones(used.shape[0])
+    result = minimize(
+        bce_and_gradient,
+        start,
+        jac=True,
+        method="L-BFGS-B",
+        bounds=[(0.0, None)] * used.shape[0],
+        options={"maxiter": 1000, "ftol": 1e-12, "gtol": 1e-9},
+    )
+    exponents = np.ones(log_certainties.shape[1], dtype=np.float32)
+    exponents[used] = result.x
+    return exponents, {
+        "rows": int(count),
+        "bce_plain": bce_and_gradient(start)[0],
+        "bce_fitted": float(result.fun),
+        "converged": bool(result.success),
+        "iterations": int(result.nit),
+    }
+
+
+def fit_margin_exponents(
+    *,
+    tree: SparseObliqueDecisionTreeClassifier,
+    export_path: str | Path,
+    checkpoint_path: str | Path,
+    summary_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Fit the tree's routing-margin exponents on the full trainval export.
+
+    Call after pruning: the tree is frozen, only `margin_exponents` change. Rows are
+    the ones the tree routes to a defect leaf (the only ones that become detections),
+    target = the teacher's softmax probability for that leaf's class.
+    """
+    payload = torch.load(export_path, map_location="cpu", weights_only=True)
+    bundle = open_exported_symbolic_array_payload(payload, feature_dtype="float32")
+    features = bundle.feature_vectors
+    teacher_scores = bundle.teacher_scores.numpy()
+    if features.shape[0] != teacher_scores.shape[0]:
+        raise ValueError("Export features and teacher scores disagree on row count.")
+
+    print(f"Fitting margin exponents on {features.shape[0]:,} trainval RoIs...", flush=True)
+    t0 = perf_counter()
+    certainty_blocks: list[np.ndarray] = []
+    target_blocks: list[np.ndarray] = []
+    leaf_rows = np.zeros(tree.num_leaves, dtype=np.int64)
+    for start in range(0, features.shape[0], _MARGIN_FIT_CHUNK):
+        stop = min(start + _MARGIN_FIT_CHUNK, features.shape[0])
+        leaf_indices, log_certainties = tree.path_log_certainties(features[start:stop])
+        classes = tree.leaf_labels[leaf_indices]
+        defect = classes != 0
+        leaf_rows += np.bincount(leaf_indices[defect], minlength=tree.num_leaves)
+        certainty_blocks.append(log_certainties[defect])
+        target_blocks.append(
+            np.take_along_axis(
+                teacher_scores[start:stop][defect], classes[defect, None], axis=1
+            )[:, 0]
+        )
+
+    exponents, fit = solve_margin_exponents(
+        np.concatenate(certainty_blocks), np.concatenate(target_blocks)
+    )
+    tree.margin_exponents = exponents
+    print(
+        f"Fit on {fit['rows']:,} defect-routed RoIs in {_format_duration(perf_counter() - t0)}: "
+        f"BCE {fit['bce_plain']:.5f} (plain) -> {fit['bce_fitted']:.5f}, "
+        f"converged={fit['converged']}, iterations={fit['iterations']}"
+    )
+    for node, nonzero in enumerate(tree.nonzero_weight_counts()):
+        if nonzero > 0:
+            print(f"  N{node}: gamma = {exponents[node]:.3f}")
+
+    # A defect leaf whose whole path is γ = 0 scores exactly 1.0: ties come back for it.
+    active = np.any(tree.node_weights != 0.0, axis=1)
+    fit["tied_leaves"] = []
+    for leaf in np.flatnonzero((tree.leaf_labels != 0) & (leaf_rows > 0)):
+        node, path_gamma = tree.num_internal_nodes + int(leaf), 0.0
+        while node > 0:
+            node = (node - 1) // 2
+            if active[node]:
+                path_gamma += float(exponents[node])
+        if path_gamma < 1e-6:
+            fit["tied_leaves"].append(int(leaf))
+            print(f"WARNING: defect leaf {leaf} ({leaf_rows[leaf]:,} RoIs) has every path gamma = 0: all score 1.0")
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    checkpoint["tree_state"] = tree.to_state_dict()
+    checkpoint["training_config"] = {**checkpoint["training_config"], "margin_fit": fit}
+    torch.save(checkpoint, checkpoint_path)
+
+    if summary_path is not None:
+        with Path(summary_path).open(encoding="utf-8") as handle:
+            summary = json.load(handle)
+        summary["training_config"]["margin_fit"] = fit
+        summary["margin_exponents"] = exponents.tolist()
+        save_json(summary, summary_path)
+    return fit

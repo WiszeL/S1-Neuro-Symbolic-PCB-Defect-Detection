@@ -3,8 +3,9 @@ data:
   storage_dtype: float32
 
 # Fixed up front like the source papers — never tuned against any evaluation split.
-# Values match checkpoints/symbolic/chosen.pt's training_config —
-# the tree that produced the reported numbers.
+# Tree settings (depth, iterations, l1_lambda, sparsity_alpha, class_weights) are the ones the
+# old chosen.pt used; logistic_max_iter and tolerance are the new L-BFGS-B node solver's
+# (the old tree ran LIBLINEAR at 200 iterations, tol 1e-4).
 search:
   tree_depth: 6
   iterations: 15

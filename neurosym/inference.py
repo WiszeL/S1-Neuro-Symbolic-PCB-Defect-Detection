@@ -8,7 +8,7 @@ import torch
 from torch import Tensor
 
 from neuro.faster_rcnn import NeuroFasterRCNN
-from symbolic.train import load_symbolic_tree
+from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 from util.device import select_device
 
 from .heatmap import (
@@ -42,7 +42,18 @@ def load_neurosymbolic_detector(
         train_config=train_config,  # type: ignore[arg-type]
     )
     detector.load_state_dict(detector_checkpoint["model_state_dict"])
-    symbolic_tree = load_symbolic_tree(symbolic_checkpoint_path)
+    symbolic_checkpoint = torch.load(
+        symbolic_checkpoint_path, map_location="cpu", weights_only=True
+    )
+    # An unfitted tree would score with plain γ = 1 and pass for the weighted row.
+    if "margin_fit" not in symbolic_checkpoint["training_config"]:
+        raise ValueError(
+            f"{symbolic_checkpoint_path} has no fitted margin exponents: "
+            "run the margin-exponent fit cell in notebook 03."
+        )
+    symbolic_tree = SparseObliqueDecisionTreeClassifier.from_state_dict(
+        symbolic_checkpoint["tree_state"]
+    )
     hybrid_model = NeuroSymbolicDetector(
         detector=detector,
         symbolic_tree=symbolic_tree,

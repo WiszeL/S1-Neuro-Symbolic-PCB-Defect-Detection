@@ -15,6 +15,7 @@ class SymbolicArrayBundle:
     feature_grids: np.ndarray
     feature_vectors: np.ndarray
     teacher_labels: Tensor
+    teacher_scores: Tensor
     proposal_boxes: Tensor
     matched_gt_boxes: Tensor | None
     has_matched_gt: Tensor | None
@@ -228,6 +229,7 @@ def open_exported_symbolic_array_payload(
         feature_grids=feature_grids,
         feature_vectors=feature_grids.reshape(feature_grids.shape[0], -1),
         teacher_labels=metadata["teacher_labels"][keep],
+        teacher_scores=metadata["teacher_scores"][keep],
         proposal_boxes=metadata["proposal_boxes"][keep],
         matched_gt_boxes=_index_optional_tensor(metadata.get("matched_gt_boxes"), keep),
         has_matched_gt=_index_optional_tensor(metadata.get("has_matched_gt"), keep),

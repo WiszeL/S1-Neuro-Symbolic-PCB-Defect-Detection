@@ -44,6 +44,8 @@ class SparseObliqueDecisionTreeClassifier:
         )
         self.node_bias = np.zeros((self.num_internal_nodes,), dtype=np.float32)
         self.leaf_labels = np.zeros((self.num_leaves,), dtype=np.int64)
+        # Per-node exponent on the routing-margin factor; 1 everywhere is the plain product.
+        self.margin_exponents = np.ones((self.num_internal_nodes,), dtype=np.float32)
 
     # Structure
 
@@ -111,34 +113,38 @@ class SparseObliqueDecisionTreeClassifier:
 
         return leaf_indices
 
-    def predict_leaf_indices_and_routing_confidence(
+    def path_log_certainties(
         self,
         features: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Confidence per sample, read off the tree's own margins.
+        """Leaf per sample, and log σ(|margin|) of every active node on its path.
 
-        Pruned nodes skipped — they score zero for everyone, so they'd
+        Shape `[N, num_internal_nodes]`; a column is 0 where the node is off the
+        sample's path or pruned — pruned nodes score zero for everyone, so they'd
         shrink every sample equally. Routing itself untouched.
         """
 
         features = self._prepare_features(features)
         leaf_indices = np.empty((features.shape[0],), dtype=np.int64)
-        routing_confidence = np.empty((features.shape[0],), dtype=np.float32)
+        log_certainties = np.zeros(
+            (features.shape[0], self.num_internal_nodes), dtype=np.float32
+        )
         active_nodes = np.any(self.node_weights != 0.0, axis=1)
 
         for start in range(0, features.shape[0], _PREDICTION_CHUNK_SIZE):
             stop = min(start + _PREDICTION_CHUNK_SIZE, features.shape[0])
             chunk_features = features[start:stop]
+            rows = np.arange(start, stop)
             node_indices = np.zeros((chunk_features.shape[0],), dtype=np.int64)
-            confidence = np.ones((chunk_features.shape[0],), dtype=np.float64)
 
             for _ in range(self.max_depth):
                 scores = self._score_features_by_node_indices(
                     chunk_features, node_indices
                 )
-                margin_confidence = 1.0 / (1.0 + np.exp(-np.abs(scores)))
-                confidence *= np.where(
-                    active_nodes[node_indices], margin_confidence, 1.0
+                log_certainties[rows, node_indices] = np.where(
+                    active_nodes[node_indices],
+                    -np.logaddexp(0.0, -np.abs(scores)),
+                    0.0,
                 )
                 go_left = scores >= 0.0
                 node_indices = np.where(
@@ -146,9 +152,25 @@ class SparseObliqueDecisionTreeClassifier:
                 )
 
             leaf_indices[start:stop] = node_indices - self.num_internal_nodes
-            routing_confidence[start:stop] = confidence.astype(np.float32)
 
-        return leaf_indices, routing_confidence
+        return leaf_indices, log_certainties
+
+    def predict_leaf_indices_and_routing_confidence(
+        self,
+        features: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Confidence per sample, read off the tree's own margins.
+
+        Π σ(|margin|)^γ over the active path nodes, γ = `margin_exponents`.
+        All γ = 1 is the plain product. Routing itself untouched.
+        """
+
+        leaf_indices, log_certainties = self.path_log_certainties(features)
+        confidence = np.exp(
+            log_certainties.astype(np.float64)
+            @ self.margin_exponents.astype(np.float64)
+        )
+        return leaf_indices, confidence.astype(np.float32)
 
     def predict(self, features: np.ndarray) -> np.ndarray:
         leaf_indices = self.predict_leaf_indices(features)
@@ -302,6 +324,7 @@ class SparseObliqueDecisionTreeClassifier:
             "node_weights": torch.from_numpy(self.node_weights.copy()),
             "node_bias": torch.from_numpy(self.node_bias.copy()),
             "leaf_labels": torch.from_numpy(self.leaf_labels.copy()),
+            "margin_exponents": torch.from_numpy(self.margin_exponents.copy()),
         }
 
     @classmethod
@@ -327,5 +350,8 @@ class SparseObliqueDecisionTreeClassifier:
         )
         tree.leaf_labels = (
             state_dict["leaf_labels"].detach().cpu().numpy().astype(np.int64)
+        )
+        tree.margin_exponents = (
+            state_dict["margin_exponents"].detach().cpu().numpy().astype(np.float32)
         )
         return tree

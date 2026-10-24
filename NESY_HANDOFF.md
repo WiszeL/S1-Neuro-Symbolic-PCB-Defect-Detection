@@ -24,8 +24,8 @@ Commits: `fd5237b` (VOC scorer), `3c3a165`/`f138e0e` (switches, since removed), 
 ## 2. What is stale and must be redone (in this order)
 
 0. **Delete the stale exports first:** `checkpoints/symbolic/teacher_trainval_new*` and `teacher_test_new*` (both the `.pt` and the folders). `extract_dataset_from_teacher` skips files that exist, and the guard in notebook 03 only checks class names, **not which detector made them**. Skipping this step silently trains the tree on the old detector's features.
-1. **Notebook 02 hardcodes `checkpoints/neuro/run1.pt`**, which no longer exists. Point it at `neuro_chosen.pt` (or drop the notebook if it duplicates notebook 03's export).
-2. **Notebook 03:** re-export teacher data, retrain the tree. Tree hyperparameters in `configs/symbolic_train.yaml` stay fixed (depth 6, l1_lambda 20, sparsity_alpha 0.15, class weights incl. spurious_copper 1.25, as in `checkpoints/symbolic/chosen.pt`); they are fixed up front and must not be tuned against the test split.
+1. **Notebook 02 hardcodes `checkpoints/neuro/run1.pt`**, which no longer exists. Point it at `neuro_chosen.pt` (or drop the notebook if it duplicates notebook 03's export). *Done (§8): notebooks 02 and 04 now load `neuro_chosen.pt` / `chosen.pt`.*
+2. **Notebook 03:** re-export teacher data, retrain the tree, then fit the margin exponents (new cell, §8). Tree hyperparameters in `configs/symbolic_train.yaml` stay fixed (depth 6, l1_lambda 20, sparsity_alpha 0.15, class weights incl. spurious_copper 1.25, as in `checkpoints/symbolic/chosen.pt`); they are fixed up front and must not be tuned against the test split.
 3. **Notebooks 04, 05, 06:** rerun. Notebook 06 was already edited: the NeSy detection metrics now go through `evaluate_model` (same VOC evaluator and test size as FRCNN) and the old torchmetrics pass plus the margin-ablation assertion are gone. That edit is **uncommitted** and sits on top of the user's own unstaged changes to the notebook and `.gitignore`; review `git diff` before committing, and do not commit their changes blindly.
 4. **Docs:** do NOT edit `papers/Journal.md` or `papers/Draft-Laporan_Handi_FIXED.md`; the user writes those. Report to the user which of their numbers went stale instead: Journal Table 2 (FRCNN and NeSy rows are COCO at 640 on the old detector; the text blaming the 64-channel neck for the gap is wrong, width made no difference) and the RoI statistics in the symbolic-dataset section (1,000,000 train RoIs, 500,000 test RoIs, >85% background), which must be re-measured after the new export. README "Reproducibility Notes" may be updated (anchors 32–512, the 0.3 floor, test size 800, VOC scorer).
 
@@ -105,6 +105,41 @@ Peak anonymous RAM 2.35 GB (largest node batch 1.98 GB), 0 fits ended at the ite
 
 **Your steps.**
 1. Delete `checkpoints/symbolic/teacher_trainval_new*` and `teacher_test_new*` (both `.pt` and folders). The neg_ratio subset cache lives inside `teacher_trainval_new/`, so this clears it too.
-2. Run notebook 03: it re-exports from `neuro_chosen.pt` and trains. The row count may differ from 437,457 with the new detector.
+2. Run notebook 03: it re-exports from `neuro_chosen.pt`, trains, prunes and fits the margin exponents (§8; the fit adds a few minutes and prints γ per node and any `WARNING: defect leaf`). The row count may differ from 437,457 with the new detector.
+3. Copy the new `runN.pt` to `checkpoints/symbolic/chosen.pt` (approved overwrite; the old `chosen.pt` no longer loads, §8). Then run notebooks 04, 05, 06.
+4. After you accept notebook 06, delete `checkpoints/neuro/neuro_chosen_v1.*` and `checkpoints/symbolic/symbolic_chosen_d6_l120_a0,15*`.
 
-**Not run.** Notebook 03 end to end (it loads the detector and the export). Its new cells were run against the smoke checkpoint and the notebook JSON validates.
+**Not run.** Notebooks 03 to 06 end to end. Notebook 03's new cells were run against the smoke checkpoint and the notebook JSON validates.
+
+## 8. γ-weighted routing margin and the recall gap (added 2026-10-25)
+
+**Diagnosis** (old draft, COCO at 640 on the old detector, so re-verify on the new run). NeSy recall 0.973 against FRCNN 0.982: FN 65 against 46, the extra 19 on mouse_bite, spur, spurious_copper and pinhole (+4 to +6 each). With every NeSy score set to 1 recall is 0.983, so the tree routes those defects to the right class and box; they are lost because the score falls under the P/R cutoff (`precision_score_threshold: 0.5`, `configs/neuro_train.yaml`). The score was `Π σ(|m_j|)` over up to six path nodes with equal weight. `short` FN is 20 for both models (the teacher's own ceiling). The draft's explanation (FN from background-heavy training, line ~1890) does not fit this.
+
+**Method.** `score = Π_{j on path, active} c_j^γ_j`, `c_j = σ(|w_j·x + b_j|)`, `γ_j ≥ 0`, one γ per internal node shared by all classes. γ is **not** the SODT's `w`/`b`, which are never touched. γ is fitted **after TAO and pruning, tree frozen**: log-binomial regression (binomial GLM, log link, no intercept) of the teacher's softmax probability for the leaf's class, on the defect-routed rows of the full trainval export, by bounded L-BFGS-B (convex in γ, so one optimum). All γ = 1 is the old score exactly. Routing, leaf labels, decision paths and heatmaps are unchanged; only the detection score changes.
+
+**Pre-registered (decided with the user before seeing results):** the γ-weighted margin is the NeSy main row in every table; plain margin (γ = 1) and no margin are ablation rows. γ has no hyperparameters. Expect recall to rise toward FRCNN's and precision to fall toward it; the "P/F1 beat FRCNN" line may not survive, report it as measured.
+
+**Code.**
+- `symbolic/sodt.py`: `margin_exponents` (required key in `to_state_dict`/`from_state_dict`, no fallback), `path_log_certainties`, confidence = `exp(X·γ)`.
+- `symbolic/train.py`: `solve_margin_exponents` (pure fit), `fit_margin_exponents` (writes `tree_state` and `training_config["margin_fit"]` into the checkpoint and `margin_exponents` into the summary json). `symbolic/dataset.py`: the bundle now carries `teacher_scores`.
+- `neurosym/inference.py::load_neurosymbolic_detector` refuses a checkpoint without `training_config["margin_fit"]`, so an unfitted tree cannot pass as the weighted row.
+- `neurosym/evaluation.py::breakdown_nesy_misses`: for every ground truth FRCNN finds at the P/R operating point and NeSy does not, the cause (`score` under the cutoff, wrong `class`, `none`) and, for `score` misses, the depth of the weakest node (lowest γ·log σ).
+- Notebook 03: fit cell after pruning. Notebook 06: new plain-vs-weighted-vs-off cell (per-class FN, confusion matrices, miss breakdown, fitted γ); its outputs were cleared (approved) and a stale comment fixed. `neurosym/visualization.py`: the per-node panel (Gambar 4.13) shows γ and σ^γ.
+- Tests: `tests/test_margin_exponents.py`, `tests/test_miss_breakdown.py` (76 pass in total).
+
+**Verified by smoke only:** one-image run at size 800 (P2′ 200×200, overlay mass inside the proposal box 1.0, GT-to-grid ok); `fit_margin_exponents` on 50k rows of the stale export (BCE 0.482 to 0.368, many γ at 0); the loader guard both ways; the miss breakdown on 5 images with a random tree. Not run: the notebooks themselves.
+
+**Citations ("dasar"), verified 2026-10-25 by the main agent** (PubMed, Europe PMC, PMC, R docs):
+- Path product = soft-tree path probability: Kontschieder et al. 2015, ICCV, pp. 1467–1475 (already in the draft).
+- GLM with log link: McCullagh & Nelder 1989, *Generalized Linear Models*, 2nd ed., Chapman & Hall (book verified; the section on link choice was not checked); R `family` docs list `log` among the binomial links; the "log link = multiplicative effects" statement is in arXiv:2301.03349.
+- Binomial regression for risk ratios: Wacholder 1986, *Am. J. Epidemiol.* 123(1):174–184 (abstract says "different link functions"; the log link comes from secondary sources).
+- Convergence caveat: Williamson, Eliasziw & Fick 2013, *Emerg. Themes Epidemiol.* 10:14. The boundary (fitted probability 1 under the log link) is **one** cause of failed convergence, not the only one.
+- Probability as target: Papke & Wooldridge 1996, *J. Appl. Econometrics* 11(6):619–632.
+- Post-hoc fit with the model frozen: Platt (book 2000, preprint 1999; the draft says 1999, pick one), Zadrozny & Elkan 2001 ICML, Niculescu-Mizil & Caruana 2005 ICML. Exponents on a product of experts, fitted by cross-entropy: Cao & Fleet 2014 (arXiv:1410.7827), Heskes 1998 (NIPS 10, pp. 266–272), Genest & Zidek 1986. Distillation target: Hinton et al. 2015.
+- **Do not** cite McNutt et al. 2003 for the link choice: its abstract never names log-binomial or a log link.
+- State honestly: no published paper fits per-node exponents on a decision tree's path product; this combination is the thesis's adaptation. Unlike a classic log opinion pool, γ has no renormalization and no sum-to-1 constraint. Unlike temperature scaling, γ can change the ranking of detections (so mAP can move either way) and γ = 0 removes a node's doubt entirely.
+
+**Open points for the thesis.**
+- γ also feeds the explanation metrics: `neurosym/evaluation.py` (`routing_confidence`, used by the deletion/insertion AUC) calls `tree.route`, so it is now the γ-weighted score. Keeping it ("the same score the detector reports") is defensible, but Tabel 4.10 AUC values change meaning; say so in the text.
+- The fit is in-sample: the teacher trained on the trainval images, so its probabilities there are probably more confident than on test, which pushes γ toward 0. Platt fits on held-out data for this reason. List it under limitations.
+- Stale in the draft (the user rewrites, Claude does not): Tabel 4.2 and 4.5 to 4.9, Gambar 4.7 and 4.9 to 4.13 (4.13 now shows γ), the RoI statistics, the line-1890 explanation, Eq. 3.3 (becomes the γ-weighted product).

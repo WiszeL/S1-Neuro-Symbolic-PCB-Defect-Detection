@@ -619,3 +619,133 @@ def evaluate_faithfulness_fpn_masking(
             "evaluated_pair_count": len(node_similarity),
         }
     return result
+
+
+def _found(
+    detection: dict[str, Tensor],
+    gt_box: Tensor,
+    gt_label: int,
+    score_threshold: float,
+    iou_threshold: float,
+) -> bool:
+    """A same-class detection at or above the score threshold overlaps the box enough."""
+    keep = (detection["labels"] == gt_label) & (detection["scores"] >= score_threshold)
+    if not bool(keep.any()):
+        return False
+    return bool((box_iou(detection["boxes"][keep], gt_box[None]) >= iou_threshold).any())
+
+
+def breakdown_nesy_misses(
+    frcnn_detections: list[dict[str, Tensor]],
+    nesy_detections: list[dict[str, Tensor]],
+    targets: list[dict[str, Tensor]],
+    tree: Any,
+    score_threshold: float,
+    iou_threshold: float,
+) -> dict[str, Any]:
+    """Ground truths FRCNN finds at the P/R operating point and NeSy does not, by cause.
+
+    "score": NeSy has a same-class detection on it, scored under the threshold.
+    "class": NeSy has a detection on it at or above the threshold, of another class.
+    "none":  nothing on it (routed to background, or suppressed by Soft-NMS).
+    Checked in that order. A per-box existence check, not the evaluator's one-to-one
+    greedy match, so totals can differ from its FN by a few. For "score" misses the
+    weakest node is the path node with the lowest γ·log σ(|margin|) of the best-scored
+    such detection; its depth is counted (0 = root). Detections need `pooled_features`.
+    """
+    causes: dict[int, dict[str, int]] = defaultdict(lambda: {"score": 0, "class": 0, "none": 0})
+    frcnn_hits: dict[int, int] = defaultdict(int)
+    weakest_depth: dict[int, int] = defaultdict(int)
+
+    for frcnn, nesy, target in zip(frcnn_detections, nesy_detections, targets):
+        for gt_box, gt_label in zip(target["boxes"], target["labels"].tolist()):
+            if not _found(frcnn, gt_box, gt_label, score_threshold, iou_threshold):
+                continue
+            frcnn_hits[gt_label] += 1
+            if _found(nesy, gt_box, gt_label, score_threshold, iou_threshold):
+                continue
+
+            overlap = box_iou(nesy["boxes"], gt_box[None])[:, 0] >= iou_threshold
+            weak = overlap & (nesy["labels"] == gt_label)
+            if bool(weak.any()):
+                causes[gt_label]["score"] += 1
+                best = int(torch.where(weak, nesy["scores"], torch.full_like(nesy["scores"], -1.0)).argmax())
+                _, log_certainties = tree.path_log_certainties(
+                    nesy["pooled_features"][best].numpy().reshape(1, -1)
+                )
+                weakest = int(np.argmin(log_certainties[0] * tree.margin_exponents))
+                weakest_depth[tree.depth_of(weakest)] += 1
+            elif bool((overlap & (nesy["scores"] >= score_threshold)).any()):
+                causes[gt_label]["class"] += 1
+            else:
+                causes[gt_label]["none"] += 1
+
+    return {
+        "causes": {label: dict(counts) for label, counts in causes.items()},
+        "frcnn_hits": dict(frcnn_hits),
+        "weakest_depth": dict(weakest_depth),
+    }
+
+
+FALSE_POSITIVE_KINDS = ("duplicate", "wrong_class", "mislocalized", "background")
+
+
+def breakdown_false_positives(
+    detections: list[dict[str, Tensor]],
+    targets: list[dict[str, Tensor]],
+    score_threshold: float,
+    iou_threshold: float,
+    reference: list[dict[str, Tensor]] | None = None,
+    background_iou: float = 0.1,
+) -> dict[str, Any]:
+    """Every false positive at the P/R operating point, by kind.
+
+    Same matching as the precision/recall counter (`neuro.train._greedy_match_within_label`):
+    per class, best score first, each ground truth claimed once, a detection is a
+    false positive when its best same-class ground truth is below the IoU threshold or
+    already claimed. Kinds, checked in this order:
+    "duplicate":    IoU >= threshold with a same-class ground truth (already claimed).
+    "wrong_class":  IoU >= threshold with a ground truth of another class.
+    "mislocalized": best IoU over all ground truths in [background_iou, threshold).
+    "background":   best IoU under background_iou (or no ground truth in the image).
+    With `reference` (e.g. FRCNN's detections), "shared" counts the false positives it
+    also produces: a same-class reference detection at or above the score threshold
+    with IoU >= threshold.
+    """
+    counts = {kind: 0 for kind in FALSE_POSITIVE_KINDS}
+    shared = {kind: 0 for kind in FALSE_POSITIVE_KINDS}
+    reference = reference if reference is not None else [None] * len(detections)
+
+    for detection, target, other in zip(detections, targets, reference):
+        keep = detection["scores"] >= score_threshold
+        boxes, scores, labels = detection["boxes"][keep], detection["scores"][keep], detection["labels"][keep]
+        gt_boxes, gt_labels = target["boxes"], target["labels"]
+        if boxes.shape[0] == 0:
+            continue
+        ious = box_iou(boxes, gt_boxes) if gt_boxes.shape[0] else torch.zeros((boxes.shape[0], 0))
+
+        for label in labels.unique().tolist():
+            same_gt = gt_labels == label
+            claimed: set[int] = set()
+            indices = torch.where(labels == label)[0]
+            for row in indices[torch.argsort(scores[indices], descending=True)].tolist():
+                if bool(same_gt.any()):
+                    best_iou, best_gt = ious[row][same_gt].max(dim=0)
+                    best_gt = int(torch.where(same_gt)[0][best_gt])
+                    if best_iou.item() >= iou_threshold and best_gt not in claimed:
+                        claimed.add(best_gt)
+                        continue
+                overlap = ious[row].max().item() if ious.shape[1] else 0.0
+                if bool((ious[row][same_gt] >= iou_threshold).any()):
+                    kind = "duplicate"
+                elif bool((ious[row][~same_gt] >= iou_threshold).any()):
+                    kind = "wrong_class"
+                elif overlap >= background_iou:
+                    kind = "mislocalized"
+                else:
+                    kind = "background"
+                counts[kind] += 1
+                if other is not None and _found(other, boxes[row], label, score_threshold, iou_threshold):
+                    shared[kind] += 1
+
+    return {"counts": counts, "shared": shared, "total": sum(counts.values())}
