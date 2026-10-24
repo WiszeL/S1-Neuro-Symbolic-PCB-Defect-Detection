@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
-from torchmetrics.detection import MeanAveragePrecision
 from torchvision.ops import box_iou
 from tqdm import tqdm
 
@@ -468,8 +467,7 @@ def evaluate_model(
     class_names = train_config["dataset"]["class_names"]
 
     model.eval()
-    # Headline numbers are mmdet-style VOC AP; COCO 101-point is kept as coco_*.
-    coco_metric = MeanAveragePrecision(iou_type="bbox", backend="pycocotools")
+    # mmdet-style VOC AP (all-point area, legacy +1 box sides).
     voc_metric = VOCMeanAP(len(class_names), VOC_IOU_GRID)
 
     num_classes = len(class_names) + 1
@@ -513,10 +511,8 @@ def evaluate_model(
             class_fp += pc["class_fp"]
             class_fn += pc["class_fn"]
 
-        coco_metric.update(predictions_for_metric, targets_for_metric)
         voc_metric.update(predictions_for_metric, targets_for_metric)
 
-    coco_output = coco_metric.compute()
     voc_ap = voc_metric.compute()
     grid_rows = {threshold: row for row, threshold in enumerate(VOC_IOU_GRID)}
     paper_rows = [grid_rows[round(t, 2)] for t in evaluation_config["iou_thresholds"]]
@@ -537,12 +533,9 @@ def evaluate_model(
             f"AP{round(t * 100)}": float(np.nanmean(voc_ap[row]))
             for t, row in zip(evaluation_config["iou_thresholds"], paper_rows)
         },
-        "coco_mAP@0.5": coco_output["map_50"].item(),
-        "coco_mAP@0.5:0.95": coco_output["map"].item(),
         "eval_protocol": "voc_area_legacy",
         "precision": precision,
         "recall": recall,
-        "mar_100": coco_output["mar_100"].item(),
         "precision_recall_score_threshold": float(
             evaluation_config["precision_score_threshold"]
         ),
