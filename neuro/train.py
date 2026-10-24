@@ -549,6 +549,10 @@ def evaluate_model(
         "mAP@0.5": float(np.nanmean(voc_ap[grid_rows[0.5]])),
         "AP75": float(np.nanmean(voc_ap[grid_rows[0.75]])),
         "AP@50:5:85": float(np.nanmean(voc_ap[paper_rows])),
+        "AP_by_iou": {
+            f"AP{round(t * 100)}": float(np.nanmean(voc_ap[row]))
+            for t, row in zip(evaluation_config["iou_thresholds"], paper_rows)
+        },
         "coco_mAP@0.5": coco_output["map_50"].item(),
         "coco_mAP@0.5:0.95": coco_output["map"].item(),
         "eval_protocol": "voc_area_legacy",

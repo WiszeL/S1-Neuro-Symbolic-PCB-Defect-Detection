@@ -1,6 +1,9 @@
 net:
   backbone_pretrained: true
   backbone_freeze_batch_norm: true
+  out_channels: 64
+  sf_upsample: nearest
+  roi_align_aligned: false
 
 anchors:
   sizes:

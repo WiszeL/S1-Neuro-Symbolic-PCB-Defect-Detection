@@ -6,6 +6,9 @@ from typing import Literal, TypedDict
 class NetConfig(TypedDict):
     backbone_pretrained: bool
     backbone_freeze_batch_norm: bool
+    out_channels: int
+    sf_upsample: Literal["cp", "nearest"]
+    roi_align_aligned: bool
 
 
 class AnchorConfig(TypedDict):
