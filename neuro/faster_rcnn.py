@@ -233,6 +233,30 @@ class BackboneWithNeck(nn.Module):
         return self.neck(stages)
 
 
+class MinIoUMatcher(det_utils.Matcher):
+    """Best-anchor-per-GT rescue only counts at IoU >= min_pos_iou (mmdet: 0.3).
+
+    min_pos_iou=0.0 is torchvision's Matcher exactly.
+    """
+
+    def __init__(self, high: float, low: float, min_pos_iou: float) -> None:
+        super().__init__(high, low, allow_low_quality_matches=True)
+        self.min_pos_iou = min_pos_iou
+
+    def set_low_quality_matches_(
+        self,
+        matches: Tensor,
+        all_matches: Tensor,
+        match_quality_matrix: Tensor,
+    ) -> None:
+        best_per_gt, _ = match_quality_matrix.max(dim=1)
+        rescued = (match_quality_matrix == best_per_gt[:, None]) & (
+            best_per_gt[:, None] >= self.min_pos_iou
+        )
+        anchor_indices = torch.where(rescued)[1]
+        matches[anchor_indices] = all_matches[anchor_indices]
+
+
 class L1RegionProposalNetwork(RegionProposalNetwork):
     """RPN with plain L1 box loss — tighter boxes on PCB."""
 
@@ -268,7 +292,7 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
             num_anchors=anchor_generator.num_anchors_per_location()[0],
         )
 
-        return L1RegionProposalNetwork(
+        rpn = L1RegionProposalNetwork(
             anchor_generator=anchor_generator,
             head=rpn_head,
             fg_iou_thresh=neuro_config["proposal"]["positive_iou"],
@@ -286,6 +310,12 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
             nms_thresh=L1RegionProposalNetwork.NMS_THRESH,
             score_thresh=L1RegionProposalNetwork.SCORE_THRESH,
         )
+        rpn.proposal_matcher = MinIoUMatcher(
+            neuro_config["proposal"]["positive_iou"],
+            neuro_config["proposal"]["negative_iou"],
+            neuro_config["proposal"]["min_pos_iou"],
+        )
+        return rpn
 
     def compute_loss(
         self,

@@ -22,6 +22,7 @@ anchors:
 proposal:
   positive_iou: 0.7
   negative_iou: 0.3
+  min_pos_iou: 0.0
 
 soft_nms:
   enabled: true

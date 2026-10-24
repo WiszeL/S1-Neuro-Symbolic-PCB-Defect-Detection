@@ -19,6 +19,7 @@ class AnchorConfig(TypedDict):
 class ProposalConfig(TypedDict):
     positive_iou: float
     negative_iou: float
+    min_pos_iou: float
 
 
 class SoftNmsConfig(TypedDict):
