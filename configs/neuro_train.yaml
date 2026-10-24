@@ -1,4 +1,4 @@
-seed: 42
+seed: 44
 deterministic: false
 device: cuda
 amp: true
@@ -20,7 +20,7 @@ dataset:
 preprocessing:
   horizontal_flip_prob: 0.5
   train_min_sizes: [480, 560, 640, 720, 800, 880]
-  test_min_size: 640
+  test_min_size: 800
   max_size: 880
   mean: [0.485, 0.456, 0.406]
   std: [0.229, 0.224, 0.225]

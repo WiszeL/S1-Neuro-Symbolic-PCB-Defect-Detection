@@ -11,10 +11,9 @@ from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.models.detection import _utils as det_utils
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 from torchvision.models.detection.rpn import RegionProposalNetwork, RPNHead
-from torchvision.ops import MultiScaleRoIAlign, box_iou, roi_align
+from torchvision.ops import MultiScaleRoIAlign, box_iou
 from torchvision.ops import boxes as box_ops
 from torchvision.ops.misc import FrozenBatchNorm2d
-from torchvision.ops.poolers import _filter_input, _setup_scales
 
 from .config import NeuroConfig, NeuroTrainConfig
 from .prepare_dataset import PCBTarget
@@ -126,21 +125,14 @@ class SFPSPyramid(nn.Module):
         # Paper never sizes this bottleneck, so fixed at 32.
         HIDDEN_CHANNELS = 32
 
-        def __init__(self, channels: int, upsample: str) -> None:
+        def __init__(self, channels: int) -> None:
             super().__init__()
-            # Fig. 5 upsamples with a CP block; Table 12's parameter count fits
-            # "nearest" better, so both stay selectable.
-            self.cp_upsample = (
-                SFPSPyramid.CPBlock(channels, channels) if upsample == "cp" else None
-            )
             self.compress = nn.Linear(channels, self.HIDDEN_CHANNELS)
             self.expand = nn.Linear(self.HIDDEN_CHANNELS, channels * 2)
             self.activation = nn.ReLU(inplace=True)
 
         def forward(self, semantic_feature: Tensor, spatial_feature: Tensor) -> Tensor:
-            if self.cp_upsample is not None:
-                semantic_feature = self.cp_upsample(semantic_feature)
-            elif semantic_feature.shape[-2:] != spatial_feature.shape[-2:]:
+            if semantic_feature.shape[-2:] != spatial_feature.shape[-2:]:
                 semantic_feature = F.interpolate(
                     semantic_feature,
                     size=spatial_feature.shape[-2:],
@@ -160,19 +152,22 @@ class SFPSPyramid(nn.Module):
 
             return weights[:, 0] * semantic_feature + weights[:, 1] * spatial_feature
 
-    def __init__(self, out_channels: int, sf_upsample: str) -> None:
+    # Keep in step with BoxHead.POOLED_CHANNELS.
+    OUT_CHANNELS = 64
+
+    def __init__(self) -> None:
         super().__init__()
-        self.out_channels = out_channels
+        self.out_channels = self.OUT_CHANNELS
 
-        self.c5_to_p5 = self.MConv(2048, out_channels)
-        self.c2_to_p1 = self.MConv(256, out_channels)
+        self.c5_to_p5 = self.MConv(2048, self.OUT_CHANNELS)
+        self.c2_to_p1 = self.MConv(256, self.OUT_CHANNELS)
 
-        self.c5_to_p4 = self.CPBlock(2048, out_channels)
-        self.c4_to_p3 = self.CPBlock(1024, out_channels)
-        self.c3_to_p2 = self.CPBlock(512, out_channels)
+        self.c5_to_p4 = self.CPBlock(2048, self.OUT_CHANNELS)
+        self.c4_to_p3 = self.CPBlock(1024, self.OUT_CHANNELS)
+        self.c3_to_p2 = self.CPBlock(512, self.OUT_CHANNELS)
 
-        self.p3_attention = self.SFAttention(out_channels, sf_upsample)
-        self.p2_attention = self.SFAttention(out_channels, sf_upsample)
+        self.p3_attention = self.SFAttention(self.OUT_CHANNELS)
+        self.p2_attention = self.SFAttention(self.OUT_CHANNELS)
 
     def forward(self, stages: dict[str, Tensor]) -> FeatureMap:
         """Build p2-p6 exactly from the c2-c5 ResNet stage maps."""
@@ -212,17 +207,15 @@ class BackboneWithNeck(nn.Module):
 
     def __init__(
         self,
-        pretrained: bool,
-        freeze_batch_norm: bool,
-        out_channels: int,
-        sf_upsample: str,
+        pretrained: bool = True,
+        freeze_batch_norm: bool = True,
     ) -> None:
         super().__init__()
         self.extractor = ResNet50Extractor(
             pretrained=pretrained,
             freeze_batch_norm=freeze_batch_norm,
         )
-        self.neck = SFPSPyramid(out_channels, sf_upsample)
+        self.neck = SFPSPyramid()
         self.out_channels = self.neck.out_channels
 
     def forward(self, images: Tensor) -> FeatureMap:
@@ -351,63 +344,15 @@ class L1RegionProposalNetwork(RegionProposalNetwork):
         return objectness_loss, box_loss
 
 
-class AlignedMultiScaleRoIAlign(MultiScaleRoIAlign):
-    """torchvision's pooler plus the `aligned` switch it doesn't expose.
-
-    aligned=True removes the half-cell shift (mmcv RoIAlign default, used by
-    mmdet's Faster R-CNN). With aligned=False the output equals the parent's.
-    """
-
-    def __init__(self, *args, aligned: bool, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.aligned = aligned
-
-    def forward(
-        self,
-        x: dict[str, Tensor],
-        boxes: list[Tensor],
-        image_shapes: list[tuple[int, int]],
-    ) -> Tensor:
-        features = _filter_input(x, self.featmap_names)
-        if self.scales is None or self.map_levels is None:
-            self.scales, self.map_levels = _setup_scales(
-                features, image_shapes, self.canonical_scale, self.canonical_level
-            )
-
-        batch_ids = [torch.full_like(b[:, :1], i) for i, b in enumerate(boxes)]
-        rois = torch.cat([torch.cat(batch_ids), torch.cat(boxes)], dim=1)
-        levels = self.map_levels(boxes)
-
-        result = torch.zeros(
-            (rois.shape[0], features[0].shape[1], *self.output_size),
-            dtype=features[0].dtype,
-            device=features[0].device,
-        )
-        for level, (feature, scale) in enumerate(zip(features, self.scales)):
-            in_level = torch.where(levels == level)[0]
-            pooled = roi_align(
-                feature,
-                rois[in_level],
-                output_size=self.output_size,
-                spatial_scale=scale,
-                sampling_ratio=self.sampling_ratio,
-                aligned=self.aligned,
-            )
-            # Autocast may give each level its own dtype; match before copying.
-            result[in_level] = pooled.to(result.dtype)
-        return result
-
-
 class RoIAlign(nn.Module):
     """The feature cut: pooled grids the tree trains on."""
 
-    def __init__(self, aligned: bool) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.pool = AlignedMultiScaleRoIAlign(
+        self.pool = MultiScaleRoIAlign(
             featmap_names=["p2", "p3", "p4", "p5", "p6"],
             output_size=7,
             sampling_ratio=2,
-            aligned=aligned,
         )
 
     def forward(
@@ -416,7 +361,7 @@ class RoIAlign(nn.Module):
         proposal_boxes: list[Tensor],
         image_shapes: list[tuple[int, int]],
     ) -> Tensor:
-        """Return true RoI Align pooled features: [total_rois, C, 7, 7]."""
+        """Return true RoI Align pooled features: [total_rois, 64, 7, 7]."""
 
         return self.pool(features, proposal_boxes, image_shapes)
 
@@ -447,12 +392,14 @@ class RoIAlign(nn.Module):
 class BoxHead(nn.Module):
     """Two FC layers turning each grid into one vector."""
 
+    # Keep in step with SFPSPyramid.OUT_CHANNELS.
+    POOLED_CHANNELS = 64
     POOLED_SIZE = 7
     REPRESENTATION_SIZE = 1024
 
-    def __init__(self, pooled_channels: int) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        input_size = pooled_channels * self.POOLED_SIZE * self.POOLED_SIZE
+        input_size = self.POOLED_CHANNELS * self.POOLED_SIZE * self.POOLED_SIZE
         self.fc6 = nn.Linear(input_size, self.REPRESENTATION_SIZE)
         self.fc7 = nn.Linear(self.REPRESENTATION_SIZE, self.REPRESENTATION_SIZE)
         self.representation_size = self.REPRESENTATION_SIZE
@@ -540,19 +487,16 @@ class NeuroFasterRCNN(nn.Module):
         self.soft_nms_score_thresh = neuro_config["soft_nms"]["score_thresh"]
 
         self.transform = RCNNPreprocessing(train_config)
-        net_config = neuro_config["net"]
         self.backbone = BackboneWithNeck(
-            pretrained=net_config["backbone_pretrained"],
-            freeze_batch_norm=net_config["backbone_freeze_batch_norm"],
-            out_channels=net_config["out_channels"],
-            sf_upsample=net_config["sf_upsample"],
+            pretrained=neuro_config["net"]["backbone_pretrained"],
+            freeze_batch_norm=neuro_config["net"]["backbone_freeze_batch_norm"],
         )
         self.rpn = L1RegionProposalNetwork.build(
             self.backbone.out_channels,
             neuro_config=neuro_config,
         )
-        self.roi_align = RoIAlign(aligned=net_config["roi_align_aligned"])
-        self.box_head = BoxHead(self.backbone.out_channels)
+        self.roi_align = RoIAlign()
+        self.box_head = BoxHead()
         self.box_predictor = BoxPredictor(
             representation_size=self.box_head.representation_size,
             num_classes=self.num_classes,

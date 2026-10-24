@@ -1,17 +1,14 @@
 net:
   backbone_pretrained: true
   backbone_freeze_batch_norm: true
-  out_channels: 64
-  sf_upsample: nearest
-  roi_align_aligned: false
 
 anchors:
   sizes:
-    - [16]
     - [32]
     - [64]
     - [128]
     - [256]
+    - [512]
   aspect_ratios:
     - [0.5, 1.0, 2.0]
     - [0.5, 1.0, 2.0]
@@ -22,7 +19,7 @@ anchors:
 proposal:
   positive_iou: 0.7
   negative_iou: 0.3
-  min_pos_iou: 0.0
+  min_pos_iou: 0.3
 
 soft_nms:
   enabled: true

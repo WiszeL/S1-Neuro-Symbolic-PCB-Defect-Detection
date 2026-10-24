@@ -351,36 +351,28 @@ VOC_IOU_GRID = [round(0.5 + 0.05 * step, 2) for step in range(10)]
 class VOCMeanAP:
     """mmdet `eval_map` (VOC style): greedy one-to-one matching, no fallback GT.
 
-    Labels are 1..num_classes (0 is background). `legacy` adds +1 to box sides.
+    Labels are 1..num_classes (0 is background). AP is the all-point area, and
+    box sides get mmdet's legacy +1.
     """
 
-    def __init__(
-        self,
-        num_classes: int,
-        iou_thresholds: list[float],
-        mode: str = "area",
-        legacy: bool = True,
-    ) -> None:
+    def __init__(self, num_classes: int, iou_thresholds: list[float]) -> None:
         self.num_classes = num_classes
         self.iou_thresholds = iou_thresholds
-        self.mode = mode
-        self.legacy = legacy
         self.num_gts = np.zeros(num_classes, dtype=np.int64)
         self._scores: list[list[np.ndarray]] = [[] for _ in range(num_classes)]
         self._tp: list[list[np.ndarray]] = [[] for _ in range(num_classes)]
         self._fp: list[list[np.ndarray]] = [[] for _ in range(num_classes)]
 
     def _iou(self, det_boxes: np.ndarray, gt_boxes: np.ndarray) -> np.ndarray:
-        extra = 1.0 if self.legacy else 0.0
-        det_area = (det_boxes[:, 2] - det_boxes[:, 0] + extra) * (
-            det_boxes[:, 3] - det_boxes[:, 1] + extra
+        det_area = (det_boxes[:, 2] - det_boxes[:, 0] + 1.0) * (
+            det_boxes[:, 3] - det_boxes[:, 1] + 1.0
         )
-        gt_area = (gt_boxes[:, 2] - gt_boxes[:, 0] + extra) * (
-            gt_boxes[:, 3] - gt_boxes[:, 1] + extra
+        gt_area = (gt_boxes[:, 2] - gt_boxes[:, 0] + 1.0) * (
+            gt_boxes[:, 3] - gt_boxes[:, 1] + 1.0
         )
         top_left = np.maximum(det_boxes[:, None, :2], gt_boxes[None, :, :2])
         bottom_right = np.minimum(det_boxes[:, None, 2:], gt_boxes[None, :, 2:])
-        wh = np.clip(bottom_right - top_left + extra, 0, None)
+        wh = np.clip(bottom_right - top_left + 1.0, 0, None)
         overlap = wh[..., 0] * wh[..., 1]
         union = np.maximum(det_area[:, None] + gt_area[None, :] - overlap, np.finfo(np.float32).eps)
         return overlap / union
@@ -433,14 +425,6 @@ class VOCMeanAP:
 
     def _average_precision(self, recalls: np.ndarray, precisions: np.ndarray) -> np.ndarray:
         rows = recalls.shape[0]
-        if self.mode == "11points":
-            ap = np.zeros(rows)
-            for t in range(rows):
-                for point in np.arange(0.0, 1.1, 0.1):
-                    reached = precisions[t][recalls[t] >= point]
-                    ap[t] += reached.max() if reached.size else 0.0
-            return ap / 11.0
-
         mrec = np.hstack((np.zeros((rows, 1)), recalls, np.ones((rows, 1))))
         mpre = np.hstack((np.zeros((rows, 1)), precisions, np.zeros((rows, 1))))
         mpre = np.maximum.accumulate(mpre[:, ::-1], axis=1)[:, ::-1]
@@ -486,7 +470,7 @@ def evaluate_model(
     model.eval()
     # Headline numbers are mmdet-style VOC AP; COCO 101-point is kept as coco_*.
     coco_metric = MeanAveragePrecision(iou_type="bbox", backend="pycocotools")
-    voc_metric = VOCMeanAP(len(class_names), VOC_IOU_GRID, mode="area", legacy=True)
+    voc_metric = VOCMeanAP(len(class_names), VOC_IOU_GRID)
 
     num_classes = len(class_names) + 1
     conf_matrix = torch.zeros(num_classes, num_classes, dtype=torch.int64)
