@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -13,7 +14,12 @@ from .config import SymbolicTrainConfig
 from .evaluation import evaluate_symbolic_model as evaluate_symbolic_metrics
 from .evaluation import evaluate_symbolic_spatial_metrics
 from .sodt import SparseObliqueDecisionTreeClassifier
-from .tao import fit_tree_with_tao, postprocess_tree, raise_if_tree_collapsed
+from .tao import (
+    fit_tree_with_tao,
+    node_statistics,
+    postprocess_tree,
+    raise_if_tree_collapsed,
+)
 from util.io import ensure_dir, save_json
 
 
@@ -51,7 +57,7 @@ def _format_progress_header(
         ),
         (
             f"Workload check: {iterations} TAO iterations and up to "
-            f"{total_node_fit_upper_bound} LIBLINEAR node fits."
+            f"{total_node_fit_upper_bound} L1-logistic node fits."
         ),
         (
             "Each TAO iteration gets its own node-fit progress bar and remains visible after completion."
@@ -292,6 +298,22 @@ def train_symbolic_tree(
         latest_mimic_accuracy = metrics["mimic_accuracy"]
         latest_nonzero_weights = metrics["nonzero_weights"]
         _set_node_bar_status("iteration_done")
+        statuses = Counter(node["status"] for node in metrics["nodes"])
+        stops = Counter(node["stop_reason"] for node in metrics["nodes"])
+        tqdm.write(
+            f"TAO {metrics['iteration']}/{sodt_config['iterations']} done in "
+            f"{_format_duration(metrics['duration_seconds'])} | objective {metrics['objective']:.1f} | "
+            f"mimic {metrics['mimic_accuracy']:.4f} | nonzero {metrics['nonzero_weights']} | "
+            f"{metrics['active_internal_nodes']} active nodes: {statuses['accepted']} accepted, {statuses['rejected']} rejected, "
+            f"{statuses['no_split_gain']} no-gain, {statuses['empty']} empty | "
+            f"solver stops: {stops['converged']} converged, {stops['cap']} cap, {stops['abnormal']} abnormal"
+        )
+
+    def _node_text(event: dict[str, Any]) -> str:
+        text = f"node {event['node_index']} d{event['depth']} rows {event['samples_at_node']:,}"
+        if event.get("care_count"):
+            text += f" care {event['care_count']:,}"
+        return text
 
     def _on_node(event: dict[str, Any]) -> None:
         nonlocal current_iteration, current_node_bar
@@ -306,14 +328,23 @@ def train_symbolic_tree(
                 leave=True,
             )
 
-        status = str(event.get("status", "solving"))
-        if event["phase"] == "start":
-            _set_node_bar_status(status)
-            return
-
-        if current_node_bar is not None:
-            current_node_bar.update(1)
-        _set_node_bar_status(status)
+        text = _node_text(event)
+        if event["phase"] == "stage":
+            text += f" | {event['stage']}"
+        elif event["phase"] == "solver":
+            # ratio <= 1 means the fit has reached its stop target.
+            text += (
+                f" | it {event['solver_iter']} obj {event['surrogate']:.4g} "
+                f"ratio {event['stop_ratio']:.3g}"
+            )
+        elif event["phase"] == "end":
+            text += (
+                f" | {event['status']} it {event['solver_iters']} "
+                f"nz {event['nonzero']} {_format_duration(event['seconds'])}"
+            )
+            if current_node_bar is not None:
+                current_node_bar.update(1)
+        _set_node_bar_status(text)
 
     tree = _build_symbolic_tree(
         bundle,
@@ -459,6 +490,9 @@ def prune_symbolic_tree(
     )
     raise_if_tree_collapsed(tree)
 
+    # Zeroed nodes route everything left, so the diagram's counts come from the pruned tree itself.
+    node_sample_counts, leaf_class_counts = node_statistics(tree, feature_matrix, labels)
+
     print()
     tree_metrics = _augment_tree_metrics(tree, {})
     history = list(checkpoint.get("history", []))
@@ -503,6 +537,8 @@ def prune_symbolic_tree(
         "sparsity_alpha": sparsity_alpha,
         "class_weights": training_config.get("class_weights"),
         "training_config": training_config,
+        "node_sample_counts": node_sample_counts,
+        "leaf_class_counts": leaf_class_counts,
     }
 
     if summary_path is not None:

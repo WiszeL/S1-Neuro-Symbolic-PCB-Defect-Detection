@@ -1,13 +1,16 @@
-"""Sanity check: the flattened grid still carries spatial layout."""
+"""Figures for the symbolic tree: spatial-layout check, TAO training dashboard, node weight maps."""
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 
 
 def _load_manifest_and_features(
@@ -181,4 +184,92 @@ def visualize_spatial_topology(
 
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.subplots_adjust(wspace=0.15, hspace=0.3)
+    return fig
+
+
+_NODE_STATUS = {  # (colour, meaning). Blue/orange stay apart under colour-blindness; grey = nothing to fit.
+    "accepted": ("#2F6F9F", "accepted: new fit kept"),
+    "rejected": ("#D97941", "rejected: new fit scored worse, old kept"),
+    "no_split_gain": ("#B8B8B8", "no split gain: children agree, nothing to learn"),
+    "empty": ("#F0F0F0", "empty: no rows reach this node"),
+}
+
+
+def plot_training_dashboard(history: list[dict[str, Any]]) -> plt.Figure:
+    """TAO curves per iteration, then what happened at every node in every iteration."""
+    iterations = [entry for entry in history if "postprocess_pruned_nodes" not in entry]  # Pruning entry has no node log.
+    x = [entry["iteration"] for entry in iterations]
+    fig = plt.figure(figsize=(14, 15), constrained_layout=True)
+    grid = fig.add_gridspec(3, 2, height_ratios=[1, 1, 2.6])
+    curves = (
+        ("objective", "Objective (weighted loss + L1)\nlower is better"),
+        ("mimic_accuracy", "Train mimic accuracy\nhigher is better"),
+        ("nonzero_weights", "Nonzero weights\nlower = sparser, easier to read"),
+        ("duration_seconds", "Seconds per iteration\nlower is faster"),
+    )
+    for slot, (key, title) in enumerate(curves):
+        ax = fig.add_subplot(grid[slot // 2, slot % 2])
+        ax.plot(x, [entry[key] for entry in iterations], color="#2F6F9F", marker="o", lw=2)
+        ax.set(title=title, xlabel="TAO iteration")
+        ax.grid(alpha=0.25)
+        ax.set_xticks(x)
+
+    statuses = list(_NODE_STATUS)
+    num_nodes = len(iterations[0]["nodes"])
+    status = np.zeros((num_nodes, len(x)))
+    care = np.zeros_like(status)
+    for col, entry in enumerate(iterations):
+        for node in entry["nodes"]:
+            status[node["node_index"], col] = statuses.index(node["status"])
+            care[node["node_index"], col] = np.log10(node["care_count"] + 1)
+    status_ax = fig.add_subplot(grid[2, 0])
+    care_ax = fig.add_subplot(grid[2, 1], sharey=status_ax)
+    care_ax.tick_params(labelleft=False)
+    extent = (x[0] - 0.5, x[-1] + 0.5, num_nodes - 0.5, -0.5)  # Row 0 (root) on top.
+    status_ax.imshow(
+        status, aspect="auto", extent=extent, interpolation="nearest",
+        cmap=ListedColormap([color for color, _ in _NODE_STATUS.values()]), vmin=-0.5, vmax=len(statuses) - 0.5,
+    )
+    status_ax.legend(
+        handles=[Patch(fc=color, ec="#888888", label=label) for color, label in _NODE_STATUS.values()],
+        loc="upper center", bbox_to_anchor=(0.5, -0.06), ncol=2, frameon=False,
+    )
+    status_ax.set_title("What happened to each node, per iteration\n(mostly blue = healthy; many orange = still searching)")
+    shown = care_ax.imshow(care, aspect="auto", extent=extent, interpolation="nearest", cmap="Blues")
+    fig.colorbar(shown, ax=care_ax, shrink=0.6, label="log10(rows the node cares about + 1)")
+    care_ax.set_title("Rows that decide each split (care set)\ndarker = more rows = slower solve")
+    for ax in (status_ax, care_ax):
+        ax.set_xticks(x)
+        ax.set_xlabel("TAO iteration")
+    status_ax.set_yticks(range(num_nodes))
+    status_ax.tick_params(axis="y", labelsize=6)
+    status_ax.set_ylabel("node index")
+    return fig
+
+
+def plot_node_weight_maps(tree: Any) -> plt.Figure:
+    """Each live node: where |w| sits on the pooled grid (top) and in which channels (bottom)."""
+    columns = 6
+    counts = tree.nonzero_weight_counts()
+    nodes = [node for node, count in enumerate(counts) if count]
+    rows = math.ceil(len(nodes) / columns)
+    channels_n, height, width = tree.feature_shape
+    fig = plt.figure(figsize=(3 * columns, 3.2 * rows))  # Fixed layout: 126 axes make constrained_layout slow.
+    grid = fig.add_gridspec(rows, columns, hspace=0.25, wspace=0.1, left=0.02, right=0.98, top=0.95, bottom=0.02)
+    fig.suptitle(
+        "Node weight maps (inside each panel: darker / taller = larger |w| = more influence on the split)\n"
+        f"top: where on the {height}x{width} grid, bottom: which of the {channels_n} channels"
+    )
+    for slot, node in enumerate(nodes):
+        weights = np.abs(tree.node_weight_grid(node))  # (channels, height, width)
+        spatial, channels = grid[divmod(slot, columns)].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.1).subplots()
+        spatial.imshow(weights.sum(axis=0), cmap="Blues", interpolation="nearest")
+        spatial.set_title(f"N{node} d{tree.depth_of(node)}  nz={counts[node]}", fontsize=9)
+        spatial.set_xticks([])
+        spatial.set_yticks([])
+        channels.stairs(weights.sum(axis=(1, 2)), np.arange(channels_n + 1) - 0.5, fill=True, color="#2F6F9F")
+        channels.set_xlim(-0.5, channels_n - 0.5)
+        channels.set_ylim(bottom=0)
+        channels.set_yticks([])
+        channels.tick_params(labelsize=6)
     return fig

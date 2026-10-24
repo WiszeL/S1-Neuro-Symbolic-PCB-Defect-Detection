@@ -4,17 +4,31 @@ from time import perf_counter
 from typing import Any, Callable
 
 import numpy as np
+from scipy.optimize import Bounds, minimize
+from scipy.special import expit
+from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from .sodt import SparseObliqueDecisionTreeClassifier
 from util.features import ensure_float32
 
 
-_TAO_CHUNK_SIZE = 2048
+# 1024 rows x 3136 x 4 B = 12.8 MB stays in the i5-13500's 24 MB L3 between the solver's two matvecs.
+_TAO_CHUNK_SIZE = 1024
+
+# The solver is memory-bound: 20 BLAS threads contend for the same memory channels. Measured on a
+# 120k-row node: 62 ms per evaluation at 6 threads vs 112 ms at 20.
+_SOLVER_BLAS_THREADS = 6
 
 
 # Gaussian init per both papers; the scale only picks which local optimum the first fit lands in.
 _INIT_WEIGHT_SCALE = 1.0
+
+# Every value record["status"] can take; the dashboard and tests are keyed on it.
+NODE_STATUSES = ("accepted", "rejected", "no_split_gain", "empty")
+
+# Solver info for a node that never reached the solver (empty, or nothing to gain).
+_NO_SOLVE = {"iterations": 0, "stop_reason": None, "stop_ratio": None}
 
 
 def initialize_tree_weights(
@@ -131,6 +145,27 @@ def compute_reduced_sets(
     return reduced_sets
 
 
+def node_statistics(
+    tree: SparseObliqueDecisionTreeClassifier,
+    features: np.ndarray,
+    labels: np.ndarray,
+) -> tuple[list[int], list[list[int]]]:
+    """Rows reaching every node, and each leaf's class counts (what the tree diagram prints)."""
+    reduced_sets = compute_reduced_sets(tree, features)
+    node_sample_counts = [
+        int(reduced_sets[node].size)
+        for node in range(tree.num_internal_nodes + tree.num_leaves)
+    ]
+    leaf_class_counts = [
+        np.bincount(
+            labels[reduced_sets[tree.num_internal_nodes + leaf]],
+            minlength=tree.num_classes,
+        ).tolist()
+        for leaf in range(tree.num_leaves)
+    ]
+    return node_sample_counts, leaf_class_counts
+
+
 def update_leaf_predictions(
     tree: SparseObliqueDecisionTreeClassifier,
     labels: np.ndarray,
@@ -152,89 +187,137 @@ def update_leaf_predictions(
         tree.leaf_labels[leaf_offset] = int(counts.argmax())
 
 
-def _prepare_reduced_problem_batch(
+def _logistic_loss_and_grad(
+    weights: np.ndarray,
+    bias: float,
     features: np.ndarray,
-    labels: np.ndarray,
-    sample_weights: np.ndarray,
-    indices: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Materialize the rows a node's reduced problem will fit on.
+    signs: np.ndarray,
+    costs: np.ndarray,
+) -> tuple[float, np.ndarray, float]:
+    """Cost-weighted logistic loss and its gradient in one chunked float32 pass."""
+    weights32 = weights.astype(np.float32)
+    loss = 0.0
+    grad_w = np.zeros(weights.shape, dtype=np.float64)
+    grad_b = 0.0
+    for start in range(0, features.shape[0], _TAO_CHUNK_SIZE):
+        stop = start + _TAO_CHUNK_SIZE
+        rows = features[start:stop]
+        sign, cost = signs[start:stop], costs[start:stop]
+        margin = sign * ((rows @ weights32) + bias)
+        loss += float(cost @ np.logaddexp(0.0, -margin))
+        residual = -cost * sign * expit(-margin)
+        grad_w += rows.T @ residual.astype(np.float32)
+        grad_b += residual.sum()
+    return loss, grad_w, grad_b
 
-    Split out from the solver so the acceptance check (below) can score the
-    old vs. new weights on the exact same batch without a second data read.
-    Returns None for an empty reduced set.
-    """
-    if labels.size == 0:
-        return None
 
-    # Only this node's rows ever leave the disk.
-    if indices is not None:
-        features = _select_rows(features, indices)
-    else:
-        features = np.asarray(features, dtype=np.float32)
-
-    labels = np.asarray(labels, dtype=np.int64)
-    sample_weights = np.asarray(sample_weights, dtype=np.float32)
-    return features, labels, sample_weights
+def _l1_violation(z: np.ndarray, grad: np.ndarray) -> float:
+    """Projected-gradient L1 norm over z >= 0, the quantity LIBLINEAR's L1 stop test shrinks."""
+    return float(np.abs(np.where(z > 0.0, grad, np.minimum(grad, 0.0))).sum())
 
 
 def solve_l1_logistic_reduced_problem(
     features: np.ndarray,
     labels: np.ndarray,
     sample_weights: np.ndarray,
-    indices: np.ndarray | None = None,
     l1_lambda: float = 0.1,
     max_iter: int = 200,
     tolerance: float = 1e-4,
     zero_threshold: float = 1e-5,
-    random_state: int = 42,
-) -> tuple[np.ndarray, float]:
-    batch = _prepare_reduced_problem_batch(
-        features, labels, sample_weights, indices
-    )
-    if batch is None:
-        dim = features.shape[1]
-        return np.zeros((dim,), dtype=np.float32), 0.0
+    init: tuple[np.ndarray, float] | None = None,
+    solver_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[np.ndarray, float, dict[str, Any]]:
+    """LIBLINEAR's L1R_LR problem, solved without copying `features`.
 
-    batch_features, batch_labels, batch_sample_weights = batch
+    min  sum_i (s_i / lambda) * log(1 + exp(-y_i (w.x_i + b)))  +  |w|_1 + |b|
+    The bias is penalized like sklearn's liblinear does. L-BFGS-B on w = p - q,
+    b = bp - bq (all >= 0), one chunked pass over `features` per evaluation.
+    `init` = (weights, bias) warm-starts the (convex) fit: same optimum, fewer iterations.
+    """
+    dim = features.shape[1]
+    positive = labels == 1
+    positives = int(positive.sum())
+    if positives in (0, labels.size):  # One class: no split signal, constant answer.
+        bias = 1.0 if positives else -1.0
+        info = {"iterations": 0, "stop_reason": "trivial", "surrogate": None, "stop_ratio": None}
+        return np.zeros((dim,), dtype=np.float32), bias, info
 
-    unique_labels = np.unique(batch_labels)
-    if unique_labels.size == 1:
-        bias = 1.0 if int(unique_labels[0]) == 1 else -1.0
-        return np.zeros((batch_features.shape[1],), dtype=np.float32), float(bias)
+    costs = sample_weights.astype(np.float64) / max(float(l1_lambda), 1e-12)
+    signs = np.where(positive, 1.0, -1.0)
+    # LIBLINEAR stops once the violation falls to eps x its value at w = 0.
+    eps = tolerance * max(min(positives, labels.size - positives), 1) / labels.size
+    state: dict[str, Any] = {"iterations": 0}
+    # scipy keeps `fun` alive in a reference cycle past this call; clearing this list frees the batch.
+    data = [features]
 
+    def unpack(z: np.ndarray) -> tuple[np.ndarray, float]:
+        return z[:dim] - z[dim : 2 * dim], z[2 * dim] - z[2 * dim + 1]
+
+    def fun(z: np.ndarray) -> tuple[float, np.ndarray]:
+        w, b = unpack(z)
+        loss, grad_w, grad_b = _logistic_loss_and_grad(w, b, data[0], signs, costs)
+        grad = np.concatenate(
+            [grad_w + 1.0, 1.0 - grad_w, [grad_b + 1.0, 1.0 - grad_b]]
+        )
+        state["surrogate"], state["grad"] = loss + z.sum(), grad
+        if "initial" not in state:  # First evaluation is at w = 0.
+            state["initial"] = _l1_violation(z, grad)
+        return state["surrogate"], grad
+
+    def on_iteration(z: np.ndarray) -> None:
+        state["iterations"] += 1
+        violation = _l1_violation(z, state["grad"])  # grad is from z's own evaluation.
+        target = eps * state["initial"]
+        # Taken here, not after minimize: a failed line search leaves result.x behind the last fun() call.
+        state["stop_ratio"] = violation / max(target, 1e-300)
+        if solver_callback is not None and state["iterations"] % 10 == 0:
+            solver_callback(
+                {
+                    "solver_iter": state["iterations"],
+                    "surrogate": state["surrogate"],
+                    "stop_ratio": state["stop_ratio"],
+                }
+            )
+        if violation <= target:
+            state["converged"] = True
+            raise StopIteration
+
+    start = np.zeros(2 * dim + 2)
     try:
-        from sklearn.linear_model import LogisticRegression
-    except ImportError as exc:
-        raise RuntimeError(
-            "scikit-learn is required for the paper-faithful TAO reduced-problem solver."
-        ) from exc
+        with threadpool_limits(limits=_SOLVER_BLAS_THREADS, user_api="blas"):
+            if init is not None:
+                fun(start)  # The stop target stays defined at w = 0, as in LIBLINEAR, wherever we start.
+                w0, b0 = init[0].astype(np.float64), init[1]
+                start[:dim], start[dim : 2 * dim] = np.maximum(w0, 0.0), np.maximum(-w0, 0.0)
+                start[2 * dim], start[2 * dim + 1] = max(b0, 0.0), max(-b0, 0.0)
+            result = minimize(
+                fun,
+                start,
+                jac=True,
+                method="L-BFGS-B",
+                bounds=Bounds(0.0, np.inf),
+                callback=on_iteration,
+                # ftol/gtol 0: only the LIBLINEAR rule above (or the cap) ends the fit.
+                options={"maxiter": max_iter, "maxfun": 5 * max_iter, "ftol": 0.0, "gtol": 0.0},
+            )
+    finally:
+        data.clear()
 
-    # Solver: L1 logistic via LIBLINEAR, the paper's solver family.
-    # LIBLINEAR takes C, so convert our lambda (C = 1/lambda).
-
-    # Upcast for LIBLINEAR, dropping the float32 copy so RAM holds one.
-    features_64 = batch_features.astype(np.float64)
-
-    effective_lambda = max(float(l1_lambda), 1e-12)
-    effective_C = max(1.0 / effective_lambda, 1e-12)
-    model = LogisticRegression(
-        penalty="l1",
-        solver="liblinear",
-        fit_intercept=True,
-        C=effective_C,
-        random_state=random_state,
-        tol=tolerance,
-        max_iter=max_iter,
-    )
-
-    model.fit(features_64, batch_labels, sample_weight=batch_sample_weights)
-
-    learned_weights = model.coef_[0].astype(np.float32)
+    if state.get("converged") or state["initial"] == 0.0:
+        stop_reason = "converged"
+    else:
+        stop_reason = "cap" if result.status == 1 else "abnormal"
+    learned_weights, learned_bias = unpack(result.x)
+    learned_weights = learned_weights.astype(np.float32)
     learned_weights[np.abs(learned_weights) < zero_threshold] = 0.0
-    bias = float(model.intercept_[0])
-
-    return learned_weights, bias
+    info = {
+        "iterations": state["iterations"],
+        "stop_reason": stop_reason,
+        "surrogate": float(result.fun),
+        # <= 1 means converged; None = the line search failed before the first iteration finished.
+        "stop_ratio": state.get("stop_ratio", 0.0 if state["initial"] == 0.0 else None),
+    }
+    return learned_weights, float(learned_bias), info
 
 
 def _reduced_problem_objective(
@@ -246,12 +329,10 @@ def _reduced_problem_objective(
     effective_lambda: float,
 ) -> float:
     """This node's own score: mistakes plus sparsity penalty."""
-    scores = features.astype(np.float64) @ weights.astype(np.float64) + bias
-    predicted_left = (scores >= 0.0).astype(np.int64)  # Same left-rule as sodt.py.
-    loss = float(
-        np.sum((predicted_left != labels).astype(np.float64) * sample_weights)
-    )
-    penalty = float(effective_lambda) * float(np.sum(np.abs(weights)))
+    scores = _score_rows_for_node(features, np.arange(features.shape[0]), weights, bias)
+    go_left = scores >= 0.0  # Same float32 score and left-rule as sodt.py.
+    loss = float(np.sum((go_left != labels) * sample_weights, dtype=np.float64))
+    penalty = float(effective_lambda) * float(np.sum(np.abs(weights), dtype=np.float64))
     return loss + penalty
 
 
@@ -264,10 +345,10 @@ def _accept_or_reject_node_update(
     new_weights: np.ndarray,
     new_bias: float,
     effective_lambda: float,
-) -> tuple[np.ndarray, float]:
-    """Keep the new fit only if this node's own score didn't get worse."""
+) -> tuple[np.ndarray, float, bool]:
+    """Keep the new fit only if this node's own score didn't get worse: (weights, bias, accepted)."""
     if not np.any(old_weights) and old_bias == 0.0:
-        return new_weights, new_bias  # No baseline yet, so the first fit always wins.
+        return new_weights, new_bias, True  # No baseline yet, so the first fit always wins.
     old_objective = _reduced_problem_objective(
         batch_features, batch_labels, batch_sample_weights,
         old_weights, old_bias, effective_lambda,
@@ -277,8 +358,8 @@ def _accept_or_reject_node_update(
         new_weights, new_bias, effective_lambda,
     )
     if new_objective <= old_objective:
-        return new_weights, new_bias
-    return old_weights, old_bias
+        return new_weights, new_bias, True
+    return old_weights, old_bias, False
 
 
 def evaluate_tree(
@@ -383,7 +464,7 @@ def postprocess_tree(
         if node_rs.size == 0:
             if np.any(tree.node_weights[node_index] != 0.0):
                 if verbose:
-                    depth = int(np.floor(np.log2(node_index + 1)))
+                    depth = tree.depth_of(node_index)
                     print(
                         f"  Node {node_index} (depth {depth}): pruned — dead branch (0 samples)"
                     )
@@ -394,7 +475,7 @@ def postprocess_tree(
         reachable_labels = _subtree_leaf_labels(node_index)
         if len(reachable_labels) == 1:
             if verbose:
-                depth = int(np.floor(np.log2(node_index + 1)))
+                depth = tree.depth_of(node_index)
                 if class_names:
                     leaf_class = class_names[next(iter(reachable_labels))]
                     print(
@@ -451,117 +532,126 @@ def fit_tree_with_tao(
     if not freshly_initialized:
         update_leaf_predictions(tree, labels, reduced_sets, class_weights=class_weights)
 
+    def emit(event: dict[str, Any], **fields: Any) -> None:
+        if node_progress_callback is not None:
+            node_progress_callback({**event, **fields})
+
+    def solve_node(
+        node_index: int,
+        node_indices: np.ndarray,
+        node_event: dict[str, Any],
+        warm: bool,
+    ) -> tuple[str, dict[str, Any]]:
+        """Refit one node: (status, solver_info). Its batch dies with this frame."""
+        if node_indices.size == 0:
+            tree.node_weights[node_index] = 0.0
+            tree.node_bias[node_index] = 0.0
+            return "empty", _NO_SOLVE
+
+        emit(node_event, phase="stage", stage="routing")
+        node_labels = labels[node_indices]
+        left_predictions = _predict_from_node_for_indices(
+            tree, features, node_indices, tree.left_child(node_index)
+        )
+        right_predictions = _predict_from_node_for_indices(
+            tree, features, node_indices, tree.right_child(node_index)
+        )
+
+        left_loss = (left_predictions != node_labels).astype(np.float32)
+        right_loss = (right_predictions != node_labels).astype(np.float32)
+        sample_weights = np.abs(left_loss - right_loss)
+
+        # Misrouting weighted classes costs more, so boundaries lean away from background.
+        if class_weights is not None:
+            sample_weights *= class_weights[node_labels].astype(np.float32)
+
+        positive_weight_mask = sample_weights > 0.0
+        care_count = int(positive_weight_mask.sum())
+        node_event["care_count"] = care_count
+        if care_count == 0:
+            return "no_split_gain", _NO_SOLVE
+
+        pseudolabels = (left_loss <= right_loss).astype(np.int64)
+
+        # Penalty sized by this node's sample count (Kairgeldin's alpha weighting).
+        effective_lambda = float(
+            l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha)
+        )
+
+        emit(node_event, phase="stage", stage="loading")
+        # Only this node's care rows leave the disk; the solver reads them in chunks.
+        batch_features = _select_rows(features, node_indices[positive_weight_mask])
+        batch_labels = pseudolabels[positive_weight_mask]
+        batch_sample_weights = sample_weights[positive_weight_mask]
+
+        old_weights = tree.node_weights[node_index].copy()
+        old_bias = float(tree.node_bias[node_index])
+        emit(node_event, phase="stage", stage="solving")
+        weights, bias, solver_info = solve_l1_logistic_reduced_problem(
+            batch_features,
+            batch_labels,
+            batch_sample_weights,
+            l1_lambda=effective_lambda,
+            max_iter=logistic_max_iter,
+            tolerance=tolerance,
+            zero_threshold=zero_threshold,
+            init=(old_weights, old_bias) if warm else None,
+            solver_callback=lambda info: emit(node_event, phase="solver", **info),
+        )
+
+        # Accept
+        chosen_weights, chosen_bias, accepted = _accept_or_reject_node_update(
+            batch_features,
+            batch_labels,
+            batch_sample_weights,
+            old_weights,
+            old_bias,
+            weights,
+            bias,
+            effective_lambda,
+        )
+        tree.node_weights[node_index] = chosen_weights
+        tree.node_bias[node_index] = chosen_bias
+        return ("accepted" if accepted else "rejected"), solver_info
+
     for iteration_index in iteration_range:
         iteration_start = perf_counter()
+        # Iteration 1 of a fresh tree solves from zero, not from the random init.
+        warm = iteration_index > 0 or not freshly_initialized
+        node_records: list[dict[str, Any]] = []
 
         # Solve nodes
         for node_index in range(tree.num_internal_nodes - 1, -1, -1):
+            node_started = perf_counter()
             node_indices = reduced_sets.get(node_index, np.zeros((0,), dtype=np.int64))
             node_event = {
                 "phase": "start",
                 "iteration": iteration_index + 1,
                 "iterations": iterations,
                 "node_index": node_index,
-                "node_number": node_index + 1,
-                "node_position": tree.num_internal_nodes - node_index,
                 "num_internal_nodes": tree.num_internal_nodes,
+                "depth": tree.depth_of(node_index),
                 "samples_at_node": int(node_indices.size),
-                "logistic_max_iter": logistic_max_iter,
+                "care_count": 0,  # solve_node fills this in once it has counted.
             }
-            if node_progress_callback is not None:
-                node_progress_callback(node_event)
+            emit(node_event)
 
-            if node_indices.size == 0:
-                tree.node_weights[node_index] = 0.0
-                tree.node_bias[node_index] = 0.0
-                if node_progress_callback is not None:
-                    node_progress_callback(
-                        {**node_event, "phase": "end", "status": "empty"}
-                    )
-                continue
-
-            node_labels = labels[node_indices]
-            left_predictions = _predict_from_node_for_indices(
-                tree,
-                features,
-                node_indices,
-                tree.left_child(node_index),
-            )
-            right_predictions = _predict_from_node_for_indices(
-                tree,
-                features,
-                node_indices,
-                tree.right_child(node_index),
-            )
-
-            left_loss = (left_predictions != node_labels).astype(np.float32)
-            right_loss = (right_predictions != node_labels).astype(np.float32)
-            sample_weights = np.abs(left_loss - right_loss)
-
-            # Misrouting weighted classes costs more, so boundaries lean away from background.
-            if class_weights is not None:
-                sample_weights *= class_weights[node_labels].astype(np.float32)
-
-            positive_weight_mask = sample_weights > 0.0
-
-            if not np.any(positive_weight_mask):
-                if node_progress_callback is not None:
-                    node_progress_callback(
-                        {**node_event, "phase": "end", "status": "no_split_gain"}
-                    )
-                continue
-
-            pseudolabels = (left_loss <= right_loss).astype(np.int64)
-            solver_indices = node_indices[positive_weight_mask]
-
-            # Penalty sized by this node's sample count (same lambda-to-C deal as above).
-            effective_lambda = float(
-                l1_lambda * float(max(node_indices.size, 1) ** sparsity_alpha)
-            )
-
-            # Stream rows in chunks so big nodes never sit fully in RAM.
-            batch = _prepare_reduced_problem_batch(
-                features,
-                pseudolabels[positive_weight_mask],
-                sample_weights[positive_weight_mask],
-                indices=solver_indices,
-            )
-            batch_features, batch_labels, batch_sample_weights = batch
-
-            weights, bias = solve_l1_logistic_reduced_problem(
-                batch_features,
-                batch_labels,
-                batch_sample_weights,
-                l1_lambda=effective_lambda,
-                max_iter=logistic_max_iter,
-                tolerance=tolerance,
-                zero_threshold=zero_threshold,
-                random_state=random_state,
-            )
-
-            # Accept
-            weights, bias = _accept_or_reject_node_update(
-                batch_features,
-                batch_labels,
-                batch_sample_weights,
-                tree.node_weights[node_index].copy(),
-                float(tree.node_bias[node_index]),
-                weights,
-                bias,
-                effective_lambda,
-            )
-            tree.node_weights[node_index] = weights
-            tree.node_bias[node_index] = bias
-
-            if node_progress_callback is not None:
-                node_progress_callback(
-                    {
-                        **node_event,
-                        "phase": "end",
-                        "status": "fit",
-                        "effective_lambda": effective_lambda,
-                    }
-                )
+            status, solver_info = solve_node(node_index, node_indices, node_event, warm)
+            record = {
+                "node_index": node_index,
+                "depth": node_event["depth"],
+                "status": status,
+                "samples_at_node": node_event["samples_at_node"],
+                "care_count": node_event["care_count"],
+                "warm": warm and node_event["care_count"] > 0,
+                "solver_iters": solver_info["iterations"],
+                "stop_reason": solver_info["stop_reason"],
+                "stop_ratio": solver_info["stop_ratio"],
+                "nonzero": int(np.count_nonzero(tree.node_weights[node_index])),
+                "seconds": perf_counter() - node_started,
+            }
+            node_records.append(record)
+            emit(node_event, **record, phase="end")
 
         # Refresh routing
         reduced_sets = compute_reduced_sets(tree, features)
@@ -577,6 +667,7 @@ def fit_tree_with_tao(
             class_weights=class_weights,
         )
         metrics["iteration"] = iteration_index + 1
+        metrics["nodes"] = node_records
         metrics["duration_seconds"] = perf_counter() - iteration_start
         history.append(metrics)
         if progress_callback is not None:

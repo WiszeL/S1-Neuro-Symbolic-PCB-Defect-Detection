@@ -53,6 +53,10 @@ class SparseObliqueDecisionTreeClassifier:
     def right_child(self, node_index: int) -> int:
         return (2 * node_index) + 2
 
+    @staticmethod
+    def depth_of(node_index: int) -> int:
+        return (node_index + 1).bit_length() - 1
+
     def is_leaf_node(self, node_index: int) -> bool:
         return node_index >= self.num_internal_nodes
 
