@@ -642,8 +642,11 @@ def breakdown_nesy_misses(
     tree: Any,
     score_threshold: float,
     iou_threshold: float,
+    nesy_score_threshold: float | None = None,
 ) -> dict[str, Any]:
     """Ground truths FRCNN finds at the P/R operating point and NeSy does not, by cause.
+
+    `nesy_score_threshold` is NeSy's own operating point (default: `score_threshold`).
 
     "score": NeSy has a same-class detection on it, scored under the threshold.
     "class": NeSy has a detection on it at or above the threshold, of another class.
@@ -653,6 +656,7 @@ def breakdown_nesy_misses(
     weakest node is the path node with the lowest γ·log σ(|margin|) of the best-scored
     such detection; its depth is counted (0 = root). Detections need `pooled_features`.
     """
+    nesy_threshold = score_threshold if nesy_score_threshold is None else nesy_score_threshold
     causes: dict[int, dict[str, int]] = defaultdict(lambda: {"score": 0, "class": 0, "none": 0})
     frcnn_hits: dict[int, int] = defaultdict(int)
     weakest_depth: dict[int, int] = defaultdict(int)
@@ -662,7 +666,7 @@ def breakdown_nesy_misses(
             if not _found(frcnn, gt_box, gt_label, score_threshold, iou_threshold):
                 continue
             frcnn_hits[gt_label] += 1
-            if _found(nesy, gt_box, gt_label, score_threshold, iou_threshold):
+            if _found(nesy, gt_box, gt_label, nesy_threshold, iou_threshold):
                 continue
 
             overlap = box_iou(nesy["boxes"], gt_box[None])[:, 0] >= iou_threshold
@@ -675,7 +679,7 @@ def breakdown_nesy_misses(
                 )
                 weakest = int(np.argmin(log_certainties[0] * tree.margin_exponents))
                 weakest_depth[tree.depth_of(weakest)] += 1
-            elif bool((overlap & (nesy["scores"] >= score_threshold)).any()):
+            elif bool((overlap & (nesy["scores"] >= nesy_threshold)).any()):
                 causes[gt_label]["class"] += 1
             else:
                 causes[gt_label]["none"] += 1

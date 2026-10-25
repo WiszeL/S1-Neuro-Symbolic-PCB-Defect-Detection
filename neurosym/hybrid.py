@@ -73,9 +73,7 @@ class NeuroSymbolicDetector(nn.Module):
         featmap_names = list(self.detector.roi_align.pool.featmap_names)
         roi_representations = self.detector.box_head(pooled_features)
         box_regression = self.detector.box_predictor.box_regressor(roi_representations)
-        symbolic_probabilities, symbolic_leaf_indices = self._symbolic_predict(
-            pooled_features
-        )
+        symbolic_probabilities, symbolic_leaf_indices = self._symbolic_predict(pooled_features)
 
         results = postprocess_symbolic_detections(
             detector=self.detector,

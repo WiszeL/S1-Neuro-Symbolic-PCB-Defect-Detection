@@ -2,6 +2,12 @@ data:
   neg_ratio: 2
   storage_dtype: float32
 
+# Routing-margin exponents are fitted to "is this RoI a correct detection": a ground truth of the
+# leaf's class at IoU >= this. 0.5 is the Faster R-CNN foreground threshold, not tuned. (Not named
+# margin_fit: that key in training_config marks a checkpoint whose exponents were fitted.)
+margin_target:
+  iou: 0.5
+
 # Fixed up front like the source papers — never tuned against any evaluation split.
 # Tree settings (depth, iterations, l1_lambda, sparsity_alpha, class_weights) are the ones the
 # old chosen.pt used; logistic_max_iter and tolerance are the new L-BFGS-B node solver's
@@ -9,8 +15,8 @@ data:
 search:
   tree_depth: 6
   iterations: 15
-  l1_lambda: 20.0
-  sparsity_alpha: 0.15
+  l1_lambda: .01
+  sparsity_alpha: 0.85
   # Per-node cap on L-BFGS-B iterations (formerly LIBLINEAR Newton steps); the slowest fit measured needed ~1000.
   logistic_max_iter: 2000
   # LIBLINEAR's stop rule at 1e-6 solves each node to within float32 precision of its optimum (sklearn's default

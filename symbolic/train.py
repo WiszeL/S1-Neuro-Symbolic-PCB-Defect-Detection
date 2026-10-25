@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import torch
 from scipy.optimize import minimize
+from torchvision.ops import box_iou
 from tqdm import tqdm
 
 from .dataset import open_exported_symbolic_array_payload
@@ -559,11 +560,11 @@ def solve_margin_exponents(
     log_certainties: np.ndarray,
     targets: np.ndarray,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """γ ≥ 0 minimizing mean BCE of s = exp(X γ) against the teacher's probability.
+    """γ ≥ 0 minimizing mean BCE of s = exp(X γ) against targets in [0, 1].
 
-    Log-binomial regression (binomial GLM, log link), no intercept. Convex in γ, so
-    one optimum. Columns of X that are zero on every row (never on a path, or
-    pruned) have no data and keep γ = 1.
+    Log-binomial regression (binomial GLM, log link). Convex in γ, so one
+    optimum. Columns of X that are zero on every row (never on a path, or pruned) have
+    no data and keep γ = 1.
     """
     if log_certainties.shape[0] == 0:
         raise ValueError("No defect rows to fit the margin exponents on.")
@@ -602,10 +603,49 @@ def solve_margin_exponents(
     }
 
 
+def gt_truth_targets(
+    leaf_classes: np.ndarray,
+    gt_classes: np.ndarray,
+    gt_iou: np.ndarray,
+    target_iou: float,
+) -> np.ndarray:
+    """1.0 where the RoI would be a correct detection: it overlaps a ground truth of the
+    leaf's class by at least `target_iou`; 0.0 otherwise (background, wrong class, poor box).
+    `gt_classes` is 0 for RoIs with no ground truth."""
+    return ((gt_classes == leaf_classes) & (gt_iou >= target_iou)).astype(np.float64)
+
+
+def _row_gt_classes(payload: dict[str, Any], bundle: Any, dataset: Any) -> np.ndarray:
+    """Class of the ground truth each export row was matched to (0 = none), rebuilt from
+    the dataset the export was made from: the row's `matched_gt_boxes` is one of that
+    image's target boxes, so the class is that box's label."""
+    records = payload["records"]
+    if len(records) != len(dataset):
+        raise ValueError(f"Export has {len(records)} images, dataset has {len(dataset)}.")
+    matched = bundle.matched_gt_boxes
+    gt_classes = np.zeros(matched.shape[0], dtype=np.int64)
+    for index, record in enumerate(tqdm(records, desc="GT classes of export rows", leave=False)):
+        start, stop = record["row_start"], record["row_stop"]
+        if stop == start:
+            continue
+        if Path(record["image_path"]).stem != dataset.samples[index].image_path.stem:
+            raise ValueError(f"Export image {index} is {record['image_path']}, dataset has {dataset.samples[index].image_path}.")
+        target = dataset[index][1]
+        overlaps = box_iou(matched[start:stop], target["boxes"])
+        best_iou, best_box = overlaps.max(dim=1)
+        has_gt = bundle.has_matched_gt[start:stop]
+        if bool((best_iou[has_gt] < 0.99).any()):
+            raise ValueError(f"Image {index}: matched GT boxes are not this dataset's targets (frame mismatch).")
+        gt_classes[start:stop] = np.where(has_gt.numpy(), target["labels"][best_box].numpy(), 0)
+    return gt_classes
+
+
 def fit_margin_exponents(
     *,
     tree: SparseObliqueDecisionTreeClassifier,
     export_path: str | Path,
+    dataset: Any,
+    target_iou: float,
     checkpoint_path: str | Path,
     summary_path: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -613,36 +653,39 @@ def fit_margin_exponents(
 
     Call after pruning: the tree is frozen, only `margin_exponents` change. Rows are
     the ones the tree routes to a defect leaf (the only ones that become detections),
-    target = the teacher's softmax probability for that leaf's class.
+    target = 1 if the RoI is a correct detection (ground truth of the leaf's class at
+    IoU >= `target_iou`, the Faster R-CNN foreground threshold), else 0. `dataset` is
+    the one the export was made from, to recover each row's ground-truth class.
     """
     payload = torch.load(export_path, map_location="cpu", weights_only=True)
     bundle = open_exported_symbolic_array_payload(payload, feature_dtype="float32")
     features = bundle.feature_vectors
-    teacher_scores = bundle.teacher_scores.numpy()
-    if features.shape[0] != teacher_scores.shape[0]:
-        raise ValueError("Export features and teacher scores disagree on row count.")
+    gt_classes = _row_gt_classes(payload, bundle, dataset)
+    gt_iou = bundle.gt_iou.numpy()
+    if features.shape[0] != gt_classes.shape[0]:
+        raise ValueError("Export features and ground-truth classes disagree on row count.")
 
     print(f"Fitting margin exponents on {features.shape[0]:,} trainval RoIs...", flush=True)
     t0 = perf_counter()
     certainty_blocks: list[np.ndarray] = []
     target_blocks: list[np.ndarray] = []
-    leaf_rows = np.zeros(tree.num_leaves, dtype=np.int64)
     for start in range(0, features.shape[0], _MARGIN_FIT_CHUNK):
         stop = min(start + _MARGIN_FIT_CHUNK, features.shape[0])
         leaf_indices, log_certainties = tree.path_log_certainties(features[start:stop])
         classes = tree.leaf_labels[leaf_indices]
         defect = classes != 0
-        leaf_rows += np.bincount(leaf_indices[defect], minlength=tree.num_leaves)
         certainty_blocks.append(log_certainties[defect])
         target_blocks.append(
-            np.take_along_axis(
-                teacher_scores[start:stop][defect], classes[defect, None], axis=1
-            )[:, 0]
+            gt_truth_targets(
+                classes[defect], gt_classes[start:stop][defect], gt_iou[start:stop][defect], target_iou
+            )
         )
 
-    exponents, fit = solve_margin_exponents(
-        np.concatenate(certainty_blocks), np.concatenate(target_blocks)
-    )
+    targets = np.concatenate(target_blocks)
+    exponents, fit = solve_margin_exponents(np.concatenate(certainty_blocks), targets)
+    fit["target"] = "gt_truth"
+    fit["target_iou"] = float(target_iou)
+    fit["positive_fraction"] = float(targets.mean())
     tree.margin_exponents = exponents
     print(
         f"Fit on {fit['rows']:,} defect-routed RoIs in {_format_duration(perf_counter() - t0)}: "
@@ -652,19 +695,6 @@ def fit_margin_exponents(
     for node, nonzero in enumerate(tree.nonzero_weight_counts()):
         if nonzero > 0:
             print(f"  N{node}: gamma = {exponents[node]:.3f}")
-
-    # A defect leaf whose whole path is γ = 0 scores exactly 1.0: ties come back for it.
-    active = np.any(tree.node_weights != 0.0, axis=1)
-    fit["tied_leaves"] = []
-    for leaf in np.flatnonzero((tree.leaf_labels != 0) & (leaf_rows > 0)):
-        node, path_gamma = tree.num_internal_nodes + int(leaf), 0.0
-        while node > 0:
-            node = (node - 1) // 2
-            if active[node]:
-                path_gamma += float(exponents[node])
-        if path_gamma < 1e-6:
-            fit["tied_leaves"].append(int(leaf))
-            print(f"WARNING: defect leaf {leaf} ({leaf_rows[leaf]:,} RoIs) has every path gamma = 0: all score 1.0")
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     checkpoint["tree_state"] = tree.to_state_dict()

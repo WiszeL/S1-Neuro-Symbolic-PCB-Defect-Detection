@@ -460,10 +460,15 @@ def evaluate_model(
     data_loader: DataLoader,
     device: torch.device,
     train_config: NeuroTrainConfig,
+    score_threshold: float | None = None,
 ) -> dict[str, Any]:
-    """Detection scores over a notebook-built dataloader."""
+    """Detection scores over a notebook-built dataloader.
+
+    `score_threshold` overrides the P/R operating point (config default for FRCNN)."""
 
     evaluation_config = train_config["evaluation"]
+    if score_threshold is None:
+        score_threshold = evaluation_config["precision_score_threshold"]
     class_names = train_config["dataset"]["class_names"]
 
     model.eval()
@@ -503,7 +508,7 @@ def evaluate_model(
                 prediction,
                 ground_truth,
                 iou_threshold=evaluation_config["precision_iou"],
-                score_threshold=evaluation_config["precision_score_threshold"],
+                score_threshold=score_threshold,
                 num_classes=len(class_names),
             )
             conf_matrix += pc["confusion"]
@@ -536,9 +541,7 @@ def evaluate_model(
         "eval_protocol": "voc_area_legacy",
         "precision": precision,
         "recall": recall,
-        "precision_recall_score_threshold": float(
-            evaluation_config["precision_score_threshold"]
-        ),
+        "precision_recall_score_threshold": float(score_threshold),
         "f1_score": 2 * precision * recall / max(precision + recall, 1e-10),
         "inference_time_ms": float(np.mean(forward_times)) * 1000
         if forward_times

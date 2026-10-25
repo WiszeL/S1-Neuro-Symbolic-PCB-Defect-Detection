@@ -46,5 +46,11 @@ train:
 evaluation:
   precision_iou: 0.5
   precision_score_threshold: 0.5
+  # NeSy's score (path margins^γ) is on its own scale: the lowest cutoff whose trainval precision
+  # (200 seeded images) is >= FRCNN's at 0.5. Derived for the γ of run1_gt_target.pt: refit or
+  # retrain the tree and this must be re-derived. (Recall-matched alternative: 0.6, see Contribution.md §3.3.)
+  nesy_score_threshold: 0.7
+  # Same rule for the plain γ = 1 ablation row (recall-matched alternative: 0.3).
+  nesy_plain_score_threshold: 0.4
   class_metrics: true
   iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85]

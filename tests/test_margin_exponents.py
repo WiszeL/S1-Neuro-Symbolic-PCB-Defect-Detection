@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
-from symbolic.train import solve_margin_exponents
+from symbolic.train import gt_truth_targets, solve_margin_exponents
 
 
 def _random_tree(seed: int = 0) -> SparseObliqueDecisionTreeClassifier:
@@ -75,7 +75,18 @@ def test_fit_recovers_exponents_and_keeps_them_nonnegative():
     assert fit["bce_fitted"] <= fit["bce_plain"]
 
 
+def test_gt_truth_target_is_one_only_for_a_correct_detection():
+    leaf = np.array([1, 1, 1, 2, 1])
+    gt_class = np.array([1, 2, 1, 2, 0])  # row 1: wrong class; row 4: no ground truth
+    gt_iou = np.array([0.9, 0.9, 0.3, 0.5, 0.0])  # row 2: poor box; row 3: exactly at the threshold
+
+    targets = gt_truth_targets(leaf, gt_class, gt_iou, 0.5)
+
+    assert targets.tolist() == [1.0, 0.0, 0.0, 1.0, 0.0]
+
+
 if __name__ == "__main__":
+    test_gt_truth_target_is_one_only_for_a_correct_detection()
     test_unit_exponents_reproduce_the_plain_product()
     test_exponents_scale_the_log_certainty_of_their_node()
     test_exponents_round_trip_and_are_required()
