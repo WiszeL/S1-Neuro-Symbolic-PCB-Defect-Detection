@@ -14,9 +14,8 @@ from util.device import select_device
 from .heatmap import (
     compute_symbolic_heatmap,
     compute_node_local_evidence_maps,
-    compute_exact_attribution,
-    node_fpn_maps,
-    project_heatmap_to_image,
+    fpn_node_maps,
+    fpn_node_maps_many,
 )
 from .hybrid import NeuroSymbolicDetector
 
@@ -74,69 +73,27 @@ def explain_hybrid_detection(
     model: NeuroSymbolicDetector,
     detection: dict[str, Tensor],
     detection_index: int,
-    image_shape: tuple[int, int],
+    image: Tensor,
     mode: str = "local_instance_evidence_map",
-    use_fpn_heatmap: bool = True,
+    pixel_attribution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Decision path plus exact pixel maps for one detection; `image` is the original [3, H, W] image.
+
+    `pixel_attribution` lets a caller that already has the maps (one pass for many detections) pass them in.
+    """
     feature_grid = detection["pooled_features"][detection_index]
-    proposal_box = detection["proposal_boxes"][detection_index]
-    detection_box = detection["boxes"][detection_index]
     explanation = compute_symbolic_heatmap(
         model.symbolic_tree,
         feature_grid=feature_grid,
         mode=mode,
     )
 
-    # Hand-built test dicts lack FPN context, so they skip the exact-attribution panel.
-    has_fpn_inputs = (
-        use_fpn_heatmap and "fpn_features" in detection and "featmap_names" in detection
-    )
-    if has_fpn_inputs:
-        level_index = int(detection["symbolic_level_indices"][detection_index])
-        level_name = detection["featmap_names"][level_index]
-        fpn_features = detection["fpn_features"]
-        proposal_box_processed = detection["proposal_boxes_processed"][detection_index]
-        processed_image_size = detection["processed_image_size"]
-        padded_size = detection["padded_image_size"]
-        roi_align = model.detector.roi_align
-
-    node_explanations = []
     path = model.symbolic_tree.decision_path(feature_grid.detach().cpu().numpy().reshape(-1))
-    for node, step in zip(
-        compute_node_local_evidence_maps(model.symbolic_tree, feature_grid), path
-    ):
-        node_heatmap = node["node_heatmap"]
-        node_result = {
-            **node,
-            "projected_node_heatmap_on_proposal_box": project_heatmap_to_image(
-                node_heatmap,
-                box=proposal_box,
-                image_shape=image_shape,
-            ),
-        }
-        if has_fpn_inputs:
-            node_attribution = compute_exact_attribution(
-                model.symbolic_tree,
-                feature_grid,
-                roi_align,
-                fpn_features,
-                level_name,
-                proposal_box_processed,
-                processed_image_size,
-                padded_size,
-                path=[step],
-            )
-            node_result["exact_attribution"] = node_attribution
-            node_result["projected_exact_attribution_on_proposal_box"] = (
-                project_heatmap_to_image(
-                    node_attribution, box=proposal_box, image_shape=image_shape
-                )
-            )
-        node_explanations.append(node_result)
-
-    explanation["node_explanations"] = node_explanations
-    explanation["proposal_box"] = proposal_box.detach().cpu()
-    explanation["detection_box"] = detection_box.detach().cpu()
+    explanation["node_explanations"] = compute_node_local_evidence_maps(
+        model.symbolic_tree, feature_grid
+    )
+    explanation["proposal_box"] = detection["proposal_boxes"][detection_index].detach().cpu()
+    explanation["detection_box"] = detection["boxes"][detection_index].detach().cpu()
     explanation["label"] = int(detection["labels"][detection_index])
     explanation["score"] = float(detection["scores"][detection_index])
     explanation["detection_index"] = int(detection_index)
@@ -147,59 +104,11 @@ def explain_hybrid_detection(
         detection_index
     ]
     explanation["explanation_mode"] = mode
-
-    if has_fpn_inputs:
-        path_attribution = compute_exact_attribution(
-            model.symbolic_tree,
-            feature_grid,
-            roi_align,
-            fpn_features,
-            level_name,
-            proposal_box_processed,
-            processed_image_size,
-            padded_size,
-            path=path,
-        )
-        explanation["path_exact_attribution"] = path_attribution
-        explanation["projected_path_exact_attribution_on_proposal_box"] = (
-            project_heatmap_to_image(
-                path_attribution, box=proposal_box, image_shape=image_shape
-            )
-        )
-        explanation["exact_attribution_level"] = level_name
-
+    # Same path as the node entries above, so the maps explain the decision on screen.
+    explanation["pixel_attribution"] = pixel_attribution or fpn_node_maps(
+        model, image, detection["proposal_boxes_processed"][detection_index], path=path
+    )
     return explanation
-
-
-def compute_node_fpn_maps(
-    model: NeuroSymbolicDetector,
-    detection: dict[str, Any],
-    detection_indices: list[int],
-) -> list[dict[str, Any]]:
-    """Explanation only: exact per-node maps and path map M, nothing for display.
-
-    Same maps as `explain_hybrid_detection`'s `exact_attribution` per node and
-    `path_exact_attribution`, without the grid maps, projections or repeat passes.
-    """
-    pool = model.detector.roi_align.pool
-    results = []
-    for index in detection_indices:
-        level_name = detection["featmap_names"][
-            int(detection["symbolic_level_indices"][index])
-        ]
-        node_maps, path_map = node_fpn_maps(
-            model.symbolic_tree,
-            detection["pooled_features"][index],
-            pool,
-            detection["fpn_features"][level_name],
-            detection["proposal_boxes_processed"][index],
-            detection["processed_image_size"],
-            detection["padded_image_size"],
-        )
-        results.append(
-            {"detection_index": int(index), "node_maps": node_maps, "path_map": path_map}
-        )
-    return results
 
 
 def select_detection_indices(
@@ -220,12 +129,11 @@ def select_detection_indices(
 def explain_hybrid_detections(
     model: NeuroSymbolicDetector,
     detection: dict[str, Tensor],
-    image_shape: tuple[int, int],
+    image: Tensor,
     detection_indices: list[int] | None = None,
     score_threshold: float = 0.3,
     max_detections: int | None = None,
     mode: str = "local_instance_evidence_map",
-    use_fpn_heatmap: bool = True,
 ) -> list[dict[str, Any]]:
     selected_indices = detection_indices
     if selected_indices is None:
@@ -235,14 +143,20 @@ def explain_hybrid_detections(
             max_detections=max_detections,
         )
 
-    return [
-        explain_hybrid_detection(
-            model,
-            detection,
-            detection_index=index,
-            image_shape=image_shape,
-            mode=mode,
-            use_fpn_heatmap=use_fpn_heatmap,
+    if not selected_indices:
+        return []
+    paths = [
+        model.symbolic_tree.decision_path(
+            detection["pooled_features"][index].detach().cpu().numpy().reshape(-1)
         )
         for index in selected_indices
+    ]
+    attributions = fpn_node_maps_many(
+        model, image, detection["proposal_boxes_processed"][selected_indices], paths=paths, cache=detection
+    )
+    return [
+        explain_hybrid_detection(
+            model, detection, index, image, mode=mode, pixel_attribution=attribution
+        )
+        for index, attribution in zip(selected_indices, attributions)
     ]

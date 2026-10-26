@@ -4,14 +4,13 @@ import numpy as np
 import torch
 from torchvision.ops import MultiScaleRoIAlign
 
-from neurosym.inference import explain_hybrid_detection
+from neurosym.heatmap import compute_node_local_evidence_maps
 from neurosym.visualization import _pruned_tree_layout
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 
 FEATURE_SHAPE = (3, 5, 5)
 DEPTH = 4
 PROCESSED_SIZE = (48, 48)
-PADDED_SIZE = (48, 48)
 
 
 def _forced_path_tree(rng: np.random.Generator) -> SparseObliqueDecisionTreeClassifier:
@@ -44,18 +43,8 @@ def _forced_path_tree(rng: np.random.Generator) -> SparseObliqueDecisionTreeClas
     return tree
 
 
-class _FakeModel:
-    def __init__(self, tree, roi_align):
-        self.symbolic_tree = tree
-
-        class _Detector:
-            pass
-
-        self.detector = _Detector()
-        self.detector.roi_align = roi_align
-
-
 def _build_explanation():
+    """The two entries the layout reads; the pixel maps need a real detector and are tested apart."""
     roi_align = MultiScaleRoIAlign(
         featmap_names=["p2"], output_size=FEATURE_SHAPE[1:], sampling_ratio=2
     )
@@ -63,32 +52,12 @@ def _build_explanation():
     proposal_box = torch.tensor([8.0, 8.0, 32.0, 32.0])
     pooled = roi_align(
         {"p2": fpn_map.unsqueeze(0)}, [proposal_box.unsqueeze(0)], [PROCESSED_SIZE]
-    )
+    )[0]
     tree = _forced_path_tree(np.random.default_rng(0))
-    model = _FakeModel(tree, roi_align)
-
-    # 1-based labels (0 is background), so class_names needs an entry before
-    # "spur" — matches how the detector's class_names are always indexed.
-    detection = {
-        "pooled_features": pooled,
-        "proposal_boxes": proposal_box.unsqueeze(0),
-        "proposal_boxes_processed": proposal_box.unsqueeze(0),
-        "boxes": proposal_box.unsqueeze(0),
-        "labels": torch.tensor([2]),
-        "scores": torch.tensor([0.9]),
-        "symbolic_leaf_indices": torch.tensor(
-            [int(tree.leaf_index_for_feature(pooled[0].numpy().reshape(-1)))]
-        ),
-        "symbolic_probabilities": torch.tensor([[0.1, 0.9]]),
-        "symbolic_level_indices": torch.tensor([0]),
-        "featmap_names": ["p2"],
-        "fpn_features": {"p2": fpn_map},
-        "padded_image_size": PADDED_SIZE,
-        "processed_image_size": PROCESSED_SIZE,
+    explanation = {
+        "node_explanations": compute_node_local_evidence_maps(tree, pooled),
+        "symbolic_leaf_index": int(tree.leaf_index_for_feature(pooled.numpy().reshape(-1))),
     }
-    explanation = explain_hybrid_detection(
-        model, detection, detection_index=0, image_shape=(48, 48)
-    )
     return explanation, tree
 
 

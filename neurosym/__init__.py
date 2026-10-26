@@ -1,8 +1,8 @@
 from .heatmap import (
     compute_node_local_evidence_maps,
     compute_symbolic_heatmap,
-    project_heatmap_to_image,
-    resize_heatmap_to_box,
+    fpn_node_maps,
+    fpn_node_maps_many,
 )
 from .hybrid import NeuroSymbolicDetector
 from .inference import (
@@ -29,8 +29,8 @@ __all__ = [
     "explain_hybrid_detection",
     "explain_hybrid_detections",
     "load_neurosymbolic_detector",
-    "project_heatmap_to_image",
-    "resize_heatmap_to_box",
+    "fpn_node_maps",
+    "fpn_node_maps_many",
     "run_neurosymbolic_inference",
     "select_detection_indices",
     "draw_neurosymbolic_explanation",

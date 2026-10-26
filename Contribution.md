@@ -75,7 +75,38 @@ score = Π over active path nodes j of  σ(|w_j·x + b_j|)^γ_j        (γ_j ≥
 
 ### 2.4 Explanation
 
-The decision path and the per-node maps (exact FPN attribution, grid 7×7 map) are unchanged by the score. The deletion/insertion AUC calls `tree.route`, so it now uses the γ-weighted confidence: say so in the text, because those AUC values change meaning. Explanation metrics must be rerun on the final tree and cutoff before quoting (§8).
+**The heatmap is the contribution map of the draft (Bab 3.8.2, Eq 3.5 to 3.8)**: for each node on the decision path, `H_i(p) = Σ_c |(∂s_i/∂F)_c(p) · F_c(p)|` on the FPN level RoIAlign read, and the overview `M = Σ_i H_i` (`neurosym/heatmap.py::fpn_node_maps_many`). It answers "which regions contributed to this node", in either direction; the direction taken is shown on the decision path, not in the colours. There is no signed or supporting/opposing map in the code. A pixel-level version (exact to the image pixels, 557 ms/img) was built and **removed for speed**; so was a signed version.
+
+**Full flow for one detection** (code names in brackets):
+
+```
+image x ──▶ transform (resize, pad) ▶ backbone + FPN features F (levels p2..p6), kept from the detection pass
+   ▼  RoIAlign at the FIXED proposal box, on ONE level ▶ pooled grid  r  (64×7×7 = 3136 numbers)
+   ▼  tree node i:   s_i = w_i · r + b_i                ◀── w_i, b_i are the SODT's own weights
+```
+
+1. **Detect and route.** The detector and the tree run normally. This fixes the proposal box and the decision path. The detection dict also keeps the FPN features (`fpn_features`, `processed_size`, `padded_size`), so the explanation needs no second backbone pass.
+2. **Pick the level and a crop.** The box reads exactly one pyramid level (torchvision's `map_levels`). Only a few cells around the box matter, so the work runs on that crop.
+3. **Gradient × Input per node.** One copy of the crop per path node, one backward through RoIAlign with `w_i` as the output gradient (`∂s_i/∂F`, which is just `w_i` spread by RoIAlign's sampling weights). Times the features `F`, absolute value, summed over the 64 channels: `H_i`. `M` is their sum.
+4. **Place on the image.** Each cell's value is spread over the image pixels it covers (stride 4 to 64 px, resize undone, `_place_on_image`) so the maps plug into the same figure and tile scoring as Grad-CAM's.
+5. **Draw.** The original figure: dimmed image, jet overlay scaled to 0..1, one panel per node, `M` first, both boxes, the Grad-CAM panel beside them.
+
+**What the claim is and is not.** The map is the model's own arithmetic at the FPN level, not an estimate: RoIAlign is linear, and the unit test checks that Σ over the pyramid of Gradient × Input equals the linear part of the node values (completeness), and that working on the crop gives the same mass as the whole level. Not exact: where that sits on the image. A cell sees a much larger region through the backbone, so the placed map is a **location label**, not a per-pixel cause. It can only light up inside the box and uses one pyramid level.
+
+- **Cost** (same-run medians, 40 test images, RTX 4060): Faster R-CNN detection 102 ms, Grad-CAM's CAM step 49 ms (so ≈151 ms end to end), NeSy detection 155 ms, NeSy maps for all ≈7 detections **24 ms** (so ≈179 ms end to end). In one headless single-image run NeSy was 125.8 ms against Grad-CAM 123.9 ms. **The heatmap step is about half of Grad-CAM's; NeSy as a whole is not faster than Grad-CAM**, because the NeSy detection (CPU routing of the proposals through the tree and its post-processing) is about 50 ms slower than Faster R-CNN's, a cost the committed code has too. Timings drift by tens of ms between runs: quote same-run numbers only. The committed FPN code was measured at 133 ms detection + 272 ms for `compute_node_fpn_maps` in the same conditions, so it was not faster than what is here.
+- **The score** is tree-only, `Π σ(|s_i|)^γ_i`. The deletion/insertion AUC calls `tree.route`, so it uses the γ-weighted confidence: say so in the text, because those AUC values change meaning.
+- **Tile masking for the faithfulness metrics.** Same protocol for both methods: 16×16 tiles over the whole image, ranked by the placed map (`M` for SODT), set to the mean colour, the real model re-run. Budget is half the tiles the proposal touches; the random control orders the proposal's tiles first (`neurosym/evaluation.py::evaluate_pixel_faithfulness`, Grad-CAM in `gradcam/evaluation.py`, whole-image and box-restricted rows).
+- **Pilot result, not final** (first 5 test images, 43 SODT and 42 Grad-CAM detections; the two methods explain different models, so AUCs are not comparable across them). The SODT rows are `M`; the Grad-CAM rows come from the earlier pilot run on the same images:
+
+| ranking | necessity flip | sufficiency kept | deletion AUC | insertion AUC |
+|---|---|---|---|---|
+| SODT `M` | 0.930 | 0.791 | 0.626 | 0.770 |
+| SODT random (in box) | 0.628 | 0.395 | 0.671 | 0.603 |
+| Grad-CAM (whole image) | 0.310 | 0.167 | 0.706 | 0.206 |
+| Grad-CAM (tiles restricted to the box) | 0.738 | 0.452 | 0.353 | 0.505 |
+| Grad-CAM random (in box) | 0.548 | 0.286 | 0.437 | 0.407 |
+
+  The whole-image Grad-CAM row sits below its random control mostly because of where the CAM puts its mass (most of its top tiles fall outside the proposal), so do not quote "Grad-CAM is worse than random". On this pilot `M` beats its random control on every column, and beats the box-restricted Grad-CAM on necessity, sufficiency and insertion; deletion AUC (lower is better) is lower for the box-restricted Grad-CAM. Five images only: rerun on a larger subset (notebooks 04/06, `N_FAITH_IMAGES` / `N_EVAL_IMAGES`) before quoting. The protocol was not tuned toward this result. Earlier pilot numbers for the pixel-level and signed maps no longer apply.
 
 ### 2.5 Tried and not part of the method
 
@@ -143,7 +174,13 @@ Trainval check of where the extra false positives come from (pre-NMS, cutoff 0.5
 7. **Seed noise.** Three seeds of the same FRCNN recipe spread about ±0.7 AP85 and ±0.003 on precision and F1. One tree fit and one FRCNN-vs-SODT gap of that size is not a finding.
 8. **Margin-off precision not reconciled.** An earlier remark that margin-off precision beat FRCNN does not match the measured margin-off row (P 0.773, mAP 0.64, with Soft-NMS keeping arbitrary boxes). Not investigated.
 9. **Novelty wording.** No published paper fits per-node exponents on a decision tree's path product; this combination is the thesis's adaptation. Unlike a classic log opinion pool, γ has no renormalisation and no sum-to-1 constraint. Unlike temperature scaling, γ can change the ranking of detections, and γ = 0 removes a node's doubt entirely.
-10. **Detector provenance.** `run9` is the best of three seeds of its recipe. Report recipe-level numbers (3 seeds, size 800, mean): AP50 98.72, AP75 94.12, AP80 87.09, AP85 70.93, AP@50:5:85 92.83. The original recipe scored 98.66, 93.86, 86.66, 69.95, 92.57. What improved is localisation at high IoU (AP80/AP85); AP50, recall and F1 are essentially unchanged, so do not claim better detection.
+10. **The map is exact per FPN cell, not per pixel.** It splits each node value over the FPN cells RoIAlign read (linear, so exact); placing a cell on the image is a location label, because a cell sees a larger region through the backbone. The box (RPN, regressor) is not explained.
+11. **The map cannot show anything outside the box**, and uses one pyramid level per detection. Context the backbone used from outside the box is invisible to it, unlike a whole-image method.
+12. **The map is magnitude only** (Eq 3.7): it does not say whether a region supported or opposed the branch taken. A signed version existed and was removed; the direction is shown on the decision path.
+13. **Cross-model faithfulness comparison.** SODT and Grad-CAM explain different models (tree head vs FRCNN head), with different labels and scores, so only each method against its own random control is like-for-like. The pilot is 5 images.
+14. **Grad-CAM arms.** Whole-image and box-restricted Grad-CAM are both reported; the whole-image one spends most of its budget outside the proposal (65% of top tiles on the pilot).
+15. **Masked forwards run the real model** (nothing is cached or held fixed there).
+16. **Detector provenance.** `run9` is the best of three seeds of its recipe. Report recipe-level numbers (3 seeds, size 800, mean): AP50 98.72, AP75 94.12, AP80 87.09, AP85 70.93, AP@50:5:85 92.83. The original recipe scored 98.66, 93.86, 86.66, 69.95, 92.57. What improved is localisation at high IoU (AP80/AP85); AP50, recall and F1 are essentially unchanged, so do not claim better detection.
 
 ---
 
@@ -172,7 +209,7 @@ Trainval check of where the extra false positives come from (pre-NMS, cutoff 0.5
 
 - Journal Table 2: the FRCNN and NeSy rows are COCO at 640 on the old detector. The text blaming the 64-channel neck for the gap is wrong (width made no difference).
 - RoI statistics in the symbolic-dataset section (1,000,000 train RoIs, 500,000 test RoIs, more than 85% background): re-measure after the new export.
-- Draft Tabel 4.2 and 4.5 to 4.9; Gambar 4.7 and 4.9 to 4.13 (4.13, the per-node panel, now shows γ and σ^γ); the explanation at line ~1890 (FN from background-heavy training does not fit the data); Eq. 3.3 (becomes the γ-weighted product); Tabel 4.10 AUC meaning (§2.4).
+- Draft Tabel 4.2 and 4.5 to 4.9; Gambar 4.7 and 4.9 to 4.13 (4.13, the per-node panel, now shows γ and σ^γ); the explanation at line ~1890 (FN from background-heavy training does not fit the data); Eq. 3.3 (becomes the γ-weighted product); Tabel 4.10 AUC meaning (§2.4); every heatmap figure and the faithfulness/localization tables, which were FPN-level and are replaced by the pixel versions (§2.4).
 - README "Reproducibility Notes" may be updated (anchors 32–512, the 0.3 floor, test size 800, VOC scorer).
 
 ---
@@ -190,7 +227,12 @@ Trainval check of where the extra false positives come from (pre-NMS, cutoff 0.5
 | P/R at a chosen cutoff | `neuro/train.py::evaluate_model(..., score_threshold=)` |
 | False-positive and missed-detection breakdowns | `neurosym/evaluation.py::breakdown_false_positives`, `breakdown_nesy_misses(..., nesy_score_threshold=)` |
 | Cutoffs | `configs/neuro_train.yaml`: `precision_score_threshold 0.5` (FRCNN), `nesy_score_threshold 0.7`, `nesy_plain_score_threshold 0.4` |
-| Tests (78 pass) | `tests/test_margin_exponents.py`, `tests/test_miss_breakdown.py`, others |
+| Contribution maps H_i and M (Eq 3.7, 3.8): `fpn_node_maps_many` (all boxes of an image, FPN features from the detection dict), `fpn_node_maps` (one box), `_place_on_image`, `pooled_roi_from_normalized_image` (masked re-runs) | `neurosym/heatmap.py` |
+| Tile faithfulness / localization | `neurosym/evaluation.py::evaluate_pixel_faithfulness`, `evaluate_exact_attribution_spatial_metrics` |
+| Grad-CAM at image size, pixel faithfulness, shared localization | `gradcam/gradcam.py::GradCAM.image_maps`, `gradcam/evaluation.py` |
+| Signed per-node map figure | `neurosym/visualization.py::_draw_pixel_maps_figure` |
+| Removed | the pixel-level attribution (`pixel_node_maps*`, SF-attention gate cache, finite-difference test): too slow, see §2.4 |
+| Tests (67 pass) | `tests/test_fpn_attribution.py` (completeness over the pyramid, crop = full level, many = one, M = Σ H_i), `tests/test_pixel_faithfulness.py`, `tests/test_margin_exponents.py`, `tests/test_miss_breakdown.py`, others |
 
 **Checkpoints** (`checkpoints/symbolic/`).
 - `run1_gt_target.pt` (+ `_metrics.json`): **main SODT**; tree-only, γ fitted to the ground-truth target. The cutoffs 0.7 / 0.4 were derived for it.
@@ -201,10 +243,11 @@ Trainval check of where the extra false positives come from (pre-NMS, cutoff 0.5
 
 **Notebooks.**
 - 03 (train, prune, fit γ): fit cell edited, run end to end only through a script on `run1_gt_target.pt`.
+- 04 and 06 were ported to the map API and then renamed to `fpn_node_maps*` by text replacement and the signed/support code and wording were stripped by jq (check the remaining markdown); **not run end to end**. 06's cells 1, 3, 5, 14, 16, 18 plus one explanation figure with the Grad-CAM panel were smoke-run headless on 2 images (`PER_NODE` on and off); 04 was not run. Printed outputs for the edited cells were cleared. Faithfulness cells run on a subset (`N_FAITH_IMAGES = 50` in 04, `N_EVAL_IMAGES = 50` in 06; set `None` for all 500, hours).
 - 04 and 06: now read the cutoffs from the config (04 uses 0.7; 06 has a per-row `CUTOFF`: FRCNN 0.5, SODT main 0.7, γ = 1 0.4, margin off 0.7). **Not rerun since**, so their printed numbers are stale.
 - 05 (Grad-CAM on FRCNN, cutoff 0.5): no change needed. 02 and 04 load `neuro_chosen.pt` / `chosen.pt`.
 
-**Still to do.** Rerun 04 and 06 (so the tables, FP breakdown and explanation metrics match §3), smoke-test one image end to end at size 800 (exact FPN attribution, overlay alignment, GT-to-grid), decide on promoting `chosen.pt`, then rerun 05.
+**Still to do.** Rerun 04 and 06 (so the tables, FP breakdown and explanation metrics match §3), smoke-test one image end to end at size 800 (FPN map figure and overlay alignment in the notebooks; the library path and one figure were smoke-tested on real checkpoints), decide on promoting `chosen.pt`, then rerun 05.
 
 **Things to watch.** `extract_dataset_from_teacher` skips exports that already exist and only checks class names, not which detector made them; re-export if the detector ever changes. Image size 800 gives a 200×200 P2′ map (stride 4). The RoI distribution changed with the new anchors: re-check it after any re-export.
 

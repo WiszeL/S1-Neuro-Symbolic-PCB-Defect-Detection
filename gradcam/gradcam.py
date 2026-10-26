@@ -76,6 +76,29 @@ class GradCAM:
             "processed_size": tuple(images_list.image_sizes[0]),
         }
 
+    def image_maps(
+        self,
+        image: Tensor,
+        proposal_boxes_processed: Tensor,
+        class_indices: Tensor,
+    ) -> list[np.ndarray]:
+        """Full-level CAM per RoI, upsampled over the whole original image: [H, W] each."""
+        maps = self.fpn_maps(image, proposal_boxes_processed, class_indices)
+        processed_h, processed_w = maps["processed_size"]
+        results: list[np.ndarray] = []
+        for cam in maps["cams"]:
+            padded = F.interpolate(
+                cam[None, None], size=maps["padded_size"], mode="bilinear", align_corners=False
+            )
+            upsampled = F.interpolate(
+                padded[..., :processed_h, :processed_w],
+                size=tuple(image.shape[-2:]),
+                mode="bilinear",
+                align_corners=False,
+            )
+            results.append(upsampled[0, 0].cpu().numpy())
+        return results
+
     def generate(
         self,
         image: Tensor,

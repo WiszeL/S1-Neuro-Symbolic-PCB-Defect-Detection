@@ -11,6 +11,10 @@ import torch
 
 from util.visualization import image_to_array
 
+from .evaluation import patch_scores
+
+DISPLAY_TILE = 8 # pixels per drawn tile; each is an exact sum, 2x2 of them make one metric tile
+
 
 def heatmap_to_array(heatmap: torch.Tensor) -> np.ndarray:
     arr = heatmap.detach().cpu().numpy()
@@ -181,16 +185,6 @@ def lookup_ground_truth(
     return None
 
 
-_SODT_HEATMAP_FOOTNOTE = (
-    "Positions are exact (RoI-Align's own coefficients); each cell's value pools a receptive "
-    "field far larger than the box (~360x350px vs ~33x29px mean proposal) — region-level, "
-    "not pixel-level.  Color: red=dominant, yellow=large, green=~half, cyan=small, "
-    "dark=no contribution (maps are non-negative, each panel normalized to its own peak — "
-    "don't compare brightness across panels).  Sign is not shown — a node's LEFT/RIGHT "
-    "direction is in its title, not the color."
-)
-
-
 def _is_ancestor(ancestor: int, descendant: int) -> bool:
     """Heap-indexed tree: ancestry is a parent walk up from `descendant`."""
     while descendant > ancestor:
@@ -285,24 +279,12 @@ def _union_box(proposal_box: torch.Tensor, detection_box: torch.Tensor) -> torch
     )
 
 
-def _draw_heatmap_panel(
+def _draw_boxes_and_zoom(
     axis: plt.Axes,
     image_tensor: torch.Tensor,
-    heatmap: torch.Tensor,
     proposal_box: torch.Tensor,
     detection_box: torch.Tensor,
 ) -> None:
-    """Image + dimmer + heatmap + both boxes + zoom, off — one node panel's worth.
-
-    Shared by the matplotlib per-node loop, the path panel, and the HTML
-    exporter, so the three can't quietly drift out of matching styles.
-    """
-    axis.imshow(image_to_array(image_tensor))
-    dimmer = np.zeros((image_tensor.shape[-2], image_tensor.shape[-1], 4), dtype=np.float32)
-    dimmer[..., 3] = 0.4
-    axis.imshow(dimmer)
-    axis.imshow(heatmap_to_array(heatmap), cmap="jet", vmin=0.0, vmax=1.0)
-
     x1, y1, x2, y2 = proposal_box.tolist()
     axis.add_patch(
         patches.Rectangle(
@@ -318,6 +300,73 @@ def _draw_heatmap_panel(
     )
     zoom_axis_to_box(axis, _union_box(proposal_box, detection_box), tuple(image_tensor.shape[-2:]))
     axis.axis("off")
+
+
+def _draw_pixel_map_panel(
+    axis: plt.Axes,
+    image_tensor: torch.Tensor,
+    pixel_map: np.ndarray,
+    proposal_box: torch.Tensor,
+    detection_box: torch.Tensor,
+) -> None:
+    """The original per-node heatmap look: dimmed image, jet overlay scaled to 0..1, both boxes.
+
+    `pixel_map` is a contribution map (which regions the node used), blended bilinearly over
+    DISPLAY_TILE-pixel tiles as the old FPN map was resized.
+    """
+    height, width = image_tensor.shape[-2:]
+    tiles = torch.from_numpy(patch_scores(pixel_map, DISPLAY_TILE)).float()
+    heatmap = torch.nn.functional.interpolate(
+        tiles[None, None], scale_factor=DISPLAY_TILE, mode="bilinear", align_corners=False
+    )[0, 0, :height, :width]
+    # Like the old FPN map: clipped to the proposal, then scaled so its own maximum is 1
+    # (heatmap_to_array clips to 0..1 first, so raw sums would all saturate).
+    x1, y1, x2, y2 = (max(int(v), 0) for v in proposal_box.tolist())
+    inside = torch.zeros_like(heatmap)
+    inside[y1:y2, x1:x2] = heatmap[y1:y2, x1:x2]
+    heatmap = inside / inside.max().clamp(min=1e-12)
+    axis.imshow(image_to_array(image_tensor))
+    dimmer = np.zeros((height, width, 4), dtype=np.float32)
+    dimmer[..., 3] = 0.4
+    axis.imshow(dimmer)
+    axis.imshow(heatmap_to_array(heatmap), cmap="jet", vmin=0.0, vmax=1.0)
+    _draw_boxes_and_zoom(axis, image_tensor, proposal_box, detection_box)
+
+
+def _draw_pixel_maps_figure(
+    image_tensor: torch.Tensor,
+    explanation: dict[str, Any],
+    extra_panel_func: Any = None,
+) -> None:
+    """Overview M plus one panel per path node H_i, like the original figure (+ extra panel)."""
+    attribution = explanation["pixel_attribution"]
+    rows = [("Overview M, all path nodes", attribution["overview_map"], "")] + [
+        (
+            f"Depth {node['depth'] + 1} | Node {node['node_index']}",
+            attribution["node_maps"][index],
+            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}  "
+            f"margin σ={_node_margin(node['score']):.4f}",
+        )
+        for index, node in enumerate(explanation["node_explanations"])
+    ]
+    columns = 2 if extra_panel_func is not None else 1
+    fig = plt.figure(figsize=(7 * columns, max(8, 4 * len(rows))))
+    grid = gridspec.GridSpec(1, columns, wspace=0.1, figure=fig)
+    rows_grid = gridspec.GridSpecFromSubplotSpec(len(rows), 1, subplot_spec=grid[0], hspace=0.4)
+    for row, (title, heat, detail) in enumerate(rows):
+        axis = fig.add_subplot(rows_grid[row])
+        _draw_pixel_map_panel(
+            axis, image_tensor, heat, explanation["proposal_box"], explanation["detection_box"]
+        )
+        axis.set_title(f"SODT heatmap — {title}\n{detail}".rstrip())
+    if extra_panel_func is not None:
+        extra_panel_func(fig.add_subplot(grid[1]))
+    fig.text(
+        0.5, 0.0,
+        "Which regions each node used: exact per FPN cell (the level RoI Align read), a location "
+        "label rather than a per-pixel value; drawn clipped to the proposal. Cyan = proposal, lime = detection box.",
+        ha="center", va="bottom", fontsize=7,
+    )
 
 
 def _node_margin(score: float) -> float:
@@ -486,11 +535,9 @@ def draw_neurosymbolic_explanation(
     symbolic_tree: Any,
     selected_number: int = 1,
     extra_panel_func: Any = None,
-    show_path_panel: bool = False,
 ) -> None:
     """Two figures: the full tree with per-node routing margins, then the heatmaps."""
     label_name = class_names[explanation["label"] - 1]
-    node_count = len(explanation["node_explanations"])
     layout = _pruned_tree_layout(explanation, symbolic_tree, class_names)
 
     # ── Figure 1: full tree (path highlighted) + routing margin per node, rows shared ──
@@ -509,55 +556,7 @@ def draw_neurosymbolic_explanation(
     feature_vector = detection_result["pooled_features"][detection_index].detach().cpu().numpy().reshape(-1)
     _draw_routing_margin_panels(fig_tree, gs_tree[1], explanation, symbolic_tree, feature_vector)
 
-    # ── Figure 2: per-node heatmaps (+ Grad-CAM) ──
-    has_exact = "projected_exact_attribution_on_proposal_box" in explanation["node_explanations"][0]
-    show_path_panel = show_path_panel and has_exact
-    columns = 2 if extra_panel_func is not None else 1
-    fig_maps = plt.figure(figsize=(7 * columns, max(8, 4 * (node_count + (1 if show_path_panel else 0)))))
-    gs = gridspec.GridSpec(1, columns, wspace=0.1, figure=fig_maps)
-    gs_right = gridspec.GridSpecFromSubplotSpec(
-        node_count + (1 if show_path_panel else 0), 1, subplot_spec=gs[0], hspace=0.4
-    )
-
-    proposal_box = explanation["proposal_box"]
-    detection_box = explanation["detection_box"]
-
-    panel_offset = 0
-    if show_path_panel:
-        axis = fig_maps.add_subplot(gs_right[0])
-        _draw_heatmap_panel(
-            axis, image_tensor,
-            explanation["projected_path_exact_attribution_on_proposal_box"],
-            proposal_box, detection_box,
-        )
-        axis.set_title(
-            f"SODT heatmap — per-node maps stacked, Σ|node map| ({node_count} nodes, "
-            f"{explanation.get('exact_attribution_level', '?')})\n"
-            "cyan=proposal (heat frame)  lime=detection box  "
-            "— validated in Table A, not the per-step story"
-        )
-        panel_offset = 1
-
-    heatmap_key = (
-        "projected_exact_attribution_on_proposal_box" if has_exact
-        else "projected_node_heatmap_on_proposal_box"
-    )
-    title_prefix = "SODT heatmap" if has_exact else "SODT heatmap (pooled-grid, no FPN context)"
-    for axis_index, node in enumerate(explanation["node_explanations"]):
-        axis = fig_maps.add_subplot(gs_right[axis_index + panel_offset])
-        _draw_heatmap_panel(axis, image_tensor, node[heatmap_key], proposal_box, detection_box)
-        axis.set_title(
-            f"{title_prefix} — Depth {node['depth'] + 1} | Node {node['node_index']}\n"
-            f"Score: {node['score']:.2f} -> Went {node['decision'].upper()}  "
-            f"margin σ={_node_margin(node['score']):.4f} "
-            f"(evidence {node.get('evidence_magnitude_sum', 0.0):.2f})"
-        )
-
-    if extra_panel_func is not None:
-        extra_panel_func(fig_maps.add_subplot(gs[1]))
-
-    if has_exact:
-        fig_maps.text(0.5, 0.0, _SODT_HEATMAP_FOOTNOTE, ha="center", va="bottom", fontsize=7, wrap=True)
-
+    # ── Figure 2: exact pixel maps per node (+ Grad-CAM) ──
+    _draw_pixel_maps_figure(image_tensor, explanation, extra_panel_func)
     plt.show()
     plt.close("all")

@@ -10,7 +10,6 @@ from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from .sodt import SparseObliqueDecisionTreeClassifier
-from util.features import ensure_float32
 
 
 # 1024 rows x 3136 x 4 B = 12.8 MB stays in the i5-13500's 24 MB L3 between the solver's two matvecs.
@@ -507,7 +506,7 @@ def fit_tree_with_tao(
     node_progress_callback: Callable[[dict[str, Any]], None] | None = None,
     class_weights: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
-    features = ensure_float32(features)
+    features = np.asarray(features)  # No cast: a float32 memmap stays on disk.
     labels = np.asarray(labels, dtype=np.int64)
 
     if features.ndim != 2:
@@ -686,10 +685,8 @@ def fit_tree_with_tao(
             relative_decrease = abs(prev_obj - curr_obj) / max(abs(prev_obj), 1e-12)
             if relative_decrease < convergence_tolerance:
                 if progress_bar is not None:
-                    progress_bar.set_postfix_str(
-                        f"converged (Δobj={relative_decrease:.2e})"
-                    )
                     progress_bar.close()
+                tqdm.write(f"converged (Δobj={relative_decrease:.2e})")
                 break
 
     return history

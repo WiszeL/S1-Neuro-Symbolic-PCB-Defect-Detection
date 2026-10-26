@@ -16,7 +16,6 @@ from torch import Tensor
 from tqdm import tqdm
 
 from .sodt import SparseObliqueDecisionTreeClassifier
-from util.features import ensure_float32
 from util.geometry import project_gt_box_to_roi_grid
 from util.heatmap_metrics import (
     importance_ranking,
@@ -201,7 +200,7 @@ def evaluate_symbolic_model(
     never alone.
     """
     rng = np.random.default_rng(random_state)
-    features = ensure_float32(feature_matrix)
+    features = np.asarray(feature_matrix)
     labels = np.asarray(teacher_labels, dtype=np.int64)
     if features.ndim != 2:
         raise ValueError("evaluate_symbolic_model expects a 2D feature matrix.")

@@ -4,10 +4,8 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import Tensor
-from torchvision.ops import roi_align as _roi_align_op
-from torchvision.ops.poolers import _infer_scale
+from torchvision.ops import roi_align
 
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 
@@ -89,10 +87,7 @@ def compute_node_local_evidence_maps(
         direction = 1.0 if step.went_left else -1.0
         weight_grid = tree.node_weight_grid(step.node_index)
         signed_local = direction * weight_grid * grid
-        # Magnitude, not just the positive half — matches the FPN path's
-        # `.abs().sum(0)` (heatmap.path_fpn_map / exact_fpn_contribution), so
-        # the FPN-vs-grid ablation differs only in resolution, not in whether
-        # negative contributions count.
+        # Magnitude, not just the positive half, so negative contributions still count.
         evidence_magnitude = np.abs(signed_local).sum(axis=0).astype(np.float32)
         node_heatmap = _normalize_heatmap_array(evidence_magnitude)
         node_explanations.append(
@@ -253,254 +248,172 @@ def _fpn_box_bounds(
     return fx1, fy1, fx2, fy2
 
 
-def path_weight_grid(
+def _normalization(detector: Any, like: Tensor) -> tuple[Tensor, Tensor]:
+    mean = torch.as_tensor(detector.transform.image_mean, dtype=like.dtype, device=like.device)
+    std = torch.as_tensor(detector.transform.image_std, dtype=like.dtype, device=like.device)
+    return mean[:, None, None], std[:, None, None]
+
+
+def _features_from_normalized_image(detector: Any, normalized_image: Tensor) -> tuple[Any, Any]:
+    """Backbone features and processed sizes for an image in (x - mean) / std units.
+
+    Feeding `x̃·std + mean` into the transform makes it normalize straight back to x̃,
+    so x̃ is the autograd leaf and gradient and input share units.
+    """
+    mean, std = _normalization(detector, normalized_image)
+    images_list, _ = detector.transform([normalized_image * std + mean], None)
+    return detector.backbone(images_list.tensors), images_list.image_sizes
+
+
+def pooled_roi_from_normalized_image(
+    detector: Any,
+    normalized_image: Tensor,
+    box_processed: Tensor,
+) -> Tensor:
+    """RoI grid [C, 7, 7] for a fixed box, from an image already in (x - mean) / std units."""
+    features, image_sizes = _features_from_normalized_image(detector, normalized_image)
+    return detector.roi_align(
+        features, [box_processed.detach().to(normalized_image).unsqueeze(0)], image_sizes
+    )[0]
+
+
+def path_scores(
     tree: SparseObliqueDecisionTreeClassifier,
-    feature_grid: Tensor | np.ndarray,
-    path: list[Any] | None = None,
+    pooled: Tensor,
+    node_indices: list[int],
+) -> Tensor:
+    """Raw node values s_i = w_i·x + b_i for the given nodes, [len(node_indices)]."""
+    weights = torch.as_tensor(tree.node_weights[node_indices]).to(pooled)
+    biases = torch.as_tensor(tree.node_bias[node_indices]).to(pooled)
+    return weights @ pooled.reshape(-1) + biases
+
+
+def _place_on_image(
+    cells: Tensor, padded_size: tuple[int, int], processed_size: tuple[int, int], image_size: tuple[int, int]
 ) -> np.ndarray:
-    """Path weights summed with routing signs; None walks the whole path."""
-    grid = _as_feature_grid(feature_grid)
-    if path is None:
-        path = tree.decision_path(grid.reshape(-1))
-    total = np.zeros(tree.feature_shape, dtype=np.float32)
-    for step in path:
-        direction = 1.0 if step.went_left else -1.0
-        total += direction * tree.node_weight_grid(step.node_index)
-    return total
+    """FPN-cell values [K, h, w] spread evenly over the image pixels each cell covers.
 
-
-def exact_fpn_contribution(
-    tree: SparseObliqueDecisionTreeClassifier,
-    feature_grid: Tensor | np.ndarray,
-    roi_align: Any,
-    fpn_features: dict[str, Tensor],
-    level_name: str,
-    box_processed: Tensor,
-    processed_image_size: tuple[int, int],
-    path: list[Any] | None = None,
-    weight_grid_override: np.ndarray | None = None,  # controls only (permuted/foreign weights)
-) -> Tensor:
-    """Path score split exactly across the FPN pixels it came from.
-
-    RoI-Align is linear, so this sums back to the score with no
-    approximation — autograd just reads RoI-Align's own coefficients.
+    Every cell keeps its value split over its pixels, so sums over a region are cell sums
+    (up to nearest-neighbour rounding when the transform resized the image). Only the block
+    of cells that carry gradient is filled and copied off the GPU; the rest stays zero.
     """
-    weights = (
-        weight_grid_override
-        if weight_grid_override is not None
-        else path_weight_grid(tree, feature_grid, path=path)
-    )
-    device = fpn_features[level_name].device  # stay where the features are (GPU stays GPU)
-    with torch.inference_mode(False), torch.enable_grad():
-        # Fresh copies so autograd works even on tensors made in inference mode.
-        feats = {name: level.detach().clone().unsqueeze(0) for name, level in fpn_features.items()}
-        feats[level_name].requires_grad_(True)
-        pooled = roi_align(
-            feats,
-            [box_processed.detach().to(device).unsqueeze(0)],
-            [tuple(processed_image_size)],
-        )[0]
-        score = (torch.as_tensor(weights, dtype=torch.float32, device=device) * pooled).sum()
-        (grad,) = torch.autograd.grad(score, feats[level_name])
-    return (grad[0] * feats[level_name][0]).detach()
-
-
-def path_fpn_map(
-    tree: SparseObliqueDecisionTreeClassifier,
-    feature_grid: Tensor | np.ndarray,
-    roi_align: Any,
-    fpn_features: dict[str, Tensor],
-    level_name: str,
-    box_processed: Tensor,
-    processed_image_size: tuple[int, int],
-    path: list[Any] | None = None,
-    node_weight_grids: list[np.ndarray] | None = None,  # controls only, one per step
-) -> Tensor:
-    """Stacked per-node panels: sum of each node's |map|; nodes never cancel.
-
-    Exact per node, not per path — the tree has no single path score.
-    """
-    if path is None:
-        path = tree.decision_path(_as_feature_grid(feature_grid).reshape(-1))
-    total = None
-    for index, step in enumerate(path):
-        node_map = exact_fpn_contribution(
-            tree,
-            feature_grid,
-            roi_align,
-            fpn_features,
-            level_name,
-            box_processed,
-            processed_image_size,
-            path=[step],
-            weight_grid_override=None
-            if node_weight_grids is None
-            else node_weight_grids[index],
-        ).abs().sum(0)
-        total = node_map if total is None else total + node_map
-    return total
-
-
-def compute_exact_attribution(
-    tree: SparseObliqueDecisionTreeClassifier,
-    feature_grid: Tensor | np.ndarray,
-    roi_align: Any,
-    fpn_features: dict[str, Tensor],
-    level_name: str,
-    box_processed: Tensor,
-    processed_image_size: tuple[int, int],
-    padded_size: tuple[int, int],
-    path: list[Any] | None = None,
-    margin: int = 0,
-) -> np.ndarray:
-    """Exact map as a 2-D picture, cropped to the box.
-
-    One step = that node's panel; several = their panels stacked.
-    Honest limits: channel-collapsing is a display choice, and FPN
-    pixels are regions, not image pixels.
-    """
-    heatmap = (
-        path_fpn_map(
-            tree,
-            feature_grid,
-            roi_align,
-            fpn_features,
-            level_name,
-            box_processed,
-            processed_image_size,
-            path=path,
+    # Original pixels per cell, per axis: cell size in processed pixels times the resize factor.
+    size = [
+        padded / cells_along * image / processed
+        for padded, cells_along, image, processed in zip(
+            padded_size, cells.shape[-2:], image_size, processed_size
         )
-        .cpu()
-        .numpy()
-        .astype(np.float32)
-    )
+    ]
+    placed = np.zeros((cells.shape[0], *image_size), dtype=np.float32)
+    rows, cols = (cells != 0).any(0).any(1).nonzero().flatten(), (cells != 0).any(0).any(0).nonzero().flatten()
+    if rows.numel() == 0:
+        return placed
+    r0, r1, c0, c1 = int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1
+    y0, y1 = int(r0 * size[0]), min(int(np.ceil(r1 * size[0])), image_size[0])
+    x0, x1 = int(c0 * size[1]), min(int(np.ceil(c1 * size[1])), image_size[1])
+    row_cell = (torch.arange(y0, y1, device=cells.device) / size[0]).long().clamp(r0, r1 - 1) - r0
+    col_cell = (torch.arange(x0, x1, device=cells.device) / size[1]).long().clamp(c0, c1 - 1) - c0
+    block = cells[:, r0:r1, c0:c1][:, row_cell][:, :, col_cell] / (size[0] * size[1])
+    placed[:, y0:y1, x0:x1] = block.float().cpu().numpy()
+    return placed
 
-    fx1, fy1, fx2, fy2 = _fpn_box_bounds(
-        box_processed, padded_size, heatmap.shape, margin=margin
-    )
-    if fx2 <= fx1 or fy2 <= fy1:
-        return np.zeros((1, 1), dtype=np.float32)
-    return _normalize_heatmap_array(heatmap[fy1:fy2, fx1:fx2])
 
+def fpn_node_maps_many(
+    model: Any,
+    image: Tensor,
+    boxes_processed: Tensor,
+    paths: list[list[Any]] | None = None,
+    cache: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Which regions contribute to each decision-path node, per box, on the FPN level the RoI read.
 
-def node_fpn_maps(
-    tree: SparseObliqueDecisionTreeClassifier,
-    feature_grid: Tensor | np.ndarray,
-    pool: Any,
-    level_feature: Tensor,
-    box_processed: Tensor,
-    processed_image_size: tuple[int, int],
-    padded_size: tuple[int, int],
-    path: list[Any] | None = None,
-) -> tuple[list[np.ndarray], np.ndarray]:
-    """Per-node exact maps and the stacked path map M in one backward pass.
+    Gradient × Input per channel, magnitudes summed over channels (draft Eq 3.5 and 3.7):
+    H_i(p) = Σ_c |(∂s_i/∂F)_c(p) · F_c(p)|. RoI Align is linear, so this is the model's own
+    arithmetic, not an approximation. `overview_map` is M = Σ_i H_i (Eq 3.8).
 
-    Same numbers as `compute_exact_attribution` with `path=[step]` per node and
-    `path=path` for M, but on the single FPN level the RoI came from, staying on
-    that level's device, with every node read out of one batched autograd call.
+    `cache` is the detection dict from `NeuroSymbolicDetector.forward`: its stored FPN features
+    save a second backbone pass. Without it the backbone is re-run on `image`.
+
+    `image` is the original [3, H, W] image, `boxes_processed` is [N, 4]. Maps come back
+    spread over original image pixels (see `_place_on_image`), so they plug into the same
+    figure and tile scoring as any pixel map; `level_stride` says how coarse the cells are.
     """
-    if path is None:
-        path = tree.decision_path(_as_feature_grid(feature_grid).reshape(-1))
-    if not path:
-        return [], np.zeros((1, 1), dtype=np.float32)
+    if boxes_processed.shape[0] == 0:
+        return []
+    detector = model.detector
+    tree = model.symbolic_tree
+    parameter = next(detector.parameters())
+    image_size = tuple(image.shape[-2:])
 
-    device = level_feature.device
-    weights = torch.as_tensor(
-        np.stack([path_weight_grid(tree, feature_grid, path=[step]) for step in path]),
-        dtype=torch.float32,
-        device=device,
-    )  # [depth, C, 7, 7]
-    depth = weights.shape[0]
-    x1, y1, x2, y2 = box_processed.detach().to(device, torch.float32).tolist()
-    rois = torch.tensor(
-        [[node, x1, y1, x2, y2] for node in range(depth)],
-        dtype=torch.float32,
-        device=device,
-    )
-    # Same scale MultiScaleRoIAlign infers; `pool.scales` is overwritten per call.
-    scale = _infer_scale(level_feature, list(processed_image_size))
+    with torch.no_grad():
+        if cache is None:
+            images_list, _ = detector.transform([image.detach().to(parameter)], None)
+            features = detector.backbone(images_list.tensors)
+            processed_sizes = images_list.image_sizes
+            padded_size = tuple(images_list.tensors.shape[-2:])
+        else:
+            features = cache["fpn_features"]
+            processed_sizes = [tuple(cache["processed_size"])]
+            padded_size = cache["padded_size"]
+        boxes = boxes_processed.detach().to(parameter)
+        pooled = detector.roi_align(features, [boxes], processed_sizes)
+        pool = detector.roi_align.pool
+        level_names = [name for name in features if name in pool.featmap_names]
+        box_levels = pool.map_levels([boxes])  # set by the pooling call above
+    if paths is None:
+        paths = [tree.decision_path(grid.cpu().numpy().reshape(-1)) for grid in pooled]
 
-    with torch.inference_mode(False), torch.enable_grad():
-        base = level_feature.detach().clone().unsqueeze(0)  # [1, C, H, W]
-        # One copy of the level per node, so each node gets its own gradient.
-        replicated = base.expand(depth, -1, -1, -1).contiguous().requires_grad_(True)
-        pooled = _roi_align_op(
-            replicated,
-            rois,
-            output_size=pool.output_size,
-            spatial_scale=scale,
-            sampling_ratio=pool.sampling_ratio,
-            aligned=False,
+    results = []
+    for k, path in enumerate(paths):
+        node_indices = [step.node_index for step in path]
+        count = len(node_indices)
+        weights = torch.as_tensor(tree.node_weights[node_indices]).to(parameter)
+        # One box reads one pyramid level, and only a few cells around it: work on that crop.
+        level_index = int(box_levels[k])
+        level = features[level_names[level_index]][0]
+        scale = pool.scales[level_index]
+        x1, y1, x2, y2 = boxes[k].tolist()
+        fx0, fy0 = max(0, int(np.floor(x1 * scale)) - 2), max(0, int(np.floor(y1 * scale)) - 2)
+        fx1, fy1 = min(level.shape[-1], int(np.ceil(x2 * scale)) + 3), min(level.shape[-2], int(np.ceil(y2 * scale)) + 3)
+        crop = level[:, fy0:fy1, fx0:fx1]
+        # The box moves with the crop, so RoI Align reads the same cells it read on the full level.
+        rois = torch.tensor(
+            [[node, x1 - fx0 / scale, y1 - fy0 / scale, x2 - fx0 / scale, y2 - fy0 / scale] for node in range(count)],
+            dtype=crop.dtype,
+            device=crop.device,
         )
-        (grad,) = torch.autograd.grad(pooled, replicated, grad_outputs=weights)
-        raw = (grad * base).abs().sum(1).detach()  # [depth, H, W]
-
-    fx1, fy1, fx2, fy2 = _fpn_box_bounds(
-        box_processed, padded_size, tuple(raw.shape[-2:])
-    )
-    if fx2 <= fx1 or fy2 <= fy1:
-        empty = np.zeros((1, 1), dtype=np.float32)
-        return [empty.copy() for _ in path], empty
-
-    # Only the box crop leaves the device, like Grad-CAM's maps.
-    node_crops = raw[:, fy1:fy2, fx1:fx2].cpu().numpy().astype(np.float32)
-    node_maps = [_normalize_heatmap_array(crop) for crop in node_crops]
-    # M sums the raw node maps, then normalizes (not the normalized panels).
-    path_map = _normalize_heatmap_array(node_crops.sum(axis=0))
-    return node_maps, path_map
-
-
-def resize_heatmap_to_box(
-    heatmap: Tensor | np.ndarray,
-    box: Tensor | np.ndarray,
-) -> Tensor:
-    if isinstance(heatmap, np.ndarray):
-        heatmap_tensor = torch.from_numpy(heatmap).float()
-    else:
-        heatmap_tensor = heatmap.detach().cpu().float()
-
-    if isinstance(box, np.ndarray):
-        box_tensor = torch.from_numpy(box).float()
-    else:
-        box_tensor = box.detach().cpu().float()
-
-    x1, y1, x2, y2 = box_tensor.round().int().tolist()
-    height = max(y2 - y1, 1)
-    width = max(x2 - x1, 1)
-
-    return F.interpolate(
-        heatmap_tensor[None, None, :, :],
-        size=(height, width),
-        mode="bilinear",
-        align_corners=False,
-    )[0, 0]
+        with torch.inference_mode(False), torch.enable_grad():
+            # One copy of the crop per node, so one backward gives every node its own gradient.
+            copies = crop.detach().clone()[None].expand(count, -1, -1, -1).contiguous().requires_grad_(True)
+            grid = roi_align(
+                copies, rois, output_size=pool.output_size, spatial_scale=scale,
+                sampling_ratio=pool.sampling_ratio, aligned=False,
+            )
+            (gradient,) = torch.autograd.grad(grid, copies, grad_outputs=weights.reshape(grid.shape))
+            node_crop = (gradient * crop.detach()[None]).abs().sum(1).detach()  # H_i on the crop
+        node_cells = torch.zeros(count, *level.shape[-2:], dtype=node_crop.dtype, device=node_crop.device)
+        node_cells[:, fy0:fy1, fx0:fx1] = node_crop
+        cells = torch.cat([node_cells, node_cells.sum(0, keepdim=True)])  # M placed with them
+        placed = _place_on_image(cells, padded_size, tuple(processed_sizes[0]), image_size)
+        results.append(
+            {
+                "path": path,
+                "node_indices": node_indices,
+                "node_maps": placed[:-1],
+                "overview_map": placed[-1],
+                "level_stride": padded_size[0] / cells.shape[-2],
+            }
+        )
+    return results
 
 
-def project_heatmap_to_image(
-    heatmap: Tensor | np.ndarray,
-    box: Tensor | np.ndarray,
-    image_shape: tuple[int, int],
-) -> Tensor:
-    if isinstance(box, np.ndarray):
-        box_tensor = torch.from_numpy(box).float()
-    else:
-        box_tensor = box.detach().cpu().float()
-
-    x1, y1, x2, y2 = box_tensor.round().int().tolist()
-    resized = resize_heatmap_to_box(heatmap, box)
-
-    img_h, img_w = image_shape
-    cx1 = max(0, min(x1, img_w))
-    cx2 = max(0, min(x2, img_w))
-    cy1 = max(0, min(y1, img_h))
-    cy2 = max(0, min(y2, img_h))
-
-    rx1 = max(0, cx1 - x1)
-    rx2 = rx1 + (cx2 - cx1)
-    ry1 = max(0, cy1 - y1)
-    ry2 = ry1 + (cy2 - cy1)
-
-    canvas = torch.zeros(image_shape, dtype=torch.float32)
-    if (cx2 > cx1) and (cy2 > cy1):
-        canvas[cy1:cy2, cx1:cx2] = resized[ry1:ry2, rx1:rx2]
-    return canvas
+def fpn_node_maps(
+    model: Any,
+    image: Tensor,
+    box_processed: Tensor,
+    path: list[Any] | None = None,
+) -> dict[str, Any]:
+    """`fpn_node_maps_many` for one box."""
+    return fpn_node_maps_many(
+        model, image, box_processed.reshape(1, 4), paths=None if path is None else [path]
+    )[0]

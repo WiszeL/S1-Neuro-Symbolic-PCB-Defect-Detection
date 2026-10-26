@@ -1,4 +1,4 @@
-"""Heatmap scores for the FPN-resolution maps (see heatmap.py)."""
+"""Heatmap scores for the exact pixel maps (see heatmap.py)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from torch import Tensor
 from torchvision.ops import box_iou
 from tqdm import tqdm
 
-from symbolic.evaluation import _compute_local_instance_heatmap, _FAITHFULNESS_CELL_BUDGET_FRACTION
+from symbolic.evaluation import _FAITHFULNESS_CELL_BUDGET_FRACTION
 from util.geometry import project_gt_box_to_roi_grid
 from util.heatmap_metrics import (
     normalize_heatmap,
@@ -22,17 +22,28 @@ from util.heatmap_metrics import (
 )
 
 from .heatmap import (
-    _fpn_box_bounds,
-    compute_node_local_evidence_maps,
-    exact_fpn_contribution,
-    path_fpn_map,
-    path_weight_grid,
+    _normalization,
+    path_scores,
+    fpn_node_maps,
+    pooled_roi_from_normalized_image,
 )
 from .hybrid import NeuroSymbolicDetector
-from .inference import explain_hybrid_detection
+
+_ROI_GRID = (7, 7)
 
 
-@torch.no_grad()  # not inference_mode: the exact map runs autograd inside
+def pixel_map_to_roi_grid(pixel_map: np.ndarray, box: Tensor) -> Tensor:
+    """Contribution map cropped to a box (original pixels) and pooled to 7x7."""
+    height, width = pixel_map.shape
+    x1, y1, x2, y2 = (int(round(float(v))) for v in box)
+    crop = pixel_map[max(y1, 0) : min(y2, height), max(x1, 0) : min(x2, width)]
+    if crop.size == 0:
+        return torch.zeros(_ROI_GRID)
+    pooled = F.adaptive_avg_pool2d(torch.from_numpy(np.ascontiguousarray(crop, dtype=np.float32))[None, None], _ROI_GRID)
+    return normalize_heatmap(pooled[0, 0])
+
+
+@torch.no_grad()  # not inference_mode: the pixel map runs autograd inside
 def evaluate_exact_attribution_spatial_metrics(
     model: NeuroSymbolicDetector,
     images: list[Tensor],
@@ -66,27 +77,20 @@ def evaluate_exact_attribution_spatial_metrics(
                 continue
 
             gt_box = gt_boxes[int(matched_idx[row])]
-            gt_mask = project_gt_box_to_roi_grid(proposals[row], gt_box, (7, 7))
+            gt_mask = project_gt_box_to_roi_grid(proposals[row], gt_box, _ROI_GRID)
             if gt_mask.sum().item() == 0:
                 continue
 
-            explanation = explain_hybrid_detection(
+            path = model.symbolic_tree.decision_path(
+                detection["pooled_features"][row].numpy().reshape(-1)
+            )
+            overview = fpn_node_maps(
                 model,
-                detection,
-                detection_index=row,
-                image_shape=tuple(image.shape[-2:]),
-            )
-            if "path_exact_attribution" not in explanation:
-                # No FPN context — nothing to score.
-                continue
-
-            # Resample to the 7x7 grid the shared metrics expect.
-            attribution = torch.from_numpy(explanation["path_exact_attribution"]).float()
-            heatmap = normalize_heatmap(
-                F.interpolate(
-                    attribution[None, None], size=(7, 7), mode="bilinear", align_corners=False
-                )[0, 0]
-            )
+                image.to(model.device),
+                detection["proposal_boxes_processed"][row],
+                path=path,
+            )["overview_map"]
+            heatmap = pixel_map_to_roi_grid(overview, proposals[row])
             if heatmap.sum() == 0:
                 continue
 
@@ -97,227 +101,131 @@ def evaluate_exact_attribution_spatial_metrics(
     return stratified_spatial_result(overlap_scores, pointing_scores, gt_coverage)
 
 
-def _rank_positions_fpn(
-    ranking: str,
-    tree,
-    pooled_grid: np.ndarray,
-    level_map: Tensor,
-    box_bounds: tuple[int, int, int, int],
-    rng: np.random.Generator,
-    fpn_map: Tensor | None = None,
-) -> np.ndarray:
-    """Rank box positions most-important first, under the given ranking."""
-    fx1, fy1, fx2, fy2 = box_bounds
-    bh, bw = fy2 - fy1, fx2 - fx1
-
-    if fpn_map is not None:
-        scores = fpn_map[fy1:fy2, fx1:fx2].detach().cpu().numpy()
-    elif ranking == "leaf_only":
-        leaf7 = _compute_local_instance_heatmap(tree, torch.from_numpy(pooled_grid), mode="leaf_only")
-        scores = F.interpolate(
-            leaf7[None, None].float(), size=(bh, bw), mode="bilinear", align_corners=False
-        )[0, 0].numpy()
-    elif ranking == "random":
-        scores = rng.random((bh, bw)).astype(np.float32)
-    else:
-        raise ValueError(f"Unknown ranking {ranking!r}.")
-
-    return np.argsort(scores.reshape(-1))[::-1]
-
-
-def _grid_map_on_level(
-    grid_map: np.ndarray,
-    level_hw: tuple[int, int],
-    inner_bounds: tuple[int, int, int, int],
-) -> Tensor:
-    """7x7 grid map stretched over the box (no margin) on a zero level-sized map,
-    so it ranks like any FPN map; margin pixels rank last."""
-    ix1, iy1, ix2, iy2 = inner_bounds
-    full = torch.zeros(level_hw, dtype=torch.float32)
-    if ix2 <= ix1 or iy2 <= iy1:
-        return full
-    full[iy1:iy2, ix1:ix2] = F.interpolate(
-        torch.from_numpy(np.ascontiguousarray(grid_map, dtype=np.float32))[None, None],
-        size=(iy2 - iy1, ix2 - ix1), mode="bilinear", align_corners=False,
-    )[0, 0]
-    return full
-
-
 def _mean(xs: list[float]) -> float:
     return float(np.mean(xs)) if xs else float("nan")
 
 
-def _masked_level(
-    level_map: Tensor,
-    bounds: tuple[int, int, int, int],
-    keep_mask: Tensor,
-    start_from_zero: bool = False,
-) -> Tensor:
-    """`level_map` with the box region reduced to only `keep_mask` positions.
-
-    `start_from_zero=False` (deletion): full map, then zero the box positions
-    NOT in `keep_mask` — i.e. `keep_mask` marks what survives.
-    `start_from_zero=True` (insertion): empty map, then copy in the box
-    positions that ARE in `keep_mask`.
-    """
-    fx1, fy1, fx2, fy2 = bounds
-    if start_from_zero:
-        out = torch.zeros_like(level_map)
-        out[:, fy1:fy2, fx1:fx2][:, keep_mask] = level_map[:, fy1:fy2, fx1:fx2][:, keep_mask]
-    else:
-        out = level_map.clone()
-        out[:, fy1:fy2, fx1:fx2][:, ~keep_mask] = 0.0
-    return out
+# Image-pixel faithfulness. Candidates are PATCH_SIZE tiles over the whole image (the
+# receptive field reaches outside the box); a tile is ranked by its summed map, which keeps the
+# ranking exact for an additive map. Masking sets a tile to the mean colour (0 in x̃ units).
+PATCH_SIZE = 16
 
 
-def fpn_necessity_sufficiency(
-    roi_align: Any,
-    fpn_features: dict[str, Tensor],
-    level_name: str,
-    box_processed: Tensor,
-    processed_size: tuple[int, int],
-    bounds: tuple[int, int, int, int],
+def patch_scores(pixel_map: np.ndarray, patch: int = PATCH_SIZE) -> np.ndarray:
+    """Sum of a pixel map over every `patch` tile; edge tiles are zero-padded."""
+    height, width = pixel_map.shape
+    rows, cols = -(-height // patch), -(-width // patch)
+    padded = np.zeros((rows * patch, cols * patch), dtype=np.float64)
+    padded[:height, :width] = pixel_map
+    return padded.reshape(rows, patch, cols, patch).sum(axis=(1, 3))
+
+
+def keep_mask_to_pixels(keep: np.ndarray, image_shape: tuple[int, int]) -> Tensor:
+    tiles = np.repeat(np.repeat(keep, PATCH_SIZE, axis=0), PATCH_SIZE, axis=1)
+    return torch.from_numpy(tiles[: image_shape[0], : image_shape[1]])
+
+
+def box_tile_mask(box: Tensor, grid_shape: tuple[int, int]) -> np.ndarray:
+    """Tiles the box (original pixels) touches, as a [rows, cols] bool grid; at least one."""
+    x1, y1, x2, y2 = (float(v) for v in box)
+    first_col = min(max(int(x1 // PATCH_SIZE), 0), grid_shape[1] - 1)
+    first_row = min(max(int(y1 // PATCH_SIZE), 0), grid_shape[0] - 1)
+    last_col = max(min(int((x2 - 1e-6) // PATCH_SIZE), grid_shape[1] - 1), first_col)
+    last_row = max(min(int((y2 - 1e-6) // PATCH_SIZE), grid_shape[0] - 1), first_row)
+    mask = np.zeros(grid_shape, dtype=bool)
+    mask[first_row : last_row + 1, first_col : last_col + 1] = True
+    return mask
+
+
+def random_order_box_first(rng: np.random.Generator, box_mask: np.ndarray) -> np.ndarray:
+    """Random floor: the box's tiles in random order, then the rest. Whole-image random would
+    almost never touch the box and tell nothing."""
+    flat = box_mask.reshape(-1)
+    return np.concatenate([rng.permutation(np.flatnonzero(flat)), rng.permutation(np.flatnonzero(~flat))])
+
+
+def memoize_by_keep_mask(function: Callable[[np.ndarray], Any]) -> Callable[[np.ndarray], Any]:
+    """Endpoints (nothing / everything kept) repeat across rankings; one forward each is enough."""
+    cache: dict[bytes, Any] = {}
+
+    def wrapped(keep: np.ndarray) -> Any:
+        key = keep.tobytes()
+        if key not in cache:
+            cache[key] = function(keep)
+        return cache[key]
+
+    return wrapped
+
+
+def pixel_masking_metrics(
+    evaluate: Callable[[np.ndarray], tuple[int, float]],
     order: np.ndarray,
+    grid_shape: tuple[int, int],
     budget: int,
-    classify: Callable[[Tensor], np.ndarray],
-    base_label: int,
-) -> tuple[float, float]:
-    """One RoI, one ranking: the top `budget` box pixels on its own FPN level.
+    box_tiles: int,
+    auc_steps: int,
+) -> dict[str, float]:
+    """One detection, one ranking. `evaluate(keep)` -> (label, score) with only `keep` tiles unmasked.
 
-    Necessity zeroes them and asks whether the label flips; sufficiency keeps
-    only them and asks whether the label survives. Every method goes through
-    this — only `order` (its own map) and `classify` (its own model) differ.
+    Necessity masks the top `budget` tiles and asks whether the label flips; sufficiency keeps
+    only them and asks whether it survives. The AUCs follow `score / base score` as the top
+    0 .. `box_tiles` tiles are masked (deletion) or added to an empty image (insertion); the
+    schedule runs over the box's tile count, not the image's, and both ends are evaluated.
+    Every method goes through this; only `order` (its own map) and `evaluate` (its own model)
+    differ.
     """
-    fx1, fy1, fx2, fy2 = bounds
-    box_shape = (fy2 - fy1, fx2 - fx1)
-    level_map = fpn_features[level_name][0]
-    selected = np.zeros(box_shape[0] * box_shape[1], dtype=bool)
-    selected[order[:budget]] = True
-    selected_t = torch.from_numpy(selected.reshape(box_shape)).to(level_map.device)
+    base_label, base_score = evaluate(np.ones(grid_shape, dtype=bool))
+    base_score = max(base_score, 1e-12)
 
-    labels: list[int] = []
-    for keep, from_zero in ((~selected_t, False), (selected_t, True)):
-        patched = dict(fpn_features)
-        patched[level_name] = _masked_level(
-            level_map, bounds, keep, start_from_zero=from_zero
-        ).unsqueeze(0)
-        grid = roi_align(patched, [box_processed.unsqueeze(0)], [processed_size])
-        labels.append(int(classify(grid)[0]))
-    return float(labels[0] != base_label), float(labels[1] == base_label)
+    def selection(count: int) -> np.ndarray:
+        selected = np.zeros(grid_shape[0] * grid_shape[1], dtype=bool)
+        selected[order[:count]] = True
+        return selected.reshape(grid_shape)
 
-
-def fpn_deletion_insertion_auc(
-    roi_align: Any,
-    fpn_features: dict[str, Tensor],
-    level_name: str,
-    box_processed: Tensor,
-    processed_size: tuple[int, int],
-    bounds: tuple[int, int, int, int],
-    order: np.ndarray,
-    base_grid: Tensor,
-    score_fn: Callable[[Tensor], float],
-    auc_steps: int = 5,
-) -> tuple[float, float]:
-    """Deletion/insertion AUC for one detection: how the score changes as top-ranked pixels are masked or added back."""
-    fx1, fy1, fx2, fy2 = bounds
-    box_shape = (fy2 - fy1, fx2 - fx1)
-    n_pos = box_shape[0] * box_shape[1]
-    level_map = fpn_features[level_name][0]
-    base = max(score_fn(base_grid), 1e-12)
-    empty = score_fn(torch.zeros_like(base_grid)) / base
-
-    del_curve, ins_curve = [1.0], [empty]  # curve ends are known without re-pooling
-    for step in range(1, auc_steps):
-        k = round(n_pos * step / auc_steps)
-        selected = np.zeros(n_pos, dtype=bool)
-        selected[order[:k]] = True
-        selected_t = torch.from_numpy(selected.reshape(box_shape)).to(level_map.device)
-        for curve, keep, from_zero in ((del_curve, ~selected_t, False), (ins_curve, selected_t, True)):
-            patched = dict(fpn_features)
-            patched[level_name] = _masked_level(
-                level_map, bounds, keep, start_from_zero=from_zero
-            ).unsqueeze(0)
-            grid = roi_align(patched, [box_processed.unsqueeze(0)], [processed_size])
-            curve.append(score_fn(grid) / base)
-    del_curve.append(empty)
-    ins_curve.append(1.0)
+    top = selection(budget)
+    deletion, insertion = [], []
+    for step in range(auc_steps + 1):
+        selected = selection(round(box_tiles * step / auc_steps))
+        deletion.append(evaluate(~selected)[1] / base_score)
+        insertion.append(evaluate(selected)[1] / base_score)
 
     dx = 1.0 / auc_steps
-    return float(np.trapz(del_curve, dx=dx)), float(np.trapz(ins_curve, dx=dx))
+    return {
+        "necessity": float(evaluate(~top)[0] != base_label),
+        "sufficiency": float(evaluate(top)[0] == base_label),
+        "deletion_auc": float(np.trapz(deletion, dx=dx)),
+        "insertion_auc": float(np.trapz(insertion, dx=dx)),
+    }
 
 
-def _node_score_after_masking(
-    detector,
-    fpn_features: dict[str, Tensor],
-    level_name: str,
-    masked_level: Tensor,
-    box_processed: Tensor,
-    processed_size: tuple[int, int],
-    weight: np.ndarray,
-    bias: float,
-) -> float:
-    """Re-pool with one FPN level replaced, then re-score this single node
-    directly (`w . x + b`) — cheaper and more exact than re-running the whole
-    tree, since the node's own weights/bias never change."""
-    patched = dict(fpn_features)
-    patched[level_name] = masked_level.unsqueeze(0)
-    grid = detector.roi_align(patched, [box_processed.unsqueeze(0)], [processed_size])[0]
-    features = grid.detach().cpu().numpy().astype(np.float32).reshape(-1)
-    return float((features * weight).sum() + bias)
+def _tile_order(pixel_map: np.ndarray) -> np.ndarray:
+    return np.argsort(patch_scores(pixel_map).reshape(-1))[::-1]
 
 
-@torch.no_grad()  # not inference_mode: the exact map runs autograd inside
-def evaluate_faithfulness_fpn_masking(
+@torch.no_grad()  # not inference_mode: the pixel map runs autograd inside
+def evaluate_pixel_faithfulness(
     model: NeuroSymbolicDetector,
     images: list[Tensor],
     rankings: tuple[str, ...] = ("exact", "random"),
     budget_fraction: float = _FAITHFULNESS_CELL_BUDGET_FRACTION,
-    margin: int = 2,
     score_threshold: float = 0.5,
     random_state: int = 42,
-    per_node: bool = True,
+    per_node: bool = False,
     auc_steps: int = 5,
-    use_fpn_heatmap: bool = True,
 ) -> dict[str, Any]:
-    """Necessity/sufficiency at full FPN resolution: mask top pixels, re-pool, check labels.
+    """Necessity/sufficiency on image pixels: mask the top-ranked tiles, re-run the real model.
 
-    RoIs are the hybrid's detections scoring >= `score_threshold`, pooled at
-    their proposals. Grad-CAM runs the same protocol through
-    `fpn_necessity_sufficiency` (gradcam/evaluation.py).
+    Population: the hybrid's detections scoring >= `score_threshold`, each at the proposal it
+    was classified from (the proposal stays fixed under masking). Masked images go through the
+    real forward pass.
 
-    Masking the FPN map directly (not shrunk to 7x7 first) is the fair test
-    for a finer-resolution map. Two things are measured, at the SAME
-    `rankings`/`budget_fraction`:
-
-    - **Path-level** (`return["path"]`): mask the path-level map (the
-      per-node panels stacked, Σ|node map| — `heatmap.path_fpn_map`), re-pool,
-      check whether the FINAL LABEL flips. "Do the regions the steps weigh,
-      together, matter to the decision" — the head-to-head vs Grad-CAM.
-    - **Per-node** (`return["node"]`, `per_node=True`, `name in {"exact",
-      "random"}`): for each node on the path, mask that NODE'S OWN map,
-      re-pool, check whether that NODE'S OWN routing sign
-      (`w_i . x + b_i >= 0`) flips, plus a deletion/insertion AUC over that
-      node's routing confidence `sigmoid(|w_i . x + b_i|)` — same quantity
-      `NeuroSymbolicDetector` uses for routing-margin scoring (`hybrid.py`),
-      tracked per masking budget instead of once. "Does the region THAT
-      NODE weighs decide THAT NODE's question" — the per-node panels' claim.
-
-    `return["node_map_similarity"]`: mean cosine similarity between
-    consecutive nodes' maps (exact FPN, or grid when `use_fpn_heatmap=False`)
-    along the path — evidence the six steps weigh different regions (high
-    similarity would mean nothing to show).
-
-    `use_fpn_heatmap=False`: SODT's own maps (`"exact"`, `"shuffled_w"`, and
-    the per-node ranking) are replaced by the displayed 7x7 grid heatmap
-    (`heatmap.compute_node_local_evidence_maps`'s `raw_node_heatmap`),
-    stretched over the box — the resolution ablation. Masking still happens
-    on FPN pixels, and node scores (hence `deletion_auc`/`insertion_auc`,
-    `support_fraction`, `node_necessity_ceiling`) always come from the exact
-    per-node decomposition, since those are properties of the node's real
-    routing score, not of the displayed map. `"activation_only"` and
-    `"random"` are unaffected either way.
-
-    Per-node masked scores come from each node's exact map (no re-pooling); only the path-level rows re-pool.
+    - **Path-level** (`return["path"]`): rank tiles by the overview map M = Σ_i H_i ("exact", most
+      contributing first) or at random; the score is the routing confidence of the final leaf and
+      the label is its class.
+    - **Per-node** (`return["node"]`, `per_node=True`): each node's own map against that node's own
+      call: its routing sign flips (necessity), and σ(|w_i·x + b_i|) is tracked as tiles go.
+      Pruned nodes are skipped. Off by default: it is most of the cost (~6 extra rankings per
+      detection, each a full set of forward passes).
     """
     tree = model.symbolic_tree
     detector = model.detector
@@ -326,293 +234,95 @@ def evaluate_faithfulness_fpn_masking(
         name: {"necessity": [], "sufficiency": [], "deletion_auc": [], "insertion_auc": []}
         for name in rankings
     }
-    node_rankings = tuple(name for name in rankings if name in ("exact", "random"))
     node_results: dict[str, dict[int, dict[str, list[float]]]] = {
-        name: defaultdict(
-            lambda: {"flip": [], "deletion_auc": [], "insertion_auc": [], "support_fraction": []}
-        )
-        for name in node_rankings
+        name: defaultdict(lambda: {"necessity": [], "sufficiency": [], "deletion_auc": [], "insertion_auc": []})
+        for name in ("exact", "random")
     }
     node_similarity: list[float] = []
-    node_ceiling: dict[int, list[float]] = defaultdict(list)
-    featmap_names = list(detector.roi_align.pool.featmap_names)
-    map_rankings = {"exact", "shuffled_w", "activation_only"}
 
-    def classify(grid: Tensor) -> np.ndarray:
-        return tree.predict(grid.detach().cpu().numpy().astype(np.float32).reshape(grid.shape[0], -1))
-
-    def routing_confidence(grid: Tensor) -> float:
-        # the same score the detector gives its detections
-        _, confidence = tree.route(
-            grid.detach().cpu().numpy().astype(np.float32).reshape(grid.shape[0], -1), True
-        )
-        return float(confidence[0])
-
-    for image in tqdm(images, desc="FPN-masking faithfulness"):
-        # Population: the hybrid's own detections at the P/R operating point,
-        # explained at the proposal each was classified from.
+    for image in tqdm(images, desc="Pixel-masking faithfulness"):
         detection = model([image])[0]
-        keep = detection["scores"] >= score_threshold
-        boxes_processed = detection["proposal_boxes_processed"][keep].to(model.device)
-        if boxes_processed.shape[0] == 0:
+        kept = torch.where(detection["scores"] >= score_threshold)[0].tolist()
+        if not kept:
             continue
 
-        images_list, _ = detector.transform([image.to(model.device)], None)
-        fpn_features = detector.backbone(images_list.tensors)
+        image = image.to(model.device)
+        mean, std = _normalization(detector, image)
+        normalized = (image - mean) / std
+        image_shape = tuple(image.shape[-2:])
+        grid_shape = (-(-image_shape[0] // PATCH_SIZE), -(-image_shape[1] // PATCH_SIZE))
 
-        pooled = detector.roi_align(fpn_features, [boxes_processed], images_list.image_sizes)
-        level_indices = detector.roi_align.pool.map_levels([boxes_processed])
-        padded_size = tuple(images_list.tensors.shape[-2:])
-        processed_size = images_list.image_sizes[0]
-        # Forward stores unbatched levels on each detection dict.
-        unbatched_fpn = {name: level[0].detach() for name, level in fpn_features.items()}
+        for row in kept:
+            box = detection["proposal_boxes_processed"][row].to(model.device)
+            path = tree.decision_path(detection["pooled_features"][row].numpy().reshape(-1))
+            attribution = fpn_node_maps(model, image, box, path=path)
+            box_mask = box_tile_mask(detection["proposal_boxes"][row], grid_shape)
+            box_tiles = int(box_mask.sum())
+            budget = max(int(box_tiles * budget_fraction), 1)
 
-        for row in range(boxes_processed.shape[0]):
-            box_processed = boxes_processed[row]
-            level_name = featmap_names[int(level_indices[row])]
-            level_map = fpn_features[level_name][0]
+            @memoize_by_keep_mask
+            def pooled_for(keep: np.ndarray) -> Tensor:
+                masked = normalized * keep_mask_to_pixels(keep, image_shape).to(model.device)
+                return pooled_roi_from_normalized_image(detector, masked, box)
 
-            bounds = _fpn_box_bounds(
-                box_processed, padded_size, tuple(level_map.shape[-2:]), margin=margin
-            )
-            fx1, fy1, fx2, fy2 = bounds
-            if fx2 <= fx1 or fy2 <= fy1:
-                continue
+            def path_evaluate(keep: np.ndarray) -> tuple[int, float]:
+                grid = pooled_for(keep).detach().cpu().numpy().astype(np.float32).reshape(1, -1)
+                leaf, confidence = tree.route(grid, True)
+                return int(tree.leaf_labels[leaf[0]]), float(confidence[0])
 
-            pooled_grid = pooled[row].detach().cpu().numpy().astype(np.float32)
-            base_pred = int(tree.predict(pooled_grid.reshape(1, -1))[0])
-
-            n_pos = (fy2 - fy1) * (fx2 - fx1)
-            budget = max(int(n_pos * budget_fraction), 1)
-
-            # Ablation: the displayed 7x7 grid maps, stretched over the box —
-            # one per path node, in path order (prune-free, matches `path` below).
-            grid_node_maps: list[Tensor] | None = None
-            if not use_fpn_heatmap:
-                level_hw = tuple(level_map.shape[-2:])
-                inner = _fpn_box_bounds(box_processed, padded_size, level_hw, margin=0)
-                grid_node_maps = [
-                    _grid_map_on_level(node["raw_node_heatmap"], level_hw, inner)
-                    for node in compute_node_local_evidence_maps(tree, pooled_grid)
-                ]
-
-            # One map per path node, shared by the path map and the per-node block below.
-            node_contribs: dict[int, Tensor] = {}
-
-            def contribution_for(step) -> Tensor:
-                if step.node_index not in node_contribs:
-                    node_contribs[step.node_index] = exact_fpn_contribution(
-                        tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                        level_name, box_processed, processed_size, path=[step],
-                    )
-                return node_contribs[step.node_index]
-
-            # ── Path-level (unchanged): does the final label flip? ──
-            fpn_maps: dict[str, Tensor] = {}
-            if map_rankings & set(rankings):
-                # Path map = stacked per-node panels (Σ|node map|), never a signed sum.
-                path_steps = tree.decision_path(pooled_grid.reshape(-1))
-                if "exact" in rankings:
-                    if use_fpn_heatmap:
-                        # Pruned nodes add zero, so skip them.
-                        exact_map = torch.zeros_like(level_map[0])
-                        for step in path_steps:
-                            if np.any(tree.node_weights[step.node_index] != 0.0):
-                                exact_map = exact_map + contribution_for(step).abs().sum(0)
-                        fpn_maps["exact"] = exact_map
-                    else:
-                        fpn_maps["exact"] = torch.stack(grid_node_maps).sum(0)
-                if "shuffled_w" in rankings:
-                    # Same stacking, each node's own weights shuffled in place.
-                    shuffled_grids = []
-                    for step in path_steps:
-                        node_grid = path_weight_grid(tree, pooled_grid, path=[step])
-                        flat = node_grid.reshape(-1).copy()
-                        rng.shuffle(flat)
-                        shuffled_grids.append(flat.reshape(node_grid.shape))
-                    if use_fpn_heatmap:
-                        fpn_maps["shuffled_w"] = path_fpn_map(
-                            tree, pooled_grid, detector.roi_align, unbatched_fpn,
-                            level_name, box_processed, processed_size, path=path_steps,
-                            node_weight_grids=shuffled_grids,
-                        )
-                    else:
-                        level_hw = tuple(level_map.shape[-2:])
-                        inner = _fpn_box_bounds(box_processed, padded_size, level_hw, margin=0)
-                        fpn_maps["shuffled_w"] = torch.stack([
-                            _grid_map_on_level(
-                                np.abs(shuffled_grid * pooled_grid).sum(0),
-                                level_hw, inner,
-                            )
-                            for shuffled_grid in shuffled_grids
-                        ]).sum(0)
-                if "activation_only" in rankings:
-                    fpn_maps["activation_only"] = level_map.detach().abs().sum(0)
-
-            for name in rankings:
-                order = _rank_positions_fpn(
-                    name, tree, pooled_grid, level_map, bounds, rng,
-                    fpn_map=fpn_maps.get(name),
-                )
-                flipped, preserved = fpn_necessity_sufficiency(
-                    detector.roi_align, fpn_features, level_name, box_processed,
-                    processed_size, bounds, order, budget, classify, base_pred,
-                )
-                path_results[name]["necessity"].append(flipped)
-                path_results[name]["sufficiency"].append(preserved)
-                if name in ("exact", "random"):  # controls skip AUC to save time
-                    del_auc, ins_auc = fpn_deletion_insertion_auc(
-                        detector.roi_align, fpn_features, level_name, box_processed,
-                        processed_size, bounds, order, pooled[row : row + 1],
-                        routing_confidence, auc_steps=auc_steps,
-                    )
-                    path_results[name]["deletion_auc"].append(del_auc)
-                    path_results[name]["insertion_auc"].append(ins_auc)
-
-            # ── Per-node: does THIS node's own routing call flip? ──
-            if per_node and node_rankings:
-                path = tree.decision_path(pooled_grid.reshape(-1))
-                exact_node_maps: list[np.ndarray] = []
-
-                for depth, step in enumerate(path):
-                    weight = tree.node_weights[step.node_index]
-                    bias = float(tree.node_bias[step.node_index])
-                    if not np.any(weight != 0.0):
-                        # Pruned node: masking can't change anything, so it'd
-                        # just pad the average with fake agreement. Skip it
-                        # (same call as hybrid.py's routing-margin).
-                        continue
-
-                    # Ceiling for "exact" specifically (support is always the
-                    # exact node support): if its top-ranked pixels cover the
-                    # node's whole nonzero support (sparse node, common under
-                    # L1), masking collapses the score to bias alone, so flip
-                    # needs sign(bias) != sign(score). NOT a bound for
-                    # "random" — a random 50% subset can flip via unrelated
-                    # cancellation even past this. Verified against a
-                    # dense-weight synthetic tree, where random's flip rate
-                    # did exceed this number.
-                    bias_blocks_flip = (bias >= 0.0) == step.went_left
-                    node_ceiling[depth].append(float(not bias_blocks_flip))
-
-                    # Ranking-independent (same node, same box either way) —
-                    # computed once, not once per ranking. Zero features in
-                    # is exactly `bias` out (locked by
-                    # test_faithfulness_protocol.py).
-                    base_conf = 1.0 / (1.0 + np.exp(-abs(step.score)))
-                    empty_conf = 1.0 / (1.0 + np.exp(-abs(bias)))
-
-                    # A node's score is a sum over FPN pixels, so masking pixels just subtracts them — no need to re-pool.
-                    # Node scores (signed_box) always come from the exact
-                    # decomposition — it's the node's real routing score, not
-                    # a displayed map. Only the ranking map (node_map_box)
-                    # follows `use_fpn_heatmap`.
-                    contribution = contribution_for(step)
-                    direction = 1.0 if step.went_left else -1.0
-                    signed_box = (contribution.sum(0) * direction)[fy1:fy2, fx1:fx2].detach().cpu().numpy().reshape(-1).astype(np.float64)
-                    exact_node_map_box = contribution.abs().sum(0)[fy1:fy2, fx1:fx2].detach().cpu().numpy()
-                    node_map_box = (
-                        exact_node_map_box
-                        if use_fpn_heatmap
-                        else grid_node_maps[depth][fy1:fy2, fx1:fx2].numpy()
-                    )
-
-                    def node_score(sel_flat: np.ndarray, *, insert: bool) -> float:
-                        """This node's `w.x + b` with `sel_flat` kept (insert) or masked."""
-                        # Sum what is kept (not total - masked) so a fully masked node gives exactly bias, not float noise.
-                        kept = sel_flat if insert else ~sel_flat
-                        return bias + float(signed_box[kept].sum())
-
-                    def conf_ratio(sel_flat: np.ndarray, *, insert: bool) -> float:
-                        """Confidence after keeping/masking `sel_flat`, over unmasked."""
-                        score = node_score(sel_flat, insert=insert)
-                        return (1.0 / (1.0 + np.exp(-abs(score)))) / base_conf
-
-                    for name in node_rankings:
-                        if name == "exact":
-                            exact_node_maps.append(node_map_box)
-                            order = np.argsort(node_map_box.reshape(-1))[::-1]
-                            # Fraction of box positions with any contribution
-                            # at all — the ceiling above is only tight for
-                            # "exact" when this is <= budget_fraction (its
-                            # top-ranked pixels then cover the whole nonzero
-                            # support); above that, the ceiling is loose.
-                            # Always the exact node support, even when
-                            # `use_fpn_heatmap=False` (the ranking map).
-                            support_fraction = float((exact_node_map_box > 0).mean())
-                            node_results[name][depth]["support_fraction"].append(support_fraction)
-                        else:  # "random"
-                            order = rng.permutation(n_pos)
-
-                        sel = np.zeros(n_pos, dtype=bool)
-                        sel[order[:budget]] = True
-                        nec_score = node_score(sel, insert=False)
-                        flipped = (nec_score >= 0.0) != step.went_left
-                        bucket = node_results[name][depth]
-                        bucket["flip"].append(float(flipped))
-
-                        # Endpoints (frac=0 and frac=1) are the same two
-                        # identities as above — no re-pool for those either.
-                        del_curve = [1.0]
-                        ins_curve = [empty_conf / base_conf]
-                        for s in range(1, auc_steps):
-                            frac = s / auc_steps
-                            k = min(max(int(round(n_pos * frac)), 0), n_pos)
-                            sel_k = np.zeros(n_pos, dtype=bool)
-                            sel_k[order[:k]] = True
-                            del_curve.append(conf_ratio(sel_k, insert=False))
-                            ins_curve.append(conf_ratio(sel_k, insert=True))
-                        del_curve.append(empty_conf / base_conf)
-                        ins_curve.append(1.0)
-
-                        dx = 1.0 / auc_steps
-                        bucket["deletion_auc"].append(float(np.trapz(del_curve, dx=dx)))
-                        bucket["insertion_auc"].append(float(np.trapz(ins_curve, dx=dx)))
-
-                if "exact" in node_rankings and len(exact_node_maps) >= 2:
-                    for map_a, map_b in zip(exact_node_maps[:-1], exact_node_maps[1:]):
-                        flat_a, flat_b = map_a.reshape(-1), map_b.reshape(-1)
-                        denom = np.linalg.norm(flat_a) * np.linalg.norm(flat_b)
-                        if denom > 1e-8:
-                            node_similarity.append(float(np.dot(flat_a, flat_b) / denom))
-
-    result: dict[str, Any] = {
-        "path": {
-            name: {
-                "necessity_prediction_flip_rate": _mean(scores["necessity"]),
-                "sufficiency_prediction_preservation": _mean(scores["sufficiency"]),
-                # nan for controls (they skip AUC)
-                "deletion_auc": _mean(scores["deletion_auc"]),
-                "insertion_auc": _mean(scores["insertion_auc"]),
-                "evaluated_roi_count": len(scores["necessity"]),
+            orders = {
+                "exact": _tile_order(attribution["overview_map"]),
+                "random": random_order_box_first(rng, box_mask),
             }
-            for name, scores in path_results.items()
+            for name in rankings:
+                metrics = pixel_masking_metrics(
+                    path_evaluate, orders[name], grid_shape, budget, box_tiles, auc_steps
+                )
+                for key, value in metrics.items():
+                    path_results[name][key].append(value)
+
+            if not per_node:
+                continue
+            aligned_maps = []
+            for position, node_index in enumerate(attribution["node_indices"]):
+                if not np.any(tree.node_weights[node_index] != 0.0):
+                    continue  # pruned: masking cannot change it
+
+                def node_evaluate(keep: np.ndarray, node_index: int = node_index) -> tuple[int, float]:
+                    score = float(path_scores(tree, pooled_for(keep), [node_index])[0])
+                    return int(score >= 0.0), float(1.0 / (1.0 + np.exp(-abs(score))))
+
+                aligned = attribution["node_maps"][position]
+                aligned_maps.append(aligned)
+                for name, order in (
+                    ("exact", _tile_order(aligned)),
+                    ("random", random_order_box_first(rng, box_mask)),
+                ):
+                    metrics = pixel_masking_metrics(
+                        node_evaluate, order, grid_shape, budget, box_tiles, auc_steps
+                    )
+                    for key, value in metrics.items():
+                        node_results[name][position][key].append(value)
+            for map_a, map_b in zip(aligned_maps[:-1], aligned_maps[1:]):
+                flat_a, flat_b = map_a.reshape(-1), map_b.reshape(-1)
+                denom = np.linalg.norm(flat_a) * np.linalg.norm(flat_b)
+                if denom > 1e-8:
+                    node_similarity.append(float(np.dot(flat_a, flat_b) / denom))
+
+    def summary(values: dict[str, list[float]]) -> dict[str, float]:
+        return {
+            "necessity_prediction_flip_rate": _mean(values["necessity"]),
+            "sufficiency_prediction_preservation": _mean(values["sufficiency"]),
+            "deletion_auc": _mean(values["deletion_auc"]),
+            "insertion_auc": _mean(values["insertion_auc"]),
+            "evaluated_roi_count": len(values["necessity"]),
         }
-    }
+
+    result: dict[str, Any] = {"path": {name: summary(values) for name, values in path_results.items()}}
     if per_node:
         result["node"] = {
-            name: {
-                depth: {
-                    "necessity_prediction_flip_rate": _mean(bucket["flip"]),
-                    # Curve is routing confidence, not class probability —
-                    # don't put this next to Grad-CAM's AUC in one table.
-                    "deletion_auc": _mean(bucket["deletion_auc"]),
-                    "insertion_auc": _mean(bucket["insertion_auc"]),
-                    # "random" has no map of its own — nan. For "exact",
-                    # whether the ceiling above is tight: <= budget_fraction
-                    # means its ranking covers the node's whole nonzero
-                    # support, so the ceiling applies; above that, it's loose.
-                    "support_fraction": _mean(bucket["support_fraction"]),
-                    "evaluated_roi_count": len(bucket["flip"]),
-                }
-                for depth, bucket in sorted(node_results[name].items())
-            }
-            for name in node_rankings
-        }
-        # Ceiling for "exact" only (see comment above where it's built) — not
-        # "random". Compare "exact" against this, not against "random".
-        result["node_necessity_ceiling"] = {
-            depth: _mean(flips) for depth, flips in sorted(node_ceiling.items())
+            name: {position: summary(bucket) for position, bucket in sorted(buckets.items())}
+            for name, buckets in node_results.items()
         }
         result["node_map_similarity"] = {
             "mean_cosine_similarity_between_consecutive_nodes": _mean(node_similarity),

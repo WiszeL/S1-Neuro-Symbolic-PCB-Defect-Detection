@@ -19,14 +19,11 @@ class NeuroSymbolicDetector(nn.Module):
         symbolic_tree: SparseObliqueDecisionTreeClassifier,
         device: str | None = None,
         use_routing_margin: bool = True,
-        keep_fpn_on_device: bool = False,
     ) -> None:
         super().__init__()
         self.detector = detector
         self.symbolic_tree = symbolic_tree
         self.use_routing_margin = use_routing_margin
-        # True keeps the stashed FPN levels on the model's device (fast maps); default copies to CPU.
-        self.keep_fpn_on_device = keep_fpn_on_device
         self.device = select_device(device)
         if self.symbolic_tree.num_classes != self.detector.num_classes:
             raise ValueError(
@@ -68,9 +65,6 @@ class NeuroSymbolicDetector(nn.Module):
             images_list.image_sizes,
         )
 
-        # Same level RoI-Align pooled from, so the map never targets the wrong one.
-        roi_level_indices = self.detector.roi_align.pool.map_levels(proposals)
-        featmap_names = list(self.detector.roi_align.pool.featmap_names)
         roi_representations = self.detector.box_head(pooled_features)
         box_regression = self.detector.box_predictor.box_regressor(roi_representations)
         symbolic_probabilities, symbolic_leaf_indices = self._symbolic_predict(pooled_features)
@@ -83,7 +77,6 @@ class NeuroSymbolicDetector(nn.Module):
             pooled_features=pooled_features,
             proposal_probabilities=symbolic_probabilities,
             proposal_leaf_indices=symbolic_leaf_indices,
-            proposal_level_indices=roi_level_indices,
         )
 
         postprocessed_boxes = self.detector.transform.postprocess(
@@ -98,11 +91,15 @@ class NeuroSymbolicDetector(nn.Module):
         )
 
         outputs: list[dict[str, Tensor]] = []
-        for image_index, (result, boxes_dict, proposals_dict, processed_size) in enumerate(
-            zip(results, postprocessed_boxes, postprocessed_proposals, images_list.image_sizes)
+        for index, (result, boxes_dict, proposals_dict) in enumerate(
+            zip(results, postprocessed_boxes, postprocessed_proposals)
         ):
             outputs.append(
                 {
+                    # Kept on the device so the explanation does not re-run the backbone.
+                    "fpn_features": {name: level[index : index + 1] for name, level in features.items()},
+                    "processed_size": images_list.image_sizes[index],
+                    "padded_size": tuple(images_list.tensors.shape[-2:]),
                     "boxes": boxes_dict["boxes"].detach().cpu(),
                     "scores": result["scores"].detach().cpu(),
                     "labels": result["labels"].detach().cpu(),
@@ -116,22 +113,6 @@ class NeuroSymbolicDetector(nn.Module):
                     "symbolic_leaf_indices": result["symbolic_leaf_indices"]
                     .detach()
                     .cpu(),
-                    "symbolic_level_indices": result["symbolic_level_indices"]
-                    .detach()
-                    .cpu(),
-                    # Stash FPN context so the map rebuilds without a second backbone pass.
-                    "fpn_features": {
-                        name: (
-                            level_map[image_index].detach()
-                            if self.keep_fpn_on_device
-                            else level_map[image_index].detach().cpu()
-                        )
-                        for name, level_map in features.items()
-                        if name in featmap_names
-                    },
-                    "featmap_names": featmap_names,
-                    "padded_image_size": tuple(images_list.tensors.shape[-2:]),
-                    "processed_image_size": tuple(processed_size),
                 }
             )
 

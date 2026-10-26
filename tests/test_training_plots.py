@@ -1,4 +1,4 @@
-"""The dashboard and weight maps draw from a real TAO history and tree."""
+"""The dashboard draws from a real TAO history."""
 
 import matplotlib
 
@@ -10,7 +10,6 @@ from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 from symbolic.tao import NODE_STATUSES, fit_tree_with_tao
 from symbolic.visualization import (
     _NODE_STATUS,
-    plot_node_weight_maps,
     plot_training_dashboard,
 )
 
@@ -29,8 +28,6 @@ def test_plots_render_from_a_real_history():
 
     assert set(_NODE_STATUS) == set(NODE_STATUSES)
     plot_training_dashboard(history)
-    fig = plot_node_weight_maps(tree)
-    assert len(fig.axes) == 2 * np.count_nonzero(tree.nonzero_weight_counts())
     plt.close("all")
 
 

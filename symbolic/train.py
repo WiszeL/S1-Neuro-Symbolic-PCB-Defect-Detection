@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -47,24 +46,9 @@ def _format_progress_header(
     total_node_fit_upper_bound: int,
 ) -> list[str]:
     return [
-        (
-            f"Loaded {feature_count} symbolic samples with {feature_dim} raw RoI-pooled feature dimensions."
-        ),
-        (
-            "TAO consumes the full RoI Align feature vector. Symbolic sparsity comes only from "
-            "L1 regularization and the tree structure."
-        ),
-        (
-            f"Training one configured SODT on the configured trainval RoI set: "
-            f"depth={tree_depth}, lambda={l1_lambda:g}, alpha={sparsity_alpha:g}."
-        ),
-        (
-            f"Workload check: {iterations} TAO iterations and up to "
-            f"{total_node_fit_upper_bound} L1-logistic node fits."
-        ),
-        (
-            "Each TAO iteration gets its own node-fit progress bar and remains visible after completion."
-        ),
+        f"SODT: {feature_count:,} RoIs x {feature_dim} dims | depth={tree_depth}, "
+        f"lambda={l1_lambda:g}, alpha={sparsity_alpha:g} | "
+        f"{iterations} TAO iterations, <= {total_node_fit_upper_bound} node fits."
     ]
 
 
@@ -283,40 +267,15 @@ def train_symbolic_tree(
     ):
         print(line)
 
-    latest_mimic_accuracy = 0.0
-    latest_nonzero_weights = 0
     current_node_bar: tqdm | None = None
     current_iteration = 0
 
-    def _set_node_bar_status(status: str) -> None:
-        if current_node_bar is None:
-            return
-        current_node_bar.set_postfix_str(
-            f"{status} | mimic={latest_mimic_accuracy:.4f} nz={latest_nonzero_weights}",
-            refresh=True,
-        )
-
     def _on_iteration(metrics: dict[str, Any]) -> None:
-        nonlocal latest_mimic_accuracy, latest_nonzero_weights
-        latest_mimic_accuracy = metrics["mimic_accuracy"]
-        latest_nonzero_weights = metrics["nonzero_weights"]
-        _set_node_bar_status("iteration_done")
-        statuses = Counter(node["status"] for node in metrics["nodes"])
-        stops = Counter(node["stop_reason"] for node in metrics["nodes"])
         tqdm.write(
-            f"TAO {metrics['iteration']}/{sodt_config['iterations']} done in "
-            f"{_format_duration(metrics['duration_seconds'])} | objective {metrics['objective']:.1f} | "
-            f"mimic {metrics['mimic_accuracy']:.4f} | nonzero {metrics['nonzero_weights']} | "
-            f"{metrics['active_internal_nodes']} active nodes: {statuses['accepted']} accepted, {statuses['rejected']} rejected, "
-            f"{statuses['no_split_gain']} no-gain, {statuses['empty']} empty | "
-            f"solver stops: {stops['converged']} converged, {stops['cap']} cap, {stops['abnormal']} abnormal"
+            f"it {metrics['iteration']}  mimic {metrics['mimic_accuracy']:.4f}  "
+            f"nonzero {metrics['nonzero_weights']}  "
+            f"{_format_duration(metrics['duration_seconds'])}"
         )
-
-    def _node_text(event: dict[str, Any]) -> str:
-        text = f"node {event['node_index']} d{event['depth']} rows {event['samples_at_node']:,}"
-        if event.get("care_count"):
-            text += f" care {event['care_count']:,}"
-        return text
 
     def _on_node(event: dict[str, Any]) -> None:
         nonlocal current_iteration, current_node_bar
@@ -327,27 +286,11 @@ def train_symbolic_tree(
             current_iteration = iteration
             current_node_bar = tqdm(
                 total=int(event["num_internal_nodes"]),
-                desc=f"TAO {iteration}/{int(event['iterations'])} nodes",
-                leave=True,
+                desc=f"TAO it {iteration}/{int(event['iterations'])}",
+                leave=False,
             )
-
-        text = _node_text(event)
-        if event["phase"] == "stage":
-            text += f" | {event['stage']}"
-        elif event["phase"] == "solver":
-            # ratio <= 1 means the fit has reached its stop target.
-            text += (
-                f" | it {event['solver_iter']} obj {event['surrogate']:.4g} "
-                f"ratio {event['stop_ratio']:.3g}"
-            )
-        elif event["phase"] == "end":
-            text += (
-                f" | {event['status']} it {event['solver_iters']} "
-                f"nz {event['nonzero']} {_format_duration(event['seconds'])}"
-            )
-            if current_node_bar is not None:
-                current_node_bar.update(1)
-        _set_node_bar_status(text)
+        if event["phase"] == "end" and current_node_bar is not None:
+            current_node_bar.update(1)
 
     tree = _build_symbolic_tree(
         bundle,
@@ -470,33 +413,26 @@ def prune_symbolic_tree(
         if stored_weights is not None:
             class_weights = _class_weights_array(stored_weights, bundle.class_names)
 
-    print("=== Pruning Symbolic Tree ===")
-    print(
-        f"Tree: {feature_matrix.shape[0]:,} RoIs, "
-        f"{tree.num_internal_nodes} internal nodes"
-    )
-
     t0 = perf_counter()
     pruned_count = postprocess_tree(
         tree,
         feature_matrix,
         labels,
         class_names=bundle.class_names,
-        verbose=True,
+        verbose=False,
         class_weights=class_weights,
     )
 
     active_nodes = sum(c > 0 for c in tree.nonzero_weight_counts())
     print(
-        f"Pruning complete — {pruned_count} nodes removed, "
-        f"{active_nodes} remain active ({_format_duration(perf_counter() - t0)})"
+        f"pruned {pruned_count} nodes -> {active_nodes} active "
+        f"({_format_duration(perf_counter() - t0)})"
     )
     raise_if_tree_collapsed(tree)
 
     # Zeroed nodes route everything left, so the diagram's counts come from the pruned tree itself.
     node_sample_counts, leaf_class_counts = node_statistics(tree, feature_matrix, labels)
 
-    print()
     tree_metrics = _augment_tree_metrics(tree, {})
     history = list(checkpoint.get("history", []))
     pruning_entry = {
@@ -506,9 +442,6 @@ def prune_symbolic_tree(
         "postprocess_pruned_nodes": pruned_count,
     }
     history.append(pruning_entry)
-
-    print(f"nonzero weights: {tree_metrics['nonzero_weights']}")
-    print(f"active nodes: {tree_metrics['active_internal_nodes']}")
 
     training_config = dict(checkpoint.get("training_config", {}))
     training_config["postprocess_pruned_nodes"] = pruned_count
@@ -526,7 +459,6 @@ def prune_symbolic_tree(
         "training_config": training_config,
     }
     torch.save(artifact, checkpoint_path)
-    print("Saving checkpoint... done")
 
     summary = {
         "export_path": str(export_path),
