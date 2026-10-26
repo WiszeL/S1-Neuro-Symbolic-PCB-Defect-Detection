@@ -15,8 +15,8 @@ margin_target:
 search:
   tree_depth: 6
   iterations: 15
-  l1_lambda: .01
-  sparsity_alpha: 0.85
+  l1_lambda: .5
+  sparsity_alpha: 0.5
   # Per-node cap on L-BFGS-B iterations (formerly LIBLINEAR Newton steps); the slowest fit measured needed ~1000.
   logistic_max_iter: 2000
   # LIBLINEAR's stop rule at 1e-6 solves each node to within float32 precision of its optimum (sklearn's default
