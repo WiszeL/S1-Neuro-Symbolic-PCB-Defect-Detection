@@ -71,7 +71,6 @@ class EvaluationConfig(TypedDict):
     precision_iou: float
     precision_score_threshold: float
     nesy_score_threshold: float
-    nesy_plain_score_threshold: float
     class_metrics: bool
     iou_thresholds: list[float]
 

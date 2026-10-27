@@ -43,8 +43,6 @@ class SparseObliqueDecisionTreeClassifier:
         )
         self.node_bias = np.zeros((self.num_internal_nodes,), dtype=np.float32)
         self.leaf_labels = np.zeros((self.num_leaves,), dtype=np.int64)
-        # Per-node exponent on the routing-margin factor; 1 everywhere is the plain product.
-        self.margin_exponents = np.ones((self.num_internal_nodes,), dtype=np.float32)
 
     # Structure
 
@@ -160,15 +158,11 @@ class SparseObliqueDecisionTreeClassifier:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Confidence per sample, read off the tree's own margins.
 
-        Π σ(|margin|)^γ over the active path nodes, γ = `margin_exponents`.
-        All γ = 1 is the plain product. Routing itself untouched.
+        Π σ(|margin|) over the active path nodes. Routing itself untouched.
         """
 
         leaf_indices, log_certainties = self.path_log_certainties(features)
-        confidence = np.exp(
-            log_certainties.astype(np.float64)
-            @ self.margin_exponents.astype(np.float64)
-        )
+        confidence = np.exp(log_certainties.astype(np.float64).sum(axis=1))
         return leaf_indices, confidence.astype(np.float32)
 
     def predict(self, features: np.ndarray) -> np.ndarray:
@@ -323,7 +317,6 @@ class SparseObliqueDecisionTreeClassifier:
             "node_weights": torch.from_numpy(self.node_weights.copy()),
             "node_bias": torch.from_numpy(self.node_bias.copy()),
             "leaf_labels": torch.from_numpy(self.leaf_labels.copy()),
-            "margin_exponents": torch.from_numpy(self.margin_exponents.copy()),
         }
 
     @classmethod
@@ -349,8 +342,5 @@ class SparseObliqueDecisionTreeClassifier:
         )
         tree.leaf_labels = (
             state_dict["leaf_labels"].detach().cpu().numpy().astype(np.int64)
-        )
-        tree.margin_exponents = (
-            state_dict["margin_exponents"].detach().cpu().numpy().astype(np.float32)
         )
         return tree

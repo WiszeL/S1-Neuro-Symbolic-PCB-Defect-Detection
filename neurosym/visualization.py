@@ -441,7 +441,7 @@ def _draw_full_tree(
 def _draw_node_split_panel(
     axis: plt.Axes, node: dict[str, Any], symbolic_tree: Any, feature_vector: np.ndarray
 ) -> float:
-    """One node's real split plane; returns its weighted margin factor σ^γ.
+    """One node's real split plane; returns its margin factor σ.
 
     Axes are the node's own score split in two: a = evidence for LEFT (Σ w>0 · x),
     c = evidence for RIGHT (-Σ w<0 · x), so f(x) = a - c + b exactly. The split
@@ -492,14 +492,12 @@ def _draw_node_split_panel(
     axis.set_ylim(lo, hi)
     axis.set_aspect("equal")
     axis.tick_params(labelsize=7)
-    gamma = float(symbolic_tree.margin_exponents[index])
-    factor = margin**gamma
     axis.set_xlabel(
-        f"evidence LEFT   |f|={abs(score):.2f}  σ={margin:.4f}  γ={gamma:.2f}  σ^γ={factor:.4f}",
+        f"evidence LEFT   |f|={abs(score):.2f}  σ={margin:.4f}",
         fontsize=8, labelpad=2,
     )
     axis.set_ylabel("evidence RIGHT", fontsize=8, labelpad=2)
-    return factor
+    return margin
 
 
 def _draw_routing_margin_panels(
@@ -509,7 +507,7 @@ def _draw_routing_margin_panels(
     symbolic_tree: Any,
     feature_vector: np.ndarray,
 ) -> None:
-    """One 2D split plane per visited node, in tree-depth rows. Πσ^γ is the detection score."""
+    """One 2D split plane per visited node, in tree-depth rows. Πσ is the detection score."""
     rows = gridspec.GridSpecFromSubplotSpec(symbolic_tree.max_depth, 1, subplot_spec=spec, hspace=0.55)
     confidence = 1.0
     for node in explanation["node_explanations"]:
@@ -521,7 +519,7 @@ def _draw_routing_margin_panels(
         (box.x0 + box.x1) / 2, box.y1 + 0.025,
         f"Routing margin per node\n"
         f"x: evidence LEFT (Σw⁺x)   y: evidence RIGHT (−Σw⁻x)\n"
-        f"Πσ^γ = {confidence:.4f}   detection score = {explanation['score']:.4f}",
+        f"Πσ = {confidence:.4f}   detection score = {explanation['score']:.4f}",
         ha="center", va="bottom", fontsize=10, weight="bold",
     )
 

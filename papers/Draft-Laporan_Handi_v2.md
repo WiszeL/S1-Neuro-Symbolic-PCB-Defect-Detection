@@ -79,9 +79,9 @@ Program Studi Informatika, Fakultas Teknologi Informasi dan Sains Data, Universi
 
 # ABSTRAK
 
-Inspeksi *Printed Circuit Board* (PCB) dalam mendeteksi cacat dengan model *deep learning* mampu menghasilkan akurasi yang tinggi, tetapi keputusannya tidak bisa divalidasi oleh teknisi karena bersifat *black-box*. Model *Explainable Artificial Intelligence* (XAI) dengan metode *post-hoc* seperti Grad-CAM sudah memberikan penjelasan (*explanation*) pada keputusannya tetapi hanya berupa perkiraan (tidak *faithful*) sehingga keputusannya tetap tidak bisa dipertanggungjawabkan. Penelitian ini mengusulkan model dengan arsitektur *neuro-symbolic* (NeSy) dengan menggabungkan *Faster* R-CNN dan *Sparse Oblique Decision Tree* (SODT). SODT dilatih untuk meniru keputusan dari *Faster* R-CNN dan menggantikan *classification head*-nya. Penelitian ini menambahkan tiga hal agar penggantian tersebut berhasil, yaitu *class weighting* pada pelatihan SODT, skor deteksi berbasis *routing margin* pada *decision path*, dan *heatmap* per *node* yang diperoleh dengan memetakan bobot *decision path* kembali ke *feature map neck* pada *RoI Align* sehingga menjadi *explanation* yang *faithful*. Model dievaluasi pada *dataset* DeepPCB dengan enam kelas cacat. Hasilnya, *Faster* R-CNN yang digunakan setara dengan Fung et al. (2024) pada AP@50:5:85 sebesar 93,03 terhadap 93,2. NeSy mempertahankan akurasi tersebut dengan mAP@0,5 sebesar 0,982 terhadap 0,987 dan menaikkan *precision* dari 0,903 menjadi 0,932 dengan *recall* turun dari 0,983 menjadi 0,976. *Routing margin* menaikkan mAP@0,5:0,95 dari 0,644 menjadi 0,787. *Explanation* NeSy lebih *faithful* daripada Grad-CAM terhadap *random control*-nya masing-masing, dengan *Necessity* sebesar 0,961 terhadap 0,594 pada petak acak, dibandingkan 0,687 terhadap 0,603 pada Grad-CAM. *Heatmap* per *node* memberikan *explanation* yang dapat ditelusuri langkah demi langkah sehingga dapat mendukung validasi teknisi.
+Inspeksi *Printed Circuit Board* (PCB) dalam mendeteksi cacat dengan model *deep learning* mampu menghasilkan akurasi yang tinggi, tetapi keputusannya tidak bisa divalidasi oleh teknisi karena bersifat *black-box*. Model *Explainable Artificial Intelligence* (XAI) dengan metode *post-hoc* seperti Grad-CAM sudah memberikan penjelasan (*explanation*) pada keputusannya tetapi hanya berupa perkiraan (tidak *faithful*) sehingga keputusannya tetap tidak bisa dipertanggungjawabkan. Penelitian ini mengusulkan model dengan arsitektur *neuro-symbolic* (NeSy) dengan menggabungkan *Faster* R-CNN dan *Sparse Oblique Decision Tree* (SODT). SODT dilatih untuk meniru keputusan dari *Faster* R-CNN dan menggantikan *classification head*-nya. Penelitian ini menambahkan tiga hal pada penggantian tersebut, yaitu *class weighting* pada pelatihan SODT, skor deteksi berbasis *routing margin* pada *decision path*, dan *heatmap* per *node* yang diperoleh dengan memetakan bobot *decision path* kembali ke *feature map neck* pada *RoI Align* sehingga menjadi *explanation* yang *faithful*. Model dievaluasi pada *dataset* DeepPCB dengan enam kelas cacat. Hasilnya, *Faster* R-CNN yang digunakan setara dengan Fung et al. (2024) pada AP@50:5:85 sebesar 93,03 terhadap 93,2. NeSy mempertahankan akurasi tersebut dengan mAP@0,5 sebesar 0,982 terhadap 0,987 dan menaikkan *precision* dari 0,903 menjadi 0,912 dengan *recall* turun dari 0,983 menjadi 0,978. *Routing margin* menaikkan mAP@0,5:0,95 dari 0,644 menjadi 0,787. *Explanation* NeSy lebih *faithful* daripada Grad-CAM terhadap *random control*-nya masing-masing, dengan *Necessity* sebesar 0,961 terhadap 0,591 pada petak acak, dibandingkan 0,687 terhadap 0,603 pada Grad-CAM. *Heatmap* per *node* memberikan *explanation* yang dapat ditelusuri langkah demi langkah sehingga dapat mendukung validasi teknisi.
 
-***Kata Kunci:** Explainable Artifical Intelligence, Faster R-CNN, Neuro-Symbolic, Sparse Oblique Decision Tree, Deteksi Cacat PCB, Faithfulness*
+***Kata Kunci:** Explainable Artificial Intelligence, Faster R-CNN, Neuro-Symbolic, Sparse Oblique Decision Tree, Deteksi Cacat PCB, Faithfulness*
 
 ***PCB DEFECT DETECTION WITH FAITHFUL EXPLANATION THROUGH A NEURO-SYMBOLIC FASTER R-CNN AND\
 SPARSE OBLIQUE DECISION TREE ARCHITECTURE***
@@ -92,7 +92,7 @@ Informatics Study Program, Faculty of Information Technology and Data Science, U
 
 # ABSTRACT
 
-*Inspection of Printed Circuit Boards (PCBs) for defect detection using deep learning models can achieve high accuracy, but their decisions cannot be validated by technicians because they are black-box in nature. Explainable Artificial Intelligence (XAI) models with post-hoc methods such as Grad-CAM have provided explanations for their decisions, but these are only approximations (not faithful); therefore, the decisions still cannot be justified. This study proposes a neuro-symbolic (NeSy) architecture that combines Faster R-CNN and Sparse Oblique Decision Tree (SODT). The SODT is trained to imitate the decisions of Faster R-CNN and replace its classification head. Three additions make this replacement work: class weighting in SODT training, a detection score based on the routing margin along the decision path, and per-node heatmaps obtained by mapping the decision-path weights back to the neck feature maps at RoI Align, which form a faithful explanation. The model is evaluated on the DeepPCB dataset with six defect classes. The Faster R-CNN used is on par with Fung et al. (2024), with an AP@50:5:85 of 93.03 versus 93.2. NeSy maintains this accuracy with an mAP@0.5 of 0.982 versus 0.987 and raises precision from 0.903 to 0.932, while recall decreases from 0.983 to 0.976. The routing margin raises mAP@0.5:0.95 from 0.644 to 0.787. The NeSy explanation is more faithful than Grad-CAM relative to each method's own random control, with a Necessity of 0.961 versus 0.594 for random tiles, compared with 0.687 versus 0.603 for Grad-CAM. The per-node heatmap provides explanations that can be traced step by step, thus supporting technician validation.*
+*Inspection of Printed Circuit Boards (PCBs) for defect detection using deep learning models can achieve high accuracy, but their decisions cannot be validated by technicians because they are black-box in nature. Explainable Artificial Intelligence (XAI) models with post-hoc methods such as Grad-CAM have provided explanations for their decisions, but these are only approximations (not faithful); therefore, the decisions still cannot be justified. This study proposes a neuro-symbolic (NeSy) architecture that combines Faster R-CNN and Sparse Oblique Decision Tree (SODT). The SODT is trained to imitate the decisions of Faster R-CNN and replace its classification head. Three additions are made to this replacement: class weighting in SODT training, a detection score based on the routing margin along the decision path, and per-node heatmaps obtained by mapping the decision-path weights back to the neck feature maps at RoI Align, which form a faithful explanation. The model is evaluated on the DeepPCB dataset with six defect classes. The Faster R-CNN used is on par with Fung et al. (2024), with an AP@50:5:85 of 93.03 versus 93.2. NeSy maintains this accuracy with an mAP@0.5 of 0.982 versus 0.987 and raises precision from 0.903 to 0.912, while recall decreases from 0.983 to 0.978. The routing margin raises mAP@0.5:0.95 from 0.644 to 0.787. The NeSy explanation is more faithful than Grad-CAM relative to each method's own random control, with a Necessity of 0.961 versus 0.591 for random tiles, compared with 0.687 versus 0.603 for Grad-CAM. The per-node heatmap provides explanations that can be traced step by step, thus supporting technician validation.*
 
 ***Keywords:** Explainable Artificial Intelligence, Faster R-CNN, Neuro-Symbolic, Sparse Oblique Decision Tree, PCB Defect Detection, Faithfulness*
 
@@ -202,6 +202,8 @@ BAB IV HASIL DAN PEMBAHASAN
 
 4.5.2 Pengaruh *Class Weighting* (Kontribusi 1)
 
+4.5.3 Pengaruh *Negative Ratio*
+
 4.6 Hasil dan Evaluasi Deteksi *Neuro-Symbolic*
 
 4.6.1 Kinerja Deteksi *Neuro-Symbolic*
@@ -280,9 +282,9 @@ Gambar 4.10 Hasil deteksi *ground truth*, *Faster* R-CNN, dan *Neuro-Symbolic* p
 
 Gambar 4.11 Bukti perubahan *precision* dan *recall*: (a) *false positive Faster* R-CNN yang ditolak NeSy dan (b) cacat yang terlewat NeSy
 
-Gambar 4.12 *Confusion Matrix Neuro-Symbolic* dengan *Routing Margin* (ambang 0,4)
+Gambar 4.12 *Confusion Matrix Neuro-Symbolic* dengan *Routing Margin* (ambang 0,35)
 
-Gambar 4.13 *Confusion Matrix Neuro-Symbolic* tanpa *Routing Margin* (ambang 0,4)
+Gambar 4.13 *Confusion Matrix Neuro-Symbolic* tanpa *Routing Margin* (ambang 0,35)
 
 Gambar 4.14 Penjelasan pada PCB 1: deteksi NeSy, peta M, dan peta Grad-CAM pada proposal yang sama
 
@@ -320,23 +322,25 @@ Tabel 4.4 Distribusi Label *Teacher* pada RoI Hasil Ekstraksi
 
 Tabel 4.5 Ringkasan Struktur dan Fidelitas SODT Terpilih
 
-Tabel 4.6 Pengaruh *Negative Ratio* dan *Class Weighting* terhadap *Agreement* per Kelas (%)
+Tabel 4.6 Pengaruh *Class Weighting* terhadap *Agreement* Pohon SODT pada Data Uji
 
-Tabel 4.7 Kinerja Deteksi pada Data Uji
+Tabel 4.7 Pengaruh *Negative Ratio* terhadap Fidelitas SODT
 
-Tabel 4.8 *Precision* dan *Recall* per Kelas Cacat
+Tabel 4.8 Kinerja Deteksi pada Data Uji
 
-Tabel 4.9 AP@0,5:0,95 per Kelas Cacat
+Tabel 4.9 *Precision* dan *Recall* per Kelas Cacat
 
-Tabel 4.10 Jenis *False Positive* pada Data Uji
+Tabel 4.10 AP@0,5:0,95 per Kelas Cacat
 
-Tabel 4.11 Cacat Terlewat (*False Negative*) per Kelas
+Tabel 4.11 Jenis *False Positive* pada Data Uji
 
-Tabel 4.12 Pengaruh *Routing Margin* pada Deteksi *Neuro-Symbolic*
+Tabel 4.12 Cacat Terlewat (*False Negative*) per Kelas
 
-Tabel 4.13 Jenis *False Positive* tanpa dan dengan *Routing Margin*
+Tabel 4.13 Pengaruh *Routing Margin* pada Deteksi *Neuro-Symbolic*
 
-Tabel 4.14 *Faithfulness* Metode *Explanation* terhadap *Random Control*
+Tabel 4.14 Jenis *False Positive* tanpa dan dengan *Routing Margin*
+
+Tabel 4.15 *Faithfulness* Metode *Explanation* terhadap *Random Control*
 
 # DAFTAR ALGORITMA
 
@@ -914,7 +918,7 @@ Penelitian ini membangun, mengintegrasikan, dan mengevaluasi sistem deteksi caca
 
 **Gambar 3.1 Diagram Alur Penelitian**
 
-Penelitian dimulai dengan persiapan dan pra-pemrosesan *dataset* DeepPCB, dilanjutkan pelatihan *Faster* R-CNN, ekstraksi *dataset* simbolik, pelatihan SODT, integrasi keduanya, lalu evaluasi akhir. Kontribusi penelitian ini terletak pada tiga hal yang membuat SODT dapat menggantikan *classification head*, yaitu *class weighting* pada pelatihan SODT (Subbab 3.7), skor deteksi berbasis *routing margin* (Subbab 3.8.1), dan *heatmap* per *node* yang *faithful* (Subbab 3.8.2).
+Penelitian dimulai dengan persiapan dan pra-pemrosesan *dataset* DeepPCB, dilanjutkan pelatihan *Faster* R-CNN, ekstraksi *dataset* simbolik, pelatihan SODT, integrasi keduanya, lalu evaluasi akhir. Kontribusi penelitian ini terletak pada tiga hal yang ditambahkan pada penggantian *classification head* oleh SODT, yaitu *class weighting* pada pelatihan SODT (Subbab 3.7), skor deteksi berbasis *routing margin* (Subbab 3.8.1), dan *heatmap* per *node* yang *faithful* (Subbab 3.8.2).
 
 ## 3.1 Persiapan Dataset
 
@@ -1129,7 +1133,7 @@ dengan $s(x)$ skor untuk RoI $x$ pada kelas *leaf* yang dicapai (kelas lain bern
 
 Berbeda dengan Platt (1999), parameter *sigmoid* bernilai tetap sehingga hasilnya merupakan skor *confidence*, bukan probabilitas kelas, dengan rentang \[0,5; 1). Karena fungsi keputusan *node* pada Persamaan 2.21 merupakan *logit* regresi logistik, setiap faktor *sigmoid* pada Persamaan 3.3 merepresentasikan *confidence* lokal terhadap arah yang diambil (Carreira-Perpiñán & Tavallali, 2018; Kairgeldin & Carreira-Perpiñán, 2025). Namun, karena setiap faktor bernilai kurang dari 1, *decision path* yang lebih panjang cenderung menghasilkan skor lebih rendah sehingga skor memiliki bias terhadap panjang *decision path*.
 
-**Ambang skor.** Deteksi hanya ditampilkan, dan dihitung pada *Precision*, *Recall*, dan F1, apabila skornya mencapai ambang skor. *Faster* R-CNN memakai ambang 0,5. Skor NeSy berupa hasil kali beberapa *sigmoid* sehingga berada pada skala yang berbeda dari probabilitas *softmax*, dan ambang yang sama tidak sebanding. Ambang NeSy ditetapkan sebagai ambang terendah yang membuat *precision* pada 200 citra acak data latih setidaknya sama dengan *precision* *Faster* R-CNN pada ambang 0,5, yaitu 0,4. Ambang tidak dipakai saat pelatihan dan tidak ikut menentukan *decision path*, sedangkan mAP tidak bergantung pada ambang sehingga menjadi perbandingan yang adil antarmodel. **[DATA LAMA: ambang 0,4 diturunkan pada pohon SODT sebelumnya dan akan diturunkan ulang pada pohon ini setelah bimbingan.]**
+**Ambang skor.** Deteksi hanya ditampilkan, dan dihitung pada *Precision*, *Recall*, dan F1, apabila skornya mencapai ambang skor. *Faster* R-CNN memakai ambang 0,5. Skor NeSy berupa hasil kali beberapa *sigmoid* sehingga berada pada skala yang berbeda dari probabilitas *softmax*, dan ambang yang sama tidak sebanding. Ambang NeSy ditetapkan sebagai ambang terendah yang membuat *precision* pada 200 citra acak data latih setidaknya sama dengan *precision* *Faster* R-CNN pada ambang 0,5. Pada 200 citra tersebut *precision* *Faster* R-CNN adalah 0,952, sedangkan NeSy mencapai 0,941 pada ambang 0,30 dan 0,960 pada ambang 0,35, sehingga ambang NeSy adalah 0,35 (kelipatan 0,05). Ambang tidak dipakai saat pelatihan dan tidak ikut menentukan *decision path*, sedangkan mAP tidak bergantung pada ambang sehingga menjadi perbandingan yang adil antarmodel.
 
 Dengan skor dan ambang tersebut, alur inferensi model hibrida dari citra uji hingga deteksi akhir dirangkum pada Algoritma 3.3.
 
@@ -1221,9 +1225,9 @@ Evaluasi mencakup dua aspek, yaitu kinerja deteksi model hibrida dan kualitas pe
 
 ### 3.9.1 Evaluasi Deteksi
 
-Model hibrida dibandingkan dengan *Faster* R-CNN menggunakan metrik pada Subbab 3.4, dengan ambang skor 0,5 untuk *Faster* R-CNN dan 0,4 untuk NeSy sesuai Subbab 3.8.1. Setiap hasil menyebut ambang yang dipakainya karena *Precision*, *Recall*, dan F1 bergantung padanya, sedangkan mAP tidak.
+Model hibrida dibandingkan dengan *Faster* R-CNN menggunakan metrik pada Subbab 3.4, dengan ambang skor 0,5 untuk *Faster* R-CNN dan 0,35 untuk NeSy sesuai Subbab 3.8.1. Setiap hasil menyebut ambang yang dipakainya karena *Precision*, *Recall*, dan F1 bergantung padanya, sedangkan mAP tidak.
 
-Kontribusi diuji melalui ablasi. Peran *routing margin* diuji dengan menyamakan skor seluruh deteksi menjadi 1 tanpa mengubah *decision path* maupun label. Peran *class weighting* diuji dengan membandingkan SODT berbobot kelas dan tanpa bobot kelas pada rasio negatif yang sama.
+Kontribusi diuji melalui ablasi. Peran *routing margin* diuji dengan menyamakan skor seluruh deteksi menjadi 1 tanpa mengubah *decision path* maupun label. Peran *class weighting* diuji dengan membandingkan SODT berbobot kelas dan tanpa bobot kelas pada rasio negatif, hiperparameter, dan *seed* yang sama. Ambang skor pohon tanpa bobot kelas diturunkan dengan aturan yang sama pada data *trainval*.
 
 Waktu per citra uji diukur sebagai rata-rata dari tiga kali pengukuran untuk tiga *pipeline*, yaitu *Faster* R-CNN yang hanya melakukan deteksi, NeSy yang melakukan deteksi beserta pembentukan *heatmap* per *node*, serta *Faster* R-CNN dengan Grad-CAM yang melakukan deteksi beserta pembentukan peta Grad-CAM.
 
@@ -1354,7 +1358,7 @@ Berdasarkan Tabel 4.3, *recall* seluruh kelas di atas 0,96, sedangkan *precision
 
 **Gambar 4.7 *Confusion Matrix Faster* R-CNN pada Data Uji**
 
-Hampir seluruh cacat terklasifikasi benar dengan sangat sedikit yang tertukar antarkelas, sedangkan kesalahan utama berasal dari *background* yang terdeteksi sebagai cacat (kolom pertama), terutama pada *pinhole* dan *short*. Jumlahnya jauh lebih banyak daripada cacat yang terlewat, sehingga model cenderung mendeteksi berlebih. Karena SODT meniru label *teacher* sesuai Subbab 3.5, kecenderungan ini ikut terbawa dan menjadi pembanding pada Subbab 4.5.
+Hampir seluruh cacat terklasifikasi benar dengan sangat sedikit yang tertukar antarkelas, sedangkan kesalahan utama berasal dari *background* yang terdeteksi sebagai cacat (kolom pertama), terutama pada *pinhole* dan *short*. Jumlahnya jauh lebih banyak daripada cacat yang terlewat, sehingga model cenderung mendeteksi berlebih. Karena SODT meniru label *teacher* sesuai Subbab 3.5, kecenderungan ini ikut terbawa dan menjadi pembanding pada Subbab 4.6.
 
 ## 4.4 Hasil Ekstraksi Fitur *Teacher* (*Faster* R-CNN)
 
@@ -1410,58 +1414,65 @@ Struktur SODT setelah *pruning* ditunjukkan pada Gambar 4.9. Angka pada *node* m
 
 **Gambar 4.9 Struktur SODT Terpilih setelah Pemangkasan**
 
-Dari 64 *leaf*, 34 berlabel *background* dan 30 berlabel cacat (*open* 7, *short* 6, *pinhole* 6, *mousebite* 5, *spurious copper* 4, *spur* 2). Pada 9 dari 32 pasangan *leaf* bersaudara, kedua *leaf* berlabel cacat yang berbeda, sehingga *node* tingkat atas terutama menyaring *background*, sedangkan *node* di dekat *leaf* menentukan kelas cacat. Jumlah *nonzero weight* tersebar tidak merata, dengan *node* terpadat N61 (459), N50 (349), dan N30 (320), sedangkan rata-rata per *node* aktif hanya sekitar 90 hingga 126 pada setiap kedalaman. Sparsitas inilah yang membuat setiap *node* cukup ringkas untuk diubah menjadi *heatmap* pada Subbab 4.6.
+Dari 64 *leaf*, 34 berlabel *background* dan 30 berlabel cacat (*open* 7, *short* 6, *pinhole* 6, *mousebite* 5, *spurious copper* 4, *spur* 2). Pada 9 dari 32 pasangan *leaf* bersaudara, kedua *leaf* berlabel cacat yang berbeda, sehingga *node* tingkat atas terutama menyaring *background*, sedangkan *node* di dekat *leaf* menentukan kelas cacat. Jumlah *nonzero weight* tersebar tidak merata, dengan *node* terpadat N61 (459), N50 (349), dan N30 (320), sedangkan rata-rata per *node* aktif hanya sekitar 90 hingga 126 pada setiap kedalaman. Sparsitas inilah yang membuat setiap *node* cukup ringkas untuk diubah menjadi *heatmap* pada Subbab 4.7.
 
 ### 4.5.2 Pengaruh *Class Weighting* (Kontribusi 1)
 
-Karena label pelatihan adalah prediksi *teacher*, kelas cacat yang sulit ditiru mudah dikalahkan oleh *background* yang dominan. *Class weighting* (CW) pada Persamaan 3.1 dan 3.2 menaikkan biaya kesalahan pada kelas cacat dengan *recall* terlemah. Pengaruhnya diuji dengan membandingkan *negative ratio* (NR) 1, 2, 4, dan tanpa *sampling* (*full*) dengan CW aktif, lalu menonaktifkan CW pada NR 2. Hasilnya ditunjukkan pada Tabel 4.6, dengan konfigurasi terpilih dicetak tebal. **[DATA LAMA: Tabel 4.6 berasal dari pohon SODT sebelumnya (λ = 20, α = 0,15) dan akan diganti dengan hasil pohon pada Tabel 4.5 setelah bimbingan. Kecenderungannya, bukan angkanya, yang dibahas di bawah.]**
+Karena label pelatihan adalah prediksi *teacher*, kelas cacat yang sulit ditiru mudah dikalahkan oleh *background* yang dominan. *Class weighting* (CW) pada Persamaan 3.1 dan 3.2 menaikkan biaya kesalahan pada kelas cacat dengan *recall* terlemah. Pengaruhnya diuji dengan melatih ulang pohon yang sama (λ = 0,01, α = 0,85, NR 2, *seed* 112) tanpa CW, sehingga satu-satunya perbedaan adalah bobot kelas. Hasilnya ditunjukkan pada Tabel 4.6, dan dampaknya pada deteksi pada Tabel 4.8.
 
-**Tabel 4.6 Pengaruh *Negative Ratio* dan *Class Weighting* terhadap *Agreement* per Kelas (%)**
+**Tabel 4.6 Pengaruh *Class Weighting* terhadap *Agreement* Pohon SODT pada Data Uji**
 
-| **Kelas (ω) / Metrik** | **NR 1 + CW** | **NR 2 + CW (terpilih)** | **NR 4 + CW** | **NR *full* + CW** | **NR 2 tanpa CW** |
-|:------------:|------------|---------------|----------|------------|------------|
-| *Background* (1) | 94,3 | **96,2** | 97,7 | 98,3 | 96,9 |
-| *Open* (1,5) | 98,0 | **96,1** | 93,9 | 91,9 | 93,3 |
-| *Short* (2) | 98,3 | **97,2** | 92,8 | 90,9 | 94,1 |
-| *Mousebite* (1) | 98,3 | **96,9** | 92,7 | 91,4 | 96,3 |
-| *Spur* (1,5) | 97,2 | **95,8** | 92,9 | 91,5 | 93,5 |
-| *Spurious copper* (1,25) | 97,4 | **96,0** | 92,3 | 90,5 | 94,6 |
-| *Pinhole* (1,25) | 97,7 | **96,2** | 91,9 | 89,8 | 94,3 |
-| **Rentang** | 4,0 | **1,4** | 5,8 | 8,5 | 3,6 |
-| ***Mimic accuracy*** | 94,77 | **96,26** | 97,03 | 97,34 | 96,56 |
-| ***Macro*-F1 (0 - 1)** | 0,855 | **0,889** | 0,905 | 0,913 | 0,894 |
+| **Pohon** | ***Mimic accuracy*** | ***Macro*-F1 (0 - 1)** | **Rentang *agreement* antarkelas (poin)** | ***Agreement short*** | ***Agreement* kelas terendah** |
+|:------------|:------:|:------:|:------:|:------:|:-----------:|
+| Dengan CW (terpilih) | 0,9633 | 0,9092 | **2,1** | **0,9639** | 0,9506 (*spurious copper*) |
+| Tanpa CW | **0,9667** | **0,9155** | 3,7 | 0,9331 | 0,9331 (*short*) |
 
-Kenaikan NR dari 1 hingga *full* menaikkan *agreement background* sekitar 4 poin, tetapi menurunkan *agreement* kelas cacat terendah lebih dari 7 poin. *Mimic accuracy* naik karena *background* dominan, sedangkan kelas cacat justru tertinggal. NR 2 menghasilkan rentang *agreement* antarkelas terkecil sehingga dipilih.
+CW menggeser *agreement* ke kelas yang lemah. *Agreement short* naik 3,1 poin (0,9331 menjadi 0,9639), *open* 1,5 poin, *spur* 1,3 poin, *pinhole* 0,6 poin, dan *spurious copper* 0,5 poin, sedangkan *mousebite* praktis tetap (turun 0,1 poin). Sebagai *trade-off* *cost-sensitive learning* (Elkan, 2001), *agreement background* turun 0,6 poin sehingga *mimic accuracy* turun 0,3 poin dan *macro*-F1 turun dari 0,9155 menjadi 0,9092. Rentang *agreement* antarkelas menyempit dari 3,7 menjadi 2,1 poin. Bobot *background* sengaja dibiarkan 1 agar *false positive* tidak bertambah.
 
-Tanpa CW, rentang *agreement* pada NR 2 melebar lebih dari dua kali lipat karena kelas cacat tertinggal dari *background*. CW meningkatkan *agreement* kelas cacat sesuai bobotnya, dari 3,1 poin pada *short* dengan ω = 2 hingga 0,6 poin pada *mousebite* dengan ω = 1. Sebagai *trade-off* *cost-sensitive learning* (Elkan, 2001), *agreement background* turun 0,7 poin sehingga *mimic accuracy* dan *macro*-F1 sedikit menurun. Karena penelitian ini mengutamakan keseimbangan antarkelas, NR 2 dengan CW dipilih. Bobot *background* sengaja dibiarkan 1 agar *false positive* tidak bertambah.
+### 4.5.3 Pengaruh *Negative Ratio*
+
+*Negative ratio* (NR) menentukan jumlah proposal *background* yang dipertahankan terhadap proposal cacat. Pada NR 1 data latih memuat 355.484 RoI, NR 2 memuat 533.226 RoI, dan NR *full* memakai seluruh 1.000.000 RoI. Ketiga pohon dilatih dengan CW aktif, λ = 0,01, α = 0,85, *seed* 112, dan *dataset* simbolik yang sama, sehingga hanya komposisi data latih yang berubah. *Agreement* cacat adalah rata-rata *agreement* enam kelas cacat, sedangkan selisih adalah *agreement* cacat dikurangi *agreement background*. Fidelitas ketiga pohon pada 500.000 RoI uji ditunjukkan pada Tabel 4.7.
+
+**Tabel 4.7 Pengaruh *Negative Ratio* terhadap Fidelitas SODT**
+
+| ***Negative Ratio*** | ***Mimic accuracy*** | ***Macro*-F1** | ***Agreement* cacat** | ***Agreement background*** | **Selisih** |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| NR 1 | 0,9530 | 0,8887 | **0,976** | 0,948 | +0,028 |
+| NR 2 (terpilih) | 0,9633 | 0,9092 | 0,962 | 0,964 | **−0,002** |
+| NR *full* | **0,9714** | **0,9245** | 0,927 | **0,981** | −0,054 |
+
+Berdasarkan Tabel 4.7, *mimic accuracy* dan *macro*-F1 naik seiring bertambahnya *background*, dari 0,9530 menjadi 0,9714 dan dari 0,8887 menjadi 0,9245. Kenaikan itu tidak mencerminkan kelas cacat karena *agreement background* naik dari 0,948 menjadi 0,981, sedangkan *agreement* rata-rata kelas cacat justru turun dari 0,976 menjadi 0,927. Pada NR 1 pohon berpihak ke kelas cacat dan mengorbankan *background* dengan selisih +0,028, sedangkan pada NR *full* pohon berpihak ke *background* dan mengorbankan kelas cacat dengan selisih −0,054. *Agreement spurious copper* turun dari 0,970 menjadi 0,900 dan *short* dari 0,978 menjadi 0,928. NR 2 adalah satu-satunya titik yang hampir seimbang dengan selisih −0,002, *agreement* kelas cacat 0,962, dan *background* 0,964, sehingga NR 2 dipilih. Dari sisi struktur, NR 1 menghasilkan pohon paling padat dengan 7.463 *nonzero weight* dan sparsitas 96,2%, sedangkan NR 2 dan NR *full* serupa dengan 4.642 dan 4.820 *nonzero weight* serta sparsitas 97,65% dan 97,56%.
 
 ## 4.6 Hasil dan Evaluasi Deteksi *Neuro-Symbolic*
 
-Subbab ini membandingkan model hibrida dengan *Faster* R-CNN terhadap *ground truth*, memakai *Faster* R-CNN pada Tabel 4.2 sebagai *teacher* dan SODT pada Tabel 4.5. Ambang skor adalah 0,5 untuk *Faster* R-CNN dan 0,4 untuk NeSy sesuai Subbab 3.8.1, dan setiap hasil menyebut ambang yang dipakainya.
+Subbab ini membandingkan model hibrida dengan *Faster* R-CNN terhadap *ground truth*, memakai *Faster* R-CNN pada Tabel 4.2 sebagai *teacher* dan SODT pada Tabel 4.5. Ambang skor adalah 0,5 untuk *Faster* R-CNN dan 0,35 untuk NeSy sesuai Subbab 3.8.1, dan setiap hasil menyebut ambang yang dipakainya.
 
 ### 4.6.1 Kinerja Deteksi *Neuro-Symbolic*
 
-Kinerja kedua model dirangkum pada Tabel 4.7, sedangkan kinerja per kelas pada Tabel 4.8 dan Tabel 4.9.
+Kinerja kedua model dirangkum pada Tabel 4.8, sedangkan kinerja per kelas pada Tabel 4.9 dan Tabel 4.10.
 
-**Tabel 4.7 Kinerja Deteksi pada Data Uji**
+**Tabel 4.8 Kinerja Deteksi pada Data Uji**
 
 | **Model** | **Ambang** | **mAP@0,5:0,95** | **mAP@0,5** | ***Precision*** | ***Recall*** | **F1** |
 |:------------|-------|--------|--------|--------|---------|--------|
 | *Faster* R-CNN (*teacher*) | 0,5 | **0,797** | **0,987** | 0,903 | **0,983** | 0,941 |
-| *Neuro-Symbolic* (SODT) | 0,4 | 0,787 | 0,982 | **0,932** | 0,976 | **0,953** |
+| *Neuro-Symbolic* (SODT) | 0,35 | 0,787 | 0,982 | 0,912 | 0,978 | 0,944 |
+| *Neuro-Symbolic* tanpa CW | 0,30 | 0,787 | 0,983 | 0,912 | 0,978 | 0,944 |
 
-**Tabel 4.8 *Precision* dan *Recall* per Kelas Cacat**
+Ambang NeSy tanpa CW diturunkan dengan aturan yang sama pada Subbab 3.8.1, yaitu ambang terendah yang *precision*-nya pada 200 citra *trainval* mencapai 0,952, dan hasilnya 0,30 (*precision* 0,955). Pohon tanpa CW tidak diberi ambang 0,35 karena skor pohon tersebut berskala berbeda.
+
+**Tabel 4.9 *Precision* dan *Recall* per Kelas Cacat**
 
 | **Kelas** | ***Precision* FRCNN** | ***Precision* NeSy** | ***Recall* FRCNN** | ***Recall* NeSy** |
 |:-----------------:|--------|--------|--------|--------|
-| *Open* | 0,956 | **0,971** | **0,980** | 0,971 |
-| *Short* | 0,827 | **0,891** | **0,969** | 0,958 |
-| *Mousebite* | 0,952 | **0,961** | **0,983** | 0,974 |
-| *Spur* | **0,967** | 0,959 | **0,981** | 0,977 |
-| *Spurious copper* | 0,874 | **0,918** | **0,989** | 0,987 |
-| *Pinhole* | 0,834 | **0,876** | **0,996** | 0,989 |
+| *Open* | 0,956 | **0,958** | **0,980** | 0,974 |
+| *Short* | 0,827 | **0,862** | **0,969** | 0,964 |
+| *Mousebite* | 0,952 | **0,955** | **0,983** | 0,976 |
+| *Spur* | **0,967** | 0,950 | **0,981** | 0,979 |
+| *Spurious copper* | 0,874 | **0,891** | **0,989** | 0,987 |
+| *Pinhole* | 0,834 | **0,841** | **0,996** | 0,991 |
 
-**Tabel 4.9 AP@0,5:0,95 per Kelas Cacat**
+**Tabel 4.10 AP@0,5:0,95 per Kelas Cacat**
 
 | **Kelas** | ***Faster* R-CNN** | ***Neuro-Symbolic*** |
 |:-----------------:|--------|--------|
@@ -1472,37 +1483,37 @@ Kinerja kedua model dirangkum pada Tabel 4.7, sedangkan kinerja per kelas pada T
 | *Spurious copper* | **0,916** | 0,905 |
 | *Pinhole* | **0,901** | 0,894 |
 
-Berdasarkan Tabel 4.7, SODT menggantikan *classification head* dengan selisih mAP@0,5:0,95 hanya 0,010 dan mAP@0,5 hanya 0,005, tetapi *precision* naik 2,9 poin dan F1 naik 1,2 poin, dengan *recall* turun 0,7 poin. Tabel 4.8 menunjukkan *precision* naik pada lima dari enam kelas, terutama pada kelas yang paling lemah di *Faster* R-CNN, yaitu *short* (+0,064), *pinhole* (+0,042), dan *spurious copper* (+0,044). Hal ini sejalan dengan tujuan *class weighting*. AP pada Tabel 4.9 sedikit lebih rendah pada semua kelas karena SODT menurunkan kualitas urutan skor, sebagaimana dibahas pada Subbab 4.6.3.
+Berdasarkan Tabel 4.8, SODT menggantikan *classification head* dengan selisih mAP@0,5:0,95 hanya 0,010 dan mAP@0,5 hanya 0,005, tetapi *precision* naik 0,9 poin dan F1 naik 0,3 poin, dengan *recall* turun 0,5 poin. Selisih ini kecil, sehingga NeSy dibaca setara dengan *Faster* R-CNN pada ambang masing-masing, bukan lebih baik. Tabel 4.9 menunjukkan *precision* naik pada lima dari enam kelas, terbesar pada *short* (+0,035) dan *spurious copper* (+0,017) yang termasuk kelas paling lemah di *Faster* R-CNN, sedangkan *spur* turun 0,017. Hanya pada *short* selisihnya cukup besar. Pohon tanpa CW (baris terakhir Tabel 4.8) memberi mAP, *precision*, *recall*, dan F1 yang sama sampai tiga desimal, dengan *precision short* 0,890 yang bahkan lebih tinggi daripada 0,862. Jadi CW memperbaiki *agreement* pohon pada kelas lemah (Tabel 4.6), tetapi pengaruh tersebut tidak terlihat pada kinerja deteksi, dan kenaikan *precision* di atas tidak dapat dikaitkan dengan CW. AP pada Tabel 4.10 sedikit lebih rendah pada semua kelas karena SODT menurunkan kualitas urutan skor, sebagaimana dibahas pada Subbab 4.6.3.
 
-Hasil deteksi ditunjukkan pada empat PCB uji pada Gambar 4.10, dengan *ground truth* pada kolom pertama, *Faster* R-CNN pada kolom kedua, dan NeSy pada kolom ketiga. PCB 1 sampai PCB 3 dipilih acak dari citra yang dideteksi benar oleh kedua model, sedangkan PCB 4 dipilih karena kedua model berbeda hasilnya. PCB 1 digunakan kembali pada Subbab 4.7.2.
+Hasil deteksi ditunjukkan pada empat PCB uji pada Gambar 4.10, dengan *ground truth* pada kolom pertama, *Faster* R-CNN pada kolom kedua, dan NeSy pada kolom ketiga. PCB 1 sampai PCB 3 dipilih acak dari citra yang dideteksi benar oleh kedua model, sedangkan PCB 4 dipilih karena kedua model berbeda hasilnya. Ambang skor masing-masing model tertera pada judul kolom. PCB 1 digunakan kembali pada Subbab 4.7.2.
 
 ![Gambar 4.10](figures_bab4_v2/fig_deteksi_4pcb.png)
 
 **Gambar 4.10 Hasil deteksi *ground truth*, *Faster* R-CNN, dan *Neuro-Symbolic* pada empat PCB uji**
 
-Pada PCB 1 sampai PCB 3, kedua model menemukan seluruh cacat dengan kelas yang benar dan tanpa *false positive*. Perbedaannya terletak pada skor. *Faster* R-CNN memberi skor mendekati 1,00 pada hampir semua deteksi, sedangkan NeSy memberi skor 0,55 hingga 0,85 yang bervariasi menurut keyakinan *decision path*. Pada PCB 4 yang memuat 10 cacat, *Faster* R-CNN menghasilkan satu *false positive* (#10, *short* berskor 0,82 pada area tanpa cacat) dan satu cacat terlewat (*pinhole* di tepi atas), sedangkan NeSy tidak menghasilkan *false positive* tetapi melewatkan dua cacat, yaitu *pinhole* dan *spur* pada tepi atas. Contoh tersebut memperlihatkan pola yang dibahas pada Subbab 4.6.2.
+Pada PCB 1 sampai PCB 3, kedua model menemukan seluruh cacat dengan kelas yang benar dan tanpa *false positive*. Perbedaannya terletak pada skor. *Faster* R-CNN memberi skor mendekati 1,00 pada hampir semua deteksi, sedangkan NeSy memberi skor 0,40 hingga 0,83 yang bervariasi menurut keyakinan *decision path*. Pada PCB 4 yang memuat 8 cacat, kedua model kesulitan pada kelompok *short* di kiri bawah. *Faster* R-CNN menghasilkan dua *false positive* (#9 dan #10, *short* berskor 0,73 dan 0,70) dengan seluruh cacat terdeteksi, sedangkan NeSy menghasilkan satu *false positive* dan melewatkan satu *short*. Kesalahan tersebut berbeda jenis tetapi sama-sama terjadi pada area yang ambigu, dan pola serupa dibahas pada Subbab 4.6.2.
 
 ### 4.6.2 Mengapa *Precision* Naik dan *Recall* Turun
 
-Perubahan *precision* dan *recall* pada Tabel 4.7 berasal dari jenis kesalahan yang berubah. Kesalahan *false positive* diklasifikasikan sebagai duplikat, salah kelas, salah lokalisasi, atau *background* (tidak menutupi cacat mana pun), dan hasilnya ditunjukkan pada Tabel 4.10.
+Perubahan *precision* dan *recall* pada Tabel 4.8 berasal dari jenis kesalahan yang berubah. Kesalahan *false positive* diklasifikasikan sebagai duplikat, salah kelas, salah lokalisasi, atau *background* (tidak menutupi cacat mana pun), dan hasilnya ditunjukkan pada Tabel 4.11.
 
-**Tabel 4.10 Jenis *False Positive* pada Data Uji**
+**Tabel 4.11 Jenis *False Positive* pada Data Uji**
 
 | **Model** | **Background** | **Salah kelas** | **Salah lokalisasi** | **Duplikat** | **Total** |
 |:------------|--------|--------|--------|--------|--------|
 | *Faster* R-CNN (ambang 0,5) | 260 | 33 | 35 | 3 | 331 |
-| *Neuro-Symbolic* (ambang 0,4) | **158** | 41 | **23** | 3 | **225** |
+| *Neuro-Symbolic* (ambang 0,35) | **215** | 49 | **27** | 7 | **298** |
 
-Dari 331 *false positive* *Faster* R-CNN, 108 *background* dan beberapa lainnya hilang pada NeSy. Hanya 6 *background* baru yang muncul pada NeSy. *Background* turun dari 260 menjadi 158, sedangkan salah kelas naik dari 33 menjadi 41 karena SODT lebih sering memilih kelas yang keliru pada RoI yang ambigu. Penurunan *false positive* ini memperkecil penyebut *precision*. Sebaliknya, cacat yang terlewat bertambah, yaitu dari 38 menjadi 55 seperti ditunjukkan pada Tabel 4.11.
+Dari 260 *false positive* *background* *Faster* R-CNN, 65 hilang pada NeSy dan hanya 20 *background* baru yang muncul, sehingga *background* turun dari 260 menjadi 215 dan total *false positive* dari 331 menjadi 298. Sebaliknya, salah kelas naik dari 33 menjadi 49 karena SODT lebih sering memilih kelas yang keliru pada RoI yang ambigu, dan duplikat naik dari 3 menjadi 7. Penurunan *false positive* memperkecil penyebut *precision*. Di sisi lain, cacat yang terlewat bertambah dari 38 menjadi 47 seperti ditunjukkan pada Tabel 4.12.
 
-**Tabel 4.11 Cacat Terlewat (*False Negative*) per Kelas**
+**Tabel 4.12 Cacat Terlewat (*False Negative*) per Kelas**
 
 | **Model** | ***Open*** | ***Short*** | ***Mousebite*** | ***Spur*** | ***Spurious copper*** | ***Pinhole*** | **Total** |
 |:------------|-----|-----|-----|-----|-----|-----|-----|
 | *Faster* R-CNN (ambang 0,5) | **8** | **13** | **6** | **6** | **3** | **2** | **38** |
-| *Neuro-Symbolic* (ambang 0,4) | 11 | 18 | 9 | 8 | 5 | 4 | 55 |
+| *Neuro-Symbolic* (ambang 0,35) | 8 | 16 | 8 | 8 | 4 | 3 | 47 |
 
-Dari cacat yang berhasil dideteksi *Faster* R-CNN, 22 hilang pada NeSy. Sebanyak 21 di antaranya terjadi karena skor NeSy berada di bawah ambang 0,4 dan hanya satu karena kelas yang salah. Penyebab skor rendah adalah *node* terlemah pada *decision path*, yaitu *node* dengan faktor σ terkecil pada Persamaan 3.3, yang berupa *root* (N0) pada 14 kasus. Kehilangan terbanyak terjadi pada *short* dan *open* (masing-masing 6), diikuti *mousebite* (5), *pinhole* (3), *spur* (2), dan *spurious copper* (1), sejalan dengan Tabel 4.11. Dengan kata lain, NeSy menolak deteksi yang keputusan pertamanya (*root*) kurang yakin, baik untuk *background* maupun untuk cacat yang tampak samar.
+Dari cacat yang berhasil dideteksi *Faster* R-CNN, 15 hilang pada NeSy. Sebanyak 14 di antaranya terjadi karena skor NeSy berada di bawah ambang 0,35 dan hanya satu karena kelas yang salah. Penyebab skor rendah adalah *node* terlemah pada *decision path*, yaitu *node* dengan faktor σ terkecil pada Persamaan 3.3, yang berupa *root* (N0) pada 9 dari 14 kasus. Kehilangan terbanyak terjadi pada *open* dan *mousebite* (masing-masing 4), diikuti *short* (3), *pinhole* (2), serta *spur* dan *spurious copper* (masing-masing 1). Dengan kata lain, NeSy menolak deteksi yang keputusan pertamanya (*root*) kurang yakin, baik untuk *background* maupun untuk cacat yang tampak samar.
 
 Kedua arah perubahan tersebut dibuktikan pada Gambar 4.11. Setiap contoh berisi citra PCB utuh dengan kotak kecil penanda lokasi, lalu potongan yang diperbesar di bawahnya. Baris (a) memperlihatkan *false positive* *Faster* R-CNN pada area tanpa cacat yang ditolak NeSy, dan baris (b) memperlihatkan cacat yang terdeteksi *Faster* R-CNN tetapi terlewat NeSy. Contoh pada baris (b) pertama berasal dari PCB 4 pada Gambar 4.10.
 
@@ -1510,39 +1521,39 @@ Kedua arah perubahan tersebut dibuktikan pada Gambar 4.11. Setiap contoh berisi 
 
 **Gambar 4.11 Bukti perubahan *precision* dan *recall*: (a) *false positive Faster* R-CNN yang ditolak NeSy dan (b) cacat yang terlewat NeSy**
 
-Pada baris (a), keempat kotak merah *Faster* R-CNN menutupi struktur yang tampak seperti cacat, misalnya celah sempit atau lubang bundar pada tembaga, tetapi tidak ada anotasi di sana. NeSy memberi kandidat yang hampir sama kotaknya, namun berskor 0,23 hingga 0,38 sehingga berada di bawah ambang 0,4. Pada baris (b), keempat cacat nyata memiliki skor NeSy 0,02 hingga 0,39, dengan tiga di antaranya ditolak pada *root* dan satu pada N14, serta kotak NeSy hampir sama dengan kotak *Faster* R-CNN. Dengan demikian NeSy tidak salah menemukan lokasi, melainkan kurang yakin terhadap kelasnya. Keterlewatan *pinhole* pada PCB 4 hanya selisih 0,01 dari ambang.
+Pada baris (a), keempat kotak merah *Faster* R-CNN (skor 0,62 hingga 0,78) menutupi struktur yang tampak seperti cacat, misalnya lubang bundar pada tembaga atau jalur yang berdekatan, tetapi tidak ada anotasi di sana. NeSy memberi kandidat yang hampir sama kotaknya, namun berskor 0,21 hingga 0,29 sehingga berada di bawah ambang 0,35. Pada baris (b), keempat cacat nyata memiliki skor NeSy 0,23 hingga 0,32, dengan tiga di antaranya ditolak pada *root* dan satu pada N59, serta kotak NeSy hampir sama dengan kotak *Faster* R-CNN. Dengan demikian NeSy tidak salah menemukan lokasi, melainkan kurang yakin terhadap kelasnya. Cacat pada PCB 4 adalah *short* yang terlewat pada Gambar 4.10.
 
 ### 4.6.3 *Routing Margin* (Kontribusi 2)
 
-Tanpa *routing margin*, setiap deteksi berskor 1,0 sehingga urutan skor yang dibutuhkan *Soft*-NMS dan AP hilang. Pengaruhnya diuji dengan menyamakan seluruh skor menjadi 1 tanpa mengubah *decision path* maupun label, sehingga selisihnya murni berasal dari skor. Hasilnya ditunjukkan pada Tabel 4.12.
+Tanpa *routing margin*, setiap deteksi berskor 1,0 sehingga urutan skor yang dibutuhkan *Soft*-NMS dan AP hilang. Pengaruhnya diuji dengan menyamakan seluruh skor menjadi 1 tanpa mengubah *decision path* maupun label, sehingga selisihnya murni berasal dari skor. Hasilnya ditunjukkan pada Tabel 4.13.
 
-**Tabel 4.12 Pengaruh *Routing Margin* pada Deteksi *Neuro-Symbolic***
+**Tabel 4.13 Pengaruh *Routing Margin* pada Deteksi *Neuro-Symbolic***
 
 | **Model** | **Ambang** | **mAP@0,5:0,95** | **mAP@0,5** | ***Precision*** | ***Recall*** | **F1** |
 |:------------|-------|--------|--------|--------|---------|--------|
-| NeSy tanpa *routing margin* | 0,4 | 0,644 | 0,810 | 0,766 | **0,988** | 0,863 |
-| NeSy dengan *routing margin* | 0,4 | **0,787** | **0,982** | **0,932** | 0,976 | **0,953** |
+| NeSy tanpa *routing margin* | 0,35 | 0,644 | 0,810 | 0,750 | **0,988** | 0,852 |
+| NeSy dengan *routing margin* | 0,35 | **0,787** | **0,982** | **0,912** | 0,978 | **0,944** |
 
-Berdasarkan Tabel 4.12, *routing margin* menaikkan mAP@0,5:0,95 sebesar 0,143 dan mAP@0,5 sebesar 0,172, serta *precision* sebesar 16,6 poin, dengan *recall* hanya turun 1,2 poin. Tanpa skor, *false positive* meningkat dari 225 menjadi 947 (*Tabel 4.13*), sebagian besar karena duplikat tidak dapat dibedakan oleh *Soft*-NMS (3 menjadi 66) dan *background* tidak dapat disaring (158 menjadi 513).
+Berdasarkan Tabel 4.13, *routing margin* menaikkan mAP@0,5:0,95 sebesar 0,142 dan mAP@0,5 sebesar 0,172, serta *precision* sebesar 16,2 poin, dengan *recall* hanya turun 1,0 poin. Tanpa skor, *false positive* meningkat dari 298 menjadi 1.036 (Tabel 4.14), sebagian besar karena duplikat tidak dapat dibedakan oleh *Soft*-NMS (7 menjadi 140) dan *background* tidak dapat disaring (215 menjadi 517).
 
-**Tabel 4.13 Jenis *False Positive* tanpa dan dengan *Routing Margin***
+**Tabel 4.14 Jenis *False Positive* tanpa dan dengan *Routing Margin***
 
 | **Model** | **Background** | **Salah kelas** | **Salah lokalisasi** | **Duplikat** | **Total** |
 |:------------|--------|--------|--------|--------|--------|
-| NeSy tanpa *routing margin* | 513 | 247 | 121 | 66 | 947 |
-| NeSy dengan *routing margin* | **158** | **41** | **23** | **3** | **225** |
+| NeSy tanpa *routing margin* | 517 | 248 | 131 | 140 | 1.036 |
+| NeSy dengan *routing margin* | **215** | **49** | **27** | **7** | **298** |
 
-Pola yang sama terlihat pada *confusion matrix* pada Gambar 4.12 dan Gambar 4.13. Tanpa *routing margin*, kolom *background* membengkak, terutama pada *short* (233), *pinhole* (210), dan *spurious copper* (141), serta muncul pertukaran antarkelas seperti *mousebite* menjadi *pinhole* (24) dan *spurious copper* menjadi *pinhole* (16).
+Pola yang sama terlihat pada *confusion matrix* pada Gambar 4.12 dan Gambar 4.13. Tanpa *routing margin*, baris *background* membengkak, yaitu *background* yang dideteksi sebagai *short* (264), *pinhole* (218), *open* (152), dan *spurious copper* (143), dibandingkan 71, 89, 24, dan 51 dengan *routing margin*. Selain itu muncul pertukaran antarkelas seperti *mousebite* menjadi *pinhole* (25) dan *spurious copper* menjadi *pinhole* (16).
 
 ![Gambar 4.12](figures_bab4_v2/cm_nesy.png)
 
-**Gambar 4.12 *Confusion Matrix Neuro-Symbolic* dengan *Routing Margin* (ambang 0,4)**
+**Gambar 4.12 *Confusion Matrix Neuro-Symbolic* dengan *Routing Margin* (ambang 0,35)**
 
 ![Gambar 4.13](figures_bab4_v2/cm_nesy_nomargin.png)
 
-**Gambar 4.13 *Confusion Matrix Neuro-Symbolic* tanpa *Routing Margin* (ambang 0,4)**
+**Gambar 4.13 *Confusion Matrix Neuro-Symbolic* tanpa *Routing Margin* (ambang 0,35)**
 
-Dengan demikian skor *routing margin* membuat SODT dapat menggantikan *classification head* tanpa kehilangan kemampuan deteksi, karena keyakinan *decision path* dapat dipakai sebagai skor. Bias terhadap panjang *decision path* pada Subbab 3.8.1 tetap ada, dan ditunjukkan oleh AP yang sedikit di bawah *Faster* R-CNN pada Tabel 4.9.
+Dengan demikian skor *routing margin* membuat SODT dapat menggantikan *classification head* tanpa kehilangan kemampuan deteksi, karena keyakinan *decision path* dapat dipakai sebagai skor. Bias terhadap panjang *decision path* pada Subbab 3.8.1 tetap ada, dan ditunjukkan oleh AP yang sedikit di bawah *Faster* R-CNN pada Tabel 4.10.
 
 ## 4.7 Hasil dan Evaluasi *Explanation* pada *Neuro-Symbolic* (Kontribusi 3)
 
@@ -1550,62 +1561,63 @@ Dengan demikian skor *routing margin* membuat SODT dapat menggantikan *classific
 
 ### 4.7.1 *Faithfulness*
 
-Tabel 4.14 membandingkan metode yang menjelaskan SODT dengan Grad-CAM pada *Faster* R-CNN, masing-masing terhadap *random control*-nya sendiri. *Necessity* dan *Sufficiency* dalam persentase deteksi yang labelnya berubah atau bertahan, sedangkan *Deletion* dan *Insertion* AUC dihitung dari skor deteksi.
+Tabel 4.15 membandingkan metode yang menjelaskan SODT dengan Grad-CAM pada *Faster* R-CNN, masing-masing terhadap *random control*-nya sendiri. *Necessity* dan *Sufficiency* dalam persentase deteksi yang labelnya berubah atau bertahan, sedangkan *Deletion* dan *Insertion* AUC dihitung dari skor deteksi.
 
-**Tabel 4.14 *Faithfulness* Metode *Explanation* terhadap *Random Control***
+**Tabel 4.15 *Faithfulness* Metode *Explanation* terhadap *Random Control***
 
 | **Metode** | ***Necessity*** | ***Sufficiency*** | ***Deletion* AUC** | ***Insertion* AUC** | **Jumlah deteksi** |
 |:------------|-------|--------|--------|--------|--------|
-| SODT: peta M | **0,961** | **0,776** | **0,436** | **0,756** | 330 |
-| SODT: *random control* | 0,594 | 0,291 | 0,577 | 0,597 | 330 |
+| SODT: peta M | **0,961** | **0,774** | **0,439** | **0,758** | 337 |
+| SODT: *random control* | 0,591 | 0,285 | 0,590 | 0,585 | 337 |
 | Grad-CAM, seluruh citra | 0,322 | 0,183 | 0,711 | 0,186 | 345 |
 | Grad-CAM, petak dibatasi pada proposal | 0,687 | 0,470 | 0,375 | 0,492 | 345 |
 | Grad-CAM: *random control* | 0,603 | 0,301 | 0,432 | 0,402 | 345 |
 
 *Catatan:* *Necessity* dan *Sufficiency* makin tinggi makin baik, *Deletion* AUC makin rendah makin baik, dan *Insertion* AUC makin tinggi makin baik.
 
-Berdasarkan Tabel 4.14, petak yang diurutkan menurut peta M mengubah label pada 96,1% deteksi bila diganti, dibandingkan 59,4% untuk petak acak, dan mempertahankan label pada 77,6% deteksi bila hanya petak tersebut yang dipertahankan, dibandingkan 29,1% untuk petak acak. Selisih terhadap *random control* sebesar +0,367 (*necessity*) dan +0,485 (*sufficiency*), sedangkan pada Grad-CAM yang dibatasi pada proposal hanya +0,084 dan +0,168. Pada seluruh citra, Grad-CAM bahkan di bawah *random control* karena sebagian besar petak teratasnya berada di luar proposal, sedangkan peta M hanya menyala di dalam proposal. Perbandingan hanya dilakukan antara tiap metode dan *random control*-nya karena kedua metode menjelaskan kepala klasifikasi yang berbeda, sehingga angka mutlak antarmetode tidak sebanding. Jadi, *region* yang disorot SODT benar-benar menentukan keputusan *tree*, sesuai sifat *faithful* dari Subbab 3.8.2.
+Berdasarkan Tabel 4.15, petak yang diurutkan menurut peta M mengubah label pada 96,1% deteksi bila diganti, dibandingkan 59,1% untuk petak acak, dan mempertahankan label pada 77,4% deteksi bila hanya petak tersebut yang dipertahankan, dibandingkan 28,5% untuk petak acak. Selisih terhadap *random control* sebesar +0,371 (*necessity*) dan +0,490 (*sufficiency*), sedangkan pada Grad-CAM yang dibatasi pada proposal hanya +0,084 dan +0,168. Pada seluruh citra, Grad-CAM bahkan di bawah *random control* karena sebagian besar petak teratasnya berada di luar proposal, sedangkan peta M hanya menyala di dalam proposal. Perbandingan hanya dilakukan antara tiap metode dan *random control*-nya karena kedua metode menjelaskan kepala klasifikasi yang berbeda, sehingga angka mutlak antarmetode tidak sebanding. Jadi, *region* yang disorot SODT benar-benar menentukan keputusan *tree*, sesuai sifat *faithful* dari Subbab 3.8.2.
 
 Dari sisi waktu, *Faster* R-CNN hanya mendeteksi membutuhkan 54,6 ms per citra, NeSy dengan pembentukan *heatmap* per *node* 67,5 ms, dan *Faster* R-CNN dengan Grad-CAM 94,7 ms. Penjelasan SODT lebih murah karena dihitung dengan satu propagasi mundur per deteksi untuk seluruh *node*, sedangkan Grad-CAM memerlukan propagasi mundur tersendiri.
 
 ### 4.7.2 Studi Kasus pada Satu PCB
 
-Penjelasan dibaca pada PCB 1 dari Gambar 4.10, yang memuat lima cacat dari lima kelas berbeda. Gambar 4.14 menampilkan citra utuh dengan deteksi NeSy bernomor, peta gabungan M pada Persamaan 3.8, dan peta Grad-CAM pada proposal yang sama.
+Penjelasan dibaca pada PCB 1 dari Gambar 4.10, yang memuat lima cacat dari lima kelas berbeda (*open*, *mouse_bite*, *pinhole*, *spur*, dan *spurious copper*). Gambar 4.14 menampilkan citra utuh dengan deteksi NeSy bernomor, peta gabungan M pada Persamaan 3.8, dan peta Grad-CAM pada proposal yang sama.
 
 ![Gambar 4.14](figures_bab4_v2/fig_xai_overview_pcb1.png)
 
 **Gambar 4.14 Penjelasan pada PCB 1: deteksi NeSy, peta M, dan peta Grad-CAM pada proposal yang sama**
 
-Pada panel tengah, peta M menyala hanya di dalam setiap kotak deteksi dan memusat pada struktur cacatnya sendiri, yaitu celah pada konduktor untuk #1 dan #3, lubang pada tembaga untuk #2, gumpalan tembaga untuk #4, dan bagian sempit yang menjembatani dua konduktor untuk #5. Area PCB lainnya tidak diberi bobot. Pada panel kanan, Grad-CAM menyala pada pola kisi di seluruh citra, termasuk area kosong yang jauh dari cacat, sehingga lokasi yang disorot tidak dapat dipakai untuk memeriksa keputusan pada satu deteksi. Peta M merupakan label lokasi *region* yang ditimbang dan bukan penyebab per piksel, sehingga kedua peta dibaca sebagai petunjuk letak.
+Pada panel tengah, peta M menyala hanya di dalam setiap kotak deteksi dan memusat pada struktur cacatnya sendiri, yaitu celah pada konduktor untuk #5, takik pada tepi konduktor untuk #1, tonjolan kecil untuk #2, lubang untuk #3, dan gumpalan tembaga untuk #4. Area PCB lainnya tidak diberi bobot. Pada panel kanan, Grad-CAM menyala pada pola kisi di seluruh citra, termasuk deretan titik panas di sepanjang konduktor kiri yang jauh dari kelima deteksi, sehingga lokasi yang disorot tidak dapat dipakai untuk memeriksa keputusan pada satu deteksi. Peta M merupakan label lokasi *region* yang ditimbang dan bukan penyebab per piksel, sehingga kedua peta dibaca sebagai petunjuk letak.
 
-Lebih lanjut, peta M dapat diuraikan per *node* karena SODT adalah rangkaian keputusan. Gambar 4.15 menunjukkan deteksi #1 (*mouse_bite*, skor 0,757) dengan *decision path* N0 → N2 → N6 → N14 → N29 → N59, dan Gambar 4.16 menunjukkan deteksi #2 (*pinhole*, skor 0,709) dengan *decision path* N0 → N2 → N6 → N14 → N29 → N60. Kotak cyan pada setiap peta adalah proposal dan kotak hijau putus-putus adalah kotak deteksi, sedangkan di bawah nama *node* tertulis arah keputusan dan faktor σ pada Persamaan 3.3. Perkalian seluruh faktor σ pada jalur sama dengan skor deteksi (0,90 × 0,86 × 0,99 × 1,00 × 1,00 × 0,99 = 0,757 pada Gambar 4.15).
+Lebih lanjut, peta M dapat diuraikan per *node* karena SODT adalah rangkaian keputusan. Gambar 4.15 menunjukkan deteksi #1 (*mouse_bite*, skor 0,833) dengan *decision path* N0 → N2 → N6 → N14 → N29 → N59, dan Gambar 4.16 menunjukkan deteksi #2 (*spur*, skor 0,801) dengan *decision path* N0 → N2 → N5 → N11 → N24 → N49. Kotak cyan pada setiap peta adalah proposal dan kotak hijau putus-putus adalah kotak deteksi, sedangkan di bawah nama *node* tertulis arah keputusan dan faktor σ pada Persamaan 3.3. Perkalian seluruh faktor σ pada jalur sama dengan skor deteksi (0,95 × 0,93 × 0,99 × 0,97 × 1,00 × 0,99 ≈ 0,84 pada Gambar 4.15, selisih terhadap 0,833 berasal dari pembulatan faktor).
 
 ![Gambar 4.15](figures_bab4_v2/fig_xai_path_a.png)
 
 **Gambar 4.15 *Decision path* dan *heatmap* per *node* untuk deteksi #1 (*mouse_bite*) pada PCB 1**
 
-Pada Gambar 4.15, *node* berbeda menyorot bagian berbeda dari cacat yang sama. N0, N14, dan N29 memusat di sisi kanan celah, sedangkan N2 dan N6 memusat di sisi kiri, dan N59 sebagai penentu akhir memusat pada garis tengah celah. Pembagian ini wajar untuk *tree* yang menyaring secara bertahap. *Node* tingkat atas menyaring *background*, dan faktor σ terkecil ada pada N0 (0,90) dan N2 (0,86), sehingga keyakinan keputusan terutama ditentukan pada tingkat atas.
+Pada Gambar 4.15, *node* berbeda menyorot bagian berbeda dari cacat yang sama. N0, N14, N29, dan N59 memusat di sisi kanan takik, sedangkan N2 dan N6 memusat di sisi kiri dan kiri bawah proposal. Pembagian ini wajar untuk *tree* yang menyaring secara bertahap. Faktor σ terkecil ada pada N0 (0,95) dan N2 (0,93), sedangkan *node* di bawahnya mendekati 1, sehingga keyakinan keputusan terutama ditentukan pada tingkat atas.
 
 ![Gambar 4.16](figures_bab4_v2/fig_xai_path_b.png)
 
-**Gambar 4.16 *Decision path* dan *heatmap* per *node* untuk deteksi #2 (*pinhole*) pada PCB 1**
+**Gambar 4.16 *Decision path* dan *heatmap* per *node* untuk deteksi #2 (*spur*) pada PCB 1**
 
-Pada Gambar 4.16, jalur *pinhole* sama dengan *mouse_bite* hingga N29 dan baru bercabang pada kedalaman 6 (N60 dan bukan N59). Sampai N29, seluruh *node* memusat pada pinggiran lubang. Pada N60, peta melebar ke area tembaga di sekitar lubang, yang menunjukkan bahwa keputusan akhir antara kelas yang bersaudara memakai konteks sekitar cacat. N0 memberi faktor σ terkecil (0,82), sehingga skor 0,709 sebagian besar ditentukan oleh keyakinan pada *root*, sejalan dengan Subbab 4.6.2 yang menyebut *root* sebagai *node* terlemah pada sebagian besar deteksi yang hilang.
+Pada Gambar 4.16, jalur *spur* sama dengan *mouse_bite* pada N0 dan N2, tetapi N2 mengarah ke kiri untuk *spur* dan ke kanan untuk *mouse_bite*, sehingga kedua deteksi berpisah sejak kedalaman 3 (N5 dan bukan N6). Peta *node* berpindah antara bagian tengah proposal (N0, N5), sisi kiri (N11, N24), dan sisi kanan bawah (N2, N49), yaitu bagian-bagian yang berbeda dari tonjolan yang sama. N0 memberi faktor σ terkecil (0,85), sehingga skor 0,801 sebagian besar ditentukan oleh keyakinan pada *root*, sejalan dengan Subbab 4.6.2 yang menyebut *root* sebagai *node* terlemah pada sebagian besar deteksi yang hilang.
 
 Dengan demikian, penjelasan SODT memungkinkan pembaca mengikuti keputusan satu deteksi dari *root* hingga *leaf* beserta *region* yang ditimbang pada setiap langkah, sedangkan Grad-CAM hanya memberi satu peta tanpa urutan keputusan.
+
 # BAB V PENUTUP
 
 ## 5.1 Kesimpulan
 
-Penelitian ini mengintegrasikan *Faster* R-CNN dengan SODT sebagai arsitektur *neuro-symbolic* untuk deteksi cacat PCB pada *dataset* DeepPCB. *Faster* R-CNN yang menjadi *teacher* setara dengan Fung et al. (2024), dengan AP@50:5:85 sebesar 93,03 terhadap 93,2. SODT yang menggantikan *classification head* mempertahankan akurasi tersebut, dengan mAP@0,5 sebesar 0,982 terhadap 0,987 dan mAP@0,5:0,95 sebesar 0,787 terhadap 0,797. Pada ambang skor masing-masing, *precision* naik dari 0,903 menjadi 0,932 dan F1 dari 0,941 menjadi 0,953, sedangkan *recall* turun dari 0,983 menjadi 0,976. Perubahan ini terjadi karena NeSy menolak 108 *false positive* *background* milik *Faster* R-CNN, tetapi kehilangan 22 cacat yang skornya berada di bawah ambang, terutama karena keputusan pada *root*.
+Penelitian ini mengintegrasikan *Faster* R-CNN dengan SODT sebagai arsitektur *neuro-symbolic* untuk deteksi cacat PCB pada *dataset* DeepPCB. *Faster* R-CNN yang menjadi *teacher* setara dengan Fung et al. (2024), dengan AP@50:5:85 sebesar 93,03 terhadap 93,2. SODT yang menggantikan *classification head* mempertahankan akurasi tersebut, dengan mAP@0,5 sebesar 0,982 terhadap 0,987 dan mAP@0,5:0,95 sebesar 0,787 terhadap 0,797. Pada ambang skor masing-masing, *precision* naik dari 0,903 menjadi 0,912 dan F1 dari 0,941 menjadi 0,944, sedangkan *recall* turun dari 0,983 menjadi 0,978. Selisih ini kecil sehingga NeSy dibaca setara dengan *Faster* R-CNN, bukan lebih baik. Perubahan ini terjadi karena NeSy menolak 65 *false positive* *background* milik *Faster* R-CNN, tetapi kehilangan 15 cacat yang dideteksi *Faster* R-CNN, hampir seluruhnya karena skor di bawah ambang pada keputusan di *root*.
 
-Tiga kontribusi mendukung hasil tersebut. Pertama, *class weighting* menjaga kelas cacat yang sulit ditiru agar tidak dikalahkan oleh *background* pada pelatihan SODT. Kedua, skor deteksi berbasis *routing margin* memberi urutan skor yang dibutuhkan *Soft*-NMS dan AP, sehingga mAP@0,5:0,95 naik dari 0,644 menjadi 0,787 dan *false positive* turun dari 947 menjadi 225. Ketiga, *heatmap* per *node* menghasilkan *explanation* yang *faithful*. Terhadap *random control*-nya sendiri, peta SODT mengubah label pada 96,1% deteksi dibandingkan 59,4% untuk petak acak, sedangkan Grad-CAM pada petak yang dibatasi proposal hanya 68,7% dibandingkan 60,3%. Waktu per citra untuk deteksi beserta *explanation* juga lebih singkat, yaitu 67,5 ms terhadap 94,7 ms. *Explanation* tidak hanya berupa satu peta, tetapi *heatmap* pada setiap *node* di *decision path* sehingga keputusan dapat ditelusuri langkah demi langkah dari *root* hingga *leaf*. Kedua tujuan penelitian, yaitu mempertahankan performa deteksi sekaligus menyediakan *explanation* yang *faithful* dan lebih baik daripada Grad-CAM, telah tercapai.
+Tiga kontribusi mendukung hasil tersebut. Pertama, *class weighting* menyempitkan rentang *agreement* antarkelas dari 3,7 menjadi 2,1 poin dan menaikkan *agreement* kelas *short* sebesar 3,1 poin, dengan biaya 0,3 poin *mimic accuracy*. Pengaruh ini belum terlihat pada kinerja deteksi, yang tidak berubah tanpa *class weighting*. Kedua, skor deteksi berbasis *routing margin* memberi urutan skor yang dibutuhkan *Soft*-NMS dan AP, sehingga mAP@0,5:0,95 naik dari 0,644 menjadi 0,787 dan *false positive* turun dari 1.036 menjadi 298. Ketiga, *heatmap* per *node* menghasilkan *explanation* yang *faithful*. Terhadap *random control*-nya sendiri, peta SODT mengubah label pada 96,1% deteksi dibandingkan 59,1% untuk petak acak, sedangkan Grad-CAM pada petak yang dibatasi proposal hanya 68,7% dibandingkan 60,3%. Waktu per citra untuk deteksi beserta *explanation* juga lebih singkat, yaitu 67,5 ms terhadap 94,7 ms. *Explanation* tidak hanya berupa satu peta, tetapi *heatmap* pada setiap *node* di *decision path* sehingga keputusan dapat ditelusuri langkah demi langkah dari *root* hingga *leaf*. Kedua tujuan penelitian, yaitu mempertahankan performa deteksi sekaligus menyediakan *explanation* yang *faithful* dan lebih baik daripada Grad-CAM, telah tercapai.
 
 ## 5.2 Saran
 
-Penelitian ini masih memiliki beberapa keterbatasan. Hasil utama berasal dari satu pohon SODT dan satu *seed* pelatihan SODT. Ambang skor NeSy sebesar 0,4 diturunkan pada pohon sebelumnya, dan Tabel 4.6 (pengaruh *negative ratio* dan *class weighting*) juga berasal dari pohon sebelumnya. SODT hanya meniru label *teacher*, sehingga cacat yang gagal ditiru menambah *false negative*. Skor *routing margin* memiliki bias terhadap panjang *decision path*, kanal *neck* dikurangi menjadi 64, dan evaluasi *explanation* dilakukan secara kuantitatif tanpa teknisi. Berdasarkan keterbatasan tersebut, saran untuk penelitian selanjutnya adalah sebagai berikut.
+Penelitian ini masih memiliki beberapa keterbatasan. Hasil utama berasal dari satu pohon SODT dan satu *seed* pelatihan SODT. Ablasi *class weighting* hanya menunjukkan pengaruh pada *agreement*, bukan pada deteksi. SODT hanya meniru label *teacher*, sehingga cacat yang gagal ditiru menambah *false negative*. Skor *routing margin* memiliki bias terhadap panjang *decision path*, kanal *neck* dikurangi menjadi 64, dan evaluasi *explanation* dilakukan secara kuantitatif tanpa teknisi. Berdasarkan keterbatasan tersebut, saran untuk penelitian selanjutnya adalah sebagai berikut.
 
-1.  Menurunkan ulang ambang skor NeSy pada data latih untuk pohon pada Tabel 4.5, dan mengulang ablasi pada Tabel 4.6 dengan pohon yang sama.
+1.  Menguji bobot kelas yang lebih besar, karena bobot saat ini belum mengubah kinerja deteksi.
 
 2.  Menguji hasil pada beberapa *seed* pelatihan SODT untuk memastikan kestabilan selisih terhadap *Faster* R-CNN.
 

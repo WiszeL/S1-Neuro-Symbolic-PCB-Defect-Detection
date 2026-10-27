@@ -20,11 +20,6 @@ class SymbolicSearchConfig(TypedDict):
     class_weights: NotRequired[dict[str, float] | None]
 
 
-class SymbolicMarginTargetConfig(TypedDict):
-    iou: float
-
-
 class SymbolicTrainConfig(TypedDict):
     data: SymbolicDataConfig
     search: SymbolicSearchConfig
-    margin_target: SymbolicMarginTargetConfig

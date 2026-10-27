@@ -363,7 +363,7 @@ def breakdown_nesy_misses(
     "none":  nothing on it (routed to background, or suppressed by Soft-NMS).
     Checked in that order. A per-box existence check, not the evaluator's one-to-one
     greedy match, so totals can differ from its FN by a few. For "score" misses the
-    weakest node is the path node with the lowest γ·log σ(|margin|) of the best-scored
+    weakest node is the path node with the lowest log σ(|margin|) of the best-scored
     such detection; its depth is counted (0 = root). Detections need `pooled_features`.
     """
     nesy_threshold = score_threshold if nesy_score_threshold is None else nesy_score_threshold
@@ -387,7 +387,7 @@ def breakdown_nesy_misses(
                 _, log_certainties = tree.path_log_certainties(
                     nesy["pooled_features"][best].numpy().reshape(1, -1)
                 )
-                weakest = int(np.argmin(log_certainties[0] * tree.margin_exponents))
+                weakest = int(np.argmin(log_certainties[0]))
                 weakest_depth[tree.depth_of(weakest)] += 1
             elif bool((overlap & (nesy["scores"] >= nesy_threshold)).any()):
                 causes[gt_label]["class"] += 1
