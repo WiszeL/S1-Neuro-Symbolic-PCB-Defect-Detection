@@ -276,7 +276,7 @@ Gambar 4.7 *Confusion Matrix Faster* R-CNN pada Data Uji
 
 Gambar 4.8 Grafik *Mimic Accuracy* dan *Nonzero Weight*
 
-Gambar 4.9 Struktur SODT Terpilih setelah Pemangkasan
+Gambar 4.9 Perbandingan Struktur Pohon Penuh dan SODT Terpilih
 
 Gambar 4.10 Hasil deteksi *ground truth*, *Faster* R-CNN, dan *Neuro-Symbolic* pada empat PCB uji
 
@@ -286,11 +286,11 @@ Gambar 4.12 *Confusion Matrix Neuro-Symbolic* dengan *Routing Margin* (ambang 0,
 
 Gambar 4.13 *Confusion Matrix Neuro-Symbolic* tanpa *Routing Margin* (ambang 0,35)
 
-Gambar 4.14 Penjelasan pada PCB 1: deteksi NeSy, peta M, dan peta Grad-CAM pada proposal yang sama
+Gambar 4.14 Penjelasan pada PCB 1: peta M (NeSy) dan peta Grad-CAM pada proposal yang sama
 
-Gambar 4.15 *Decision path* dan *heatmap* per *node* untuk deteksi #1 (*mouse_bite*) pada PCB 1
+Gambar 4.15 Perbandingan (a) peta M, (b) peta Grad-CAM, dan (c) peta per *node* sepanjang *decision path* untuk deteksi #1 (*mouse_bite*) pada PCB 1
 
-Gambar 4.16 *Decision path* dan *heatmap* per *node* untuk deteksi #2 (*pinhole*) pada PCB 1
+Gambar 4.16 Perbandingan (a) peta M, (b) peta Grad-CAM, dan (c) peta per *node* sepanjang *decision path* untuk deteksi #2 (*spur*) pada PCB 1
 
 # DAFTAR TABEL
 
@@ -1241,7 +1241,7 @@ $$
 
 (3.8)
 
-dengan $M(p)$ peta gabungan pada posisi $p$, $P(x)$ *node* pada *decision path* RoI $x$ pada Persamaan 3.3, dan $H_{i}$ *heatmap* *node* ke-*i* pada Persamaan 3.7. Peta $M$ hanya dipakai untuk perbandingan dengan Grad-CAM dan untuk gambaran umum pada studi kasus.
+dengan $M(p)$ peta gabungan pada posisi $p$, $P(x)$ *node* pada *decision path* RoI $x$ pada Persamaan 3.3, dan $H_{i}$ *heatmap* *node* ke-*i* pada Persamaan 3.7. Peta $M$ hanya dipakai untuk perbandingan dengan Grad-CAM dan untuk studi kasus, yang juga menguraikan $M$ menjadi peta per *node*.
 
 *Explanation* diuji dengan *faithfulness*, yaitu apakah *region* yang disorot menentukan keputusan model, dan melalui studi kasus pada satu PCB. Kedua metode diuji dengan protokol yang sama. Citra dibagi menjadi petak 16×16 piksel yang diurutkan menurut peta, petak teratas diganti warna rata-rata citra, dan model asli dijalankan ulang. Anggaran petak adalah setengah dari jumlah petak yang disentuh proposal. Sebagai pembanding (*random control*), urutan petak diacak dengan petak di dalam proposal didahulukan. Karena SODT dan Grad-CAM menjelaskan model dengan kepala klasifikasi yang berbeda, dengan label dan skor yang berbeda, hanya perbandingan tiap metode terhadap *random control*-nya sendiri yang sebanding. Grad-CAM dihitung pada *feature map neck* sesuai Selvaraju et al. (2017) dan dilaporkan dalam dua bentuk, yaitu pada seluruh citra dan dengan petak dibatasi pada proposal. Skor *Deletion* dan *Insertion* AUC pada SODT adalah skor *routing margin* pada Persamaan 3.3, sedangkan pada Grad-CAM adalah probabilitas kelas. Prosedur pengujian dirangkum pada Algoritma 3.5.
 
@@ -1408,13 +1408,13 @@ SODT dilatih dengan konfigurasi pada Tabel 3.7. Dengan rasio negatif 2, *backgro
 
 SODT meniru *teacher* dengan fidelitas di atas 96% meskipun setiap *node* hanya memakai sekitar 3% fitur, sejalan dengan Hada et al. (2024). *Agreement* per kelas berada pada rentang sempit, yaitu 0,951 (*spurious copper*) hingga 0,972 (*spur*), dengan *background* 0,964, *mousebite* 0,957, *open* 0,967, *pinhole* 0,963, dan *short* 0,964, sehingga tidak ada kelas yang ditinggalkan. *Macro*-F1 lebih rendah daripada *mimic accuracy* karena F1 juga memperhitungkan *precision*, yaitu RoI *background* yang ikut dilabeli cacat.
 
-Struktur SODT setelah *pruning* ditunjukkan pada Gambar 4.9. Angka pada *node* menyatakan jumlah *nonzero weight*, label pada *leaf* menyatakan kelas keputusan, dan *node* dinomori per tingkat dari kiri ke kanan mulai dari N0 sebagai *root*, sehingga anak kiri dan kanan N*i* adalah N(2*i*+1) dan N(2*i*+2).
+Perbandingan struktur pohon penuh dan SODT terpilih setelah *pruning* ditunjukkan pada Gambar 4.9. Panel (a) menampilkan struktur biner lengkap berkedalaman 6 dengan 63 *node* internal dan 64 *leaf*; setelah TAO, 47 *node* aktif dan 4.735 bobot bernilai bukan nol, sedangkan *node* abu-abu memiliki seluruh bobot nol. Panel (b) menampilkan pohon setelah pemangkasan dengan 44 *node* aktif, 45 *leaf* terjangkau, dan 4.642 bobot bukan nol (sparsitas 97,65%), sedangkan cabang yang tidak terjangkau dilipat. Angka pada *node* menyatakan jumlah *nonzero weight*, label pada *leaf* menyatakan kelas keputusan, dan *node* dinomori per tingkat dari kiri ke kanan mulai dari N0 sebagai *root*, sehingga anak kiri dan kanan N*i* adalah N(2*i*+1) dan N(2*i*+2).
 
 ![Gambar 4.9](figures_bab4_v2/gambar_4_10.png)
 
-**Gambar 4.9 Struktur SODT Terpilih setelah Pemangkasan**
+**Gambar 4.9 Perbandingan struktur SODT: (a) pohon penuh dengan 63 *node* internal dan 64 *leaf* serta (b) SODT terpilih dengan 44 *node* aktif setelah pemangkasan. Angka pada *node* menyatakan jumlah bobot bukan nol, *node* abu-abu memiliki seluruh bobot nol, dan kotak merah menandai subtree yang dipangkas.**
 
-Dari 64 *leaf*, 34 berlabel *background* dan 30 berlabel cacat (*open* 7, *short* 6, *pinhole* 6, *mousebite* 5, *spurious copper* 4, *spur* 2). Pada 9 dari 32 pasangan *leaf* bersaudara, kedua *leaf* berlabel cacat yang berbeda, sehingga *node* tingkat atas terutama menyaring *background*, sedangkan *node* di dekat *leaf* menentukan kelas cacat. Jumlah *nonzero weight* tersebar tidak merata, dengan *node* terpadat N61 (459), N50 (349), dan N30 (320), sedangkan rata-rata per *node* aktif hanya sekitar 90 hingga 126 pada setiap kedalaman. Sparsitas inilah yang membuat setiap *node* cukup ringkas untuk diubah menjadi *heatmap* pada Subbab 4.7.
+Dari 64 *leaf* pada panel (a), 34 berlabel *background* dan 30 berlabel cacat (*open* 7, *short* 6, *pinhole* 6, *mousebite* 5, *spurious copper* 4, *spur* 2). Pada 9 dari 32 pasangan *leaf* bersaudara, kedua *leaf* berlabel cacat yang berbeda, sehingga *node* tingkat atas terutama menyaring *background*, sedangkan *node* di dekat *leaf* menentukan kelas cacat. Jumlah *nonzero weight* tersebar tidak merata, dengan *node* terpadat N61 (459), N50 (349), dan N30 (320), sedangkan rata-rata per *node* aktif hanya sekitar 90 hingga 126 pada setiap kedalaman. Sparsitas inilah yang membuat setiap *node* cukup ringkas untuk diubah menjadi *heatmap* pada Subbab 4.7.
 
 ### 4.5.2 Pengaruh *Class Weighting* (Kontribusi 1)
 
@@ -1581,27 +1581,27 @@ Dari sisi waktu, *Faster* R-CNN hanya mendeteksi membutuhkan 54,6 ms per citra, 
 
 ### 4.7.2 Studi Kasus pada Satu PCB
 
-Penjelasan dibaca pada PCB 1 dari Gambar 4.10, yang memuat lima cacat dari lima kelas berbeda (*open*, *mouse_bite*, *pinhole*, *spur*, dan *spurious copper*). Gambar 4.14 menampilkan citra utuh dengan deteksi NeSy bernomor, peta gabungan M pada Persamaan 3.8, dan peta Grad-CAM pada proposal yang sama.
+Penjelasan dibaca pada PCB 1 dari Gambar 4.10, yang memuat lima cacat dari lima kelas berbeda (*open*, *mouse_bite*, *pinhole*, *spur*, dan *spurious copper*). Gambar 4.14 menampilkan citra utuh dengan dua panel, yaitu peta gabungan M pada Persamaan 3.8 untuk deteksi NeSy (kiri) dan peta Grad-CAM pada proposal yang sama (kanan). Kotak putih bernomor adalah deteksi NeSy. Kedua peta digambar hanya di dalam proposal masing-masing deteksi karena kelas sebuah deteksi dihitung dari fitur *RoI Align* di dalam proposalnya, sehingga aktivasi di luar proposal tidak memengaruhi keputusan deteksi tersebut. Setiap peta dinormalisasi sendiri per deteksi.
 
 ![Gambar 4.14](figures_bab4_v2/fig_xai_overview_pcb1.png)
 
-**Gambar 4.14 Penjelasan pada PCB 1: deteksi NeSy, peta M, dan peta Grad-CAM pada proposal yang sama**
+**Gambar 4.14 Penjelasan pada PCB 1: peta M (NeSy) dan peta Grad-CAM pada proposal yang sama**
 
-Pada panel tengah, peta M menyala hanya di dalam setiap kotak deteksi dan memusat pada struktur cacatnya sendiri, yaitu celah pada konduktor untuk #5, takik pada tepi konduktor untuk #1, tonjolan kecil untuk #2, lubang untuk #3, dan gumpalan tembaga untuk #4. Area PCB lainnya tidak diberi bobot. Pada panel kanan, Grad-CAM menyala pada pola kisi di seluruh citra, termasuk deretan titik panas di sepanjang konduktor kiri yang jauh dari kelima deteksi, sehingga lokasi yang disorot tidak dapat dipakai untuk memeriksa keputusan pada satu deteksi. Peta M merupakan label lokasi *region* yang ditimbang dan bukan penyebab per piksel, sehingga kedua peta dibaca sebagai petunjuk letak.
+Pada panel kiri, peta M menyala di dalam setiap kotak dan memusat pada struktur cacatnya sendiri, yaitu celah pada konduktor untuk #5, takik pada tepi konduktor untuk #1, tonjolan kecil untuk #2, lubang untuk #3, dan gumpalan tembaga untuk #4. Pada panel kanan, Grad-CAM juga terbatas di dalam proposal, tetapi sorotannya lebih lemah dan lebih tersebar, terutama pada #4 dan #5 yang hampir tidak menyala. Peta M berasal dari keputusan *tree* itu sendiri, sedangkan Grad-CAM adalah perkiraan atas keputusan *Faster* R-CNN. Peta M merupakan label lokasi *region* yang ditimbang dan bukan penyebab per piksel, sehingga kedua peta dibaca sebagai petunjuk letak.
 
-Lebih lanjut, peta M dapat diuraikan per *node* karena SODT adalah rangkaian keputusan. Gambar 4.15 menunjukkan deteksi #1 (*mouse_bite*, skor 0,833) dengan *decision path* N0 → N2 → N6 → N14 → N29 → N59, dan Gambar 4.16 menunjukkan deteksi #2 (*spur*, skor 0,801) dengan *decision path* N0 → N2 → N5 → N11 → N24 → N49. Kotak cyan pada setiap peta adalah proposal dan kotak hijau putus-putus adalah kotak deteksi, sedangkan di bawah nama *node* tertulis arah keputusan dan faktor σ pada Persamaan 3.3. Perkalian seluruh faktor σ pada jalur sama dengan skor deteksi (0,95 × 0,93 × 0,99 × 0,97 × 1,00 × 0,99 ≈ 0,84 pada Gambar 4.15, selisih terhadap 0,833 berasal dari pembulatan faktor).
+Lebih lanjut, Gambar 4.15 dan Gambar 4.16 membandingkan tiga peta untuk satu deteksi yang sama, yaitu (a) peta M, (b) peta Grad-CAM pada proposal yang sama, dan (c) peta per *node* sepanjang *decision path*. Peta M pada panel (a) adalah jumlah seluruh peta *node* pada panel (c) menurut Persamaan 3.8, sehingga panel (c) menguraikan M menjadi langkah-langkah keputusannya. Grad-CAM pada panel (b) tidak dapat diuraikan seperti itu karena hanya menghasilkan satu peta per deteksi. Gambar 4.15 menunjukkan deteksi #1 (*mouse_bite*, skor 0,833) dengan *decision path* N0 → N2 → N6 → N14 → N29 → N59, dan Gambar 4.16 menunjukkan deteksi #2 (*spur*, skor 0,801) dengan *decision path* N0 → N2 → N5 → N11 → N24 → N49. Kotak cyan pada setiap peta adalah proposal dan kotak hijau putus-putus adalah kotak deteksi. Pada panel (c), panah menunjukkan urutan *node* dari *root*, dan di atas setiap peta tertulis nomor *node*, arah keputusan, dan faktor σ pada Persamaan 3.3. Perkalian seluruh faktor σ pada jalur sama dengan skor deteksi (0,95 × 0,93 × 0,99 × 0,97 × 1,00 × 0,99 ≈ 0,84 pada Gambar 4.15, selisih terhadap 0,833 berasal dari pembulatan faktor).
 
 ![Gambar 4.15](figures_bab4_v2/fig_xai_path_a.png)
 
-**Gambar 4.15 *Decision path* dan *heatmap* per *node* untuk deteksi #1 (*mouse_bite*) pada PCB 1**
+**Gambar 4.15 Perbandingan (a) peta M, (b) peta Grad-CAM, dan (c) peta per *node* sepanjang *decision path* untuk deteksi #1 (*mouse_bite*) pada PCB 1**
 
-Pada Gambar 4.15, *node* berbeda menyorot bagian berbeda dari cacat yang sama. N0, N14, N29, dan N59 memusat di sisi kanan takik, sedangkan N2 dan N6 memusat di sisi kiri dan kiri bawah proposal. Pembagian ini wajar untuk *tree* yang menyaring secara bertahap. Faktor σ terkecil ada pada N0 (0,95) dan N2 (0,93), sedangkan *node* di bawahnya mendekati 1, sehingga keyakinan keputusan terutama ditentukan pada tingkat atas.
+Pada Gambar 4.15, peta M pada panel (a) memusat di sisi kanan takik. Puncak yang sama muncul pada Grad-CAM di panel (b) sebagai garis vertikal di tengah-kanan proposal, tetapi Grad-CAM juga menyala kuat di sepanjang tepi bawah proposal, yang bukan puncak pada M. Pada panel (c), *node* berbeda menyorot bagian berbeda dari cacat yang sama. N0, N14, N29, dan N59 memusat di sisi kanan takik, sedangkan N2 dan N6 memusat di sisi kiri dan kiri bawah proposal. Pembagian ini wajar untuk *tree* yang menyaring secara bertahap. Faktor σ terkecil ada pada N0 (0,95) dan N2 (0,93), sedangkan *node* di bawahnya mendekati 1, sehingga keyakinan keputusan terutama ditentukan pada tingkat atas.
 
 ![Gambar 4.16](figures_bab4_v2/fig_xai_path_b.png)
 
-**Gambar 4.16 *Decision path* dan *heatmap* per *node* untuk deteksi #2 (*spur*) pada PCB 1**
+**Gambar 4.16 Perbandingan (a) peta M, (b) peta Grad-CAM, dan (c) peta per *node* sepanjang *decision path* untuk deteksi #2 (*spur*) pada PCB 1**
 
-Pada Gambar 4.16, jalur *spur* sama dengan *mouse_bite* pada N0 dan N2, tetapi N2 mengarah ke kiri untuk *spur* dan ke kanan untuk *mouse_bite*, sehingga kedua deteksi berpisah sejak kedalaman 3 (N5 dan bukan N6). Peta *node* berpindah antara bagian tengah proposal (N0, N5), sisi kiri (N11, N24), dan sisi kanan bawah (N2, N49), yaitu bagian-bagian yang berbeda dari tonjolan yang sama. N0 memberi faktor σ terkecil (0,85), sehingga skor 0,801 sebagian besar ditentukan oleh keyakinan pada *root*, sejalan dengan Subbab 4.6.2 yang menyebut *root* sebagai *node* terlemah pada sebagian besar deteksi yang hilang.
+Pada Gambar 4.16, peta M pada panel (a) memusat di sisi kiri tengah proposal dan menyebar ke kanan, sedangkan Grad-CAM pada panel (b) menyala paling kuat di tepi kanan bawah proposal dan lebih lemah di sisi kiri. Untuk deteksi ini kedua peta menunjuk bagian yang berbeda, dan hanya peta M yang dapat ditelusuri ke *node* penyusunnya pada panel (c). Pada panel (c), jalur *spur* sama dengan *mouse_bite* pada N0 dan N2, tetapi N2 mengarah ke kiri untuk *spur* dan ke kanan untuk *mouse_bite*, sehingga kedua deteksi berpisah sejak kedalaman 3 (N5 dan bukan N6). Peta *node* berpindah antara bagian tengah proposal (N0, N5), sisi kiri (N11, N24), dan sisi kanan bawah (N2, N49), yaitu bagian-bagian yang berbeda dari tonjolan yang sama. N0 memberi faktor σ terkecil (0,85), sehingga skor 0,801 sebagian besar ditentukan oleh keyakinan pada *root*, sejalan dengan Subbab 4.6.2 yang menyebut *root* sebagai *node* terlemah pada sebagian besar deteksi yang hilang.
 
 Dengan demikian, penjelasan SODT memungkinkan pembaca mengikuti keputusan satu deteksi dari *root* hingga *leaf* beserta *region* yang ditimbang pada setiap langkah, sedangkan Grad-CAM hanya memberi satu peta tanpa urutan keputusan.
 
