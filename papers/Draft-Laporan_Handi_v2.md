@@ -322,7 +322,7 @@ Tabel 4.4 Distribusi Label *Teacher* pada RoI Hasil Ekstraksi
 
 Tabel 4.5 Ringkasan Struktur dan Fidelitas SODT Terpilih
 
-Tabel 4.6 Pengaruh *Class Weighting* terhadap *Agreement* Pohon SODT pada Data Uji
+Tabel 4.6 Agreement per Kelas Pohon SODT dengan dan tanpa *Class Weighting* pada Data Uji
 
 Tabel 4.7 Pengaruh *Negative Ratio* terhadap Fidelitas SODT
 
@@ -1420,14 +1420,21 @@ Dari 64 *leaf* pada panel (a), 34 berlabel *background* dan 30 berlabel cacat (*
 
 Karena label pelatihan adalah prediksi *teacher*, kelas cacat yang sulit ditiru mudah dikalahkan oleh *background* yang dominan. *Class weighting* (CW) pada Persamaan 3.1 dan 3.2 menaikkan biaya kesalahan pada kelas cacat dengan *recall* terlemah. Pengaruhnya diuji dengan melatih ulang pohon yang sama (λ = 0,01, α = 0,85, NR 2, *seed* 112) tanpa CW, sehingga satu-satunya perbedaan adalah bobot kelas. Hasilnya ditunjukkan pada Tabel 4.6, dan dampaknya pada deteksi pada Tabel 4.8.
 
-**Tabel 4.6 Pengaruh *Class Weighting* terhadap *Agreement* Pohon SODT pada Data Uji**
+**Tabel 4.6 Agreement per Kelas Pohon SODT dengan dan tanpa *Class Weighting* pada Data Uji**
 
-| **Pohon** | ***Mimic accuracy*** | ***Macro*-F1 (0 - 1)** | **Rentang *agreement* antarkelas (poin)** | ***Agreement short*** | ***Agreement* kelas terendah** |
-|:------------|:------:|:------:|:------:|:------:|:-----------:|
-| Dengan CW (terpilih) | 0,9633 | 0,9092 | **2,1** | **0,9639** | 0,9506 (*spurious copper*) |
-| Tanpa CW | **0,9667** | **0,9155** | 3,7 | 0,9331 | 0,9331 (*short*) |
+| **Kelas** | **Jumlah RoI uji (proporsi)** | ***Agreement* tanpa CW** | ***Agreement* dengan CW (terpilih)** | **Selisih (poin)** |
+|:------------|:------:|:------:|:------:|:------:|
+| *Background* | 414.076 (82,8%) | **0,9699** | 0,9635 | −0,6 |
+| *Open* | 17.224 (3,4%) | 0,9515 | **0,9666** | +1,5 |
+| *Short* | 12.995 (2,6%) | 0,9331 | **0,9639** | +3,1 |
+| *Mousebite* | 15.233 (3,0%) | **0,9579** | 0,9565 | −0,1 |
+| *Spur* | 14.108 (2,8%) | 0,9590 | **0,9719** | +1,3 |
+| *Spurious copper* | 13.170 (2,6%) | 0,9456 | **0,9506** | +0,5 |
+| *Pinhole* | 13.194 (2,6%) | 0,9568 | **0,9628** | +0,6 |
+| *Mimic accuracy* | 500.000 | **0,9667** | 0,9633 | −0,3 |
+| *Macro*-F1 | 500.000 | **0,9155** | 0,9092 | −0,6 |
 
-CW menggeser *agreement* ke kelas yang lemah. *Agreement short* naik 3,1 poin (0,9331 menjadi 0,9639), *open* 1,5 poin, *spur* 1,3 poin, *pinhole* 0,6 poin, dan *spurious copper* 0,5 poin, sedangkan *mousebite* praktis tetap (turun 0,1 poin). Sebagai *trade-off* *cost-sensitive learning* (Elkan, 2001), *agreement background* turun 0,6 poin sehingga *mimic accuracy* turun 0,3 poin dan *macro*-F1 turun dari 0,9155 menjadi 0,9092. Rentang *agreement* antarkelas menyempit dari 3,7 menjadi 2,1 poin. Bobot *background* sengaja dibiarkan 1 agar *false positive* tidak bertambah.
+Tabel 4.6 menunjukkan ketimpangan kelas yang ditangani CW. Pada 500.000 RoI uji, *background* menyumbang 82,8% sampel, sedangkan setiap kelas cacat hanya 2,6% hingga 3,4%, atau sekitar 24 hingga 32 kali lebih sedikit. Tanpa CW, pohon meminimalkan kesalahan total sehingga *agreement background* tertinggi (0,9699) dan kelas cacat yang paling sulit ditiru dikorbankan, yaitu *short* (0,9331) dan *spurious copper* (0,9456). Dengan CW, *agreement short* naik 3,1 poin (0,9331 menjadi 0,9639), *open* 1,5 poin, *spur* 1,3 poin, *pinhole* 0,6 poin, dan *spurious copper* 0,5 poin, sedangkan *mousebite* praktis tetap (turun 0,1 poin). Sebagai *trade-off* *cost-sensitive learning* (Elkan, 2001), *agreement background* turun 0,6 poin. Karena *background* mendominasi sampel, penurunan kecil itu membuat *mimic accuracy* turun 0,3 poin dan *macro*-F1 turun dari 0,9155 menjadi 0,9092, sementara kenaikan pada kelas cacat yang jauh lebih sedikit nyaris tidak terlihat pada metrik ringkasan tersebut. Karena itu CW dinilai dari *agreement* per kelas, bukan dari *mimic accuracy*. Rentang *agreement* antarkelas menyempit dari 3,7 menjadi 2,1 poin. Bobot *background* sengaja dibiarkan 1 agar *false positive* tidak bertambah.
 
 ### 4.5.3 Pengaruh *Negative Ratio*
 
