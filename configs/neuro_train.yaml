@@ -47,7 +47,7 @@ evaluation:
   precision_iou: 0.5
   precision_score_threshold: 0.5
   # NeSy's score (product of path margin sigmoids) is on its own scale: the lowest cutoff whose trainval precision
-  # (200 seeded images) is >= FRCNN's at 0.5. Derived for L0,01;S0.85.pt (0.3 gives P 0.941 < FRCNN 0.952, 0.35 gives
+  # (200 seeded images) is >= FRCNN's at 0.5. Derived for run1.pt (0.3 gives P 0.941 < FRCNN 0.952, 0.35 gives
   # 0.960); retrain the tree and this must be re-derived.
   nesy_score_threshold: 0.35
   class_metrics: true

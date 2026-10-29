@@ -12,8 +12,7 @@ from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 from util.device import select_device
 
 from .heatmap import (
-    compute_symbolic_heatmap,
-    compute_node_local_evidence_maps,
+    describe_decision_path,
     fpn_node_maps,
     fpn_node_maps_many,
 )
@@ -68,36 +67,24 @@ def explain_hybrid_detection(
     detection: dict[str, Tensor],
     detection_index: int,
     image: Tensor,
-    mode: str = "local_instance_evidence_map",
     pixel_attribution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Decision path plus exact pixel maps for one detection; `image` is the original [3, H, W] image.
 
     `pixel_attribution` lets a caller that already has the maps (one pass for many detections) pass them in.
     """
-    feature_grid = detection["pooled_features"][detection_index]
-    explanation = compute_symbolic_heatmap(
-        model.symbolic_tree,
-        feature_grid=feature_grid,
-        mode=mode,
-    )
-
-    path = model.symbolic_tree.decision_path(feature_grid.detach().cpu().numpy().reshape(-1))
-    explanation["node_explanations"] = compute_node_local_evidence_maps(
-        model.symbolic_tree, feature_grid
-    )
-    explanation["proposal_box"] = detection["proposal_boxes"][detection_index].detach().cpu()
-    explanation["detection_box"] = detection["boxes"][detection_index].detach().cpu()
-    explanation["label"] = int(detection["labels"][detection_index])
-    explanation["score"] = float(detection["scores"][detection_index])
-    explanation["detection_index"] = int(detection_index)
-    explanation["symbolic_leaf_index"] = int(
-        detection["symbolic_leaf_indices"][detection_index]
-    )
-    explanation["symbolic_probabilities"] = detection["symbolic_probabilities"][
-        detection_index
-    ]
-    explanation["explanation_mode"] = mode
+    feature_vector = detection["pooled_features"][detection_index].detach().cpu().numpy().reshape(-1)
+    path = model.symbolic_tree.decision_path(feature_vector)
+    explanation: dict[str, Any] = {
+        "node_explanations": describe_decision_path(model.symbolic_tree, feature_vector),
+        "proposal_box": detection["proposal_boxes"][detection_index].detach().cpu(),
+        "detection_box": detection["boxes"][detection_index].detach().cpu(),
+        "label": int(detection["labels"][detection_index]),
+        "score": float(detection["scores"][detection_index]),
+        "detection_index": int(detection_index),
+        "symbolic_leaf_index": int(detection["symbolic_leaf_indices"][detection_index]),
+        "symbolic_probabilities": detection["symbolic_probabilities"][detection_index],
+    }
     # Same path as the node entries above, so the maps explain the decision on screen.
     explanation["pixel_attribution"] = pixel_attribution or fpn_node_maps(
         model, image, detection["proposal_boxes_processed"][detection_index], path=path
@@ -127,7 +114,6 @@ def explain_hybrid_detections(
     detection_indices: list[int] | None = None,
     score_threshold: float = 0.3,
     max_detections: int | None = None,
-    mode: str = "local_instance_evidence_map",
 ) -> list[dict[str, Any]]:
     selected_indices = detection_indices
     if selected_indices is None:
@@ -150,7 +136,7 @@ def explain_hybrid_detections(
     )
     return [
         explain_hybrid_detection(
-            model, detection, index, image, mode=mode, pixel_attribution=attribution
+            model, detection, index, image, pixel_attribution=attribution
         )
         for index, attribution in zip(selected_indices, attributions)
     ]

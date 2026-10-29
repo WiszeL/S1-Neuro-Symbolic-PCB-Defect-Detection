@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from torchvision.ops import MultiScaleRoIAlign
 
-from neurosym.heatmap import compute_node_local_evidence_maps
+from neurosym.heatmap import describe_decision_path
 from neurosym.visualization import _pruned_tree_layout
 from symbolic.sodt import SparseObliqueDecisionTreeClassifier
 
@@ -55,7 +55,7 @@ def _build_explanation():
     )[0]
     tree = _forced_path_tree(np.random.default_rng(0))
     explanation = {
-        "node_explanations": compute_node_local_evidence_maps(tree, pooled),
+        "node_explanations": describe_decision_path(tree, pooled.numpy().reshape(-1)),
         "symbolic_leaf_index": int(tree.leaf_index_for_feature(pooled.numpy().reshape(-1))),
     }
     return explanation, tree

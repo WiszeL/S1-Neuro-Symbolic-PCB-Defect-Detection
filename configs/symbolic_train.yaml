@@ -1,5 +1,5 @@
 data:
-  neg_ratio: 8
+  neg_ratio: 2
   storage_dtype: float32
 
 # Fixed up front like the source papers — never tuned against any evaluation split.

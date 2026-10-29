@@ -1,6 +1,5 @@
 from .heatmap import (
-    compute_node_local_evidence_maps,
-    compute_symbolic_heatmap,
+    describe_decision_path,
     fpn_node_maps,
     fpn_node_maps_many,
 )
@@ -24,8 +23,7 @@ from util.visualization import image_to_array
 
 __all__ = [
     "NeuroSymbolicDetector",
-    "compute_node_local_evidence_maps",
-    "compute_symbolic_heatmap",
+    "describe_decision_path",
     "explain_hybrid_detection",
     "explain_hybrid_detections",
     "load_neurosymbolic_detector",
