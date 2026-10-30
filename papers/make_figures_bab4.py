@@ -1,4 +1,4 @@
-"""Figures for Bab 4: Gambar 4.10 (deteksi 4 PCB), 4.11/4.12 (bukti FP/FN), 4.13 (keyakinan root), 4.14 (confusion matrix).
+"""Figures for Bab 4: Lampiran 1 (deteksi 4 PCB), Gambar 4.10/4.11 (bukti FP/FN), 4.12 (keyakinan root), 4.13 (confusion matrix), 4.14 (routing margin per node).
 
 Run from anywhere: python papers/make_figures_bab4.py
 Inference is cached in figures_bab4_v2/_cache_detections.pt (detections, NeSy per-node certainties) and
@@ -226,7 +226,7 @@ def blank_axis(ax) -> None:
 
 
 def detection_figure(records, dataset) -> None:
-    """Gambar 4.10: GT | Faster R-CNN | NeSy for four PCBs. Every model box carries its score
+    """Lampiran 1: GT | Faster R-CNN | NeSy for four PCBs. Every model box carries its score
     (a missed defect shows its best same-class candidate's score, or – if the model has none)."""
     fig, axes = plt.subplots(len(DETECTION_PCBS), 3, figsize=(9.0, 12.6), dpi=200)
     fig.subplots_adjust(left=0.01, right=0.99, top=0.955, bottom=0.04, wspace=0.03, hspace=0.20)
@@ -335,9 +335,9 @@ def evidence_rows(records, hybrid, dataset, device) -> tuple[list[dict], list[di
 
 
 def evidence_figure(rows: list[dict], group: str, dataset, filename: str) -> None:
-    """Gambar 4.11 ("fp") / 4.12 ("fn"): PCB (one marked location) | Faster R-CNN | NeSy, one example per row."""
-    fig = plt.figure(figsize=(7.6, 2.8 * len(rows) + 0.8), dpi=200)
-    grid = fig.add_gridspec(len(rows), 3, hspace=0.5, wspace=0.04, left=0.01, right=0.99, top=0.95, bottom=0.07)
+    """Gambar 4.10 ("fp") / 4.11 ("fn"): PCB (one marked location) | Faster R-CNN | NeSy, one example per row."""
+    fig = plt.figure(figsize=(6.6, 2.6 * len(rows) + 0.8), dpi=200)  # width ≈ row height, so the square crops fill their slots
+    grid = fig.add_gridspec(len(rows), 3, hspace=0.3, wspace=0.04, left=0.01, right=0.99, top=0.96, bottom=0.045)
     marker_color = FP_RED if group == "fp" else FN_YELLOW
     all_axes = []
     for k, row in enumerate(rows):
@@ -347,7 +347,7 @@ def evidence_figure(rows: list[dict], group: str, dataset, filename: str) -> Non
         marker = row["frcnn"]["box"] if group == "fp" else row["gt_box"]
         axes[0].imshow(image)
         draw_box(axes[0], marker, marker_color, linewidth=1.8, pad=6)
-        axes[0].set_title(f"PCB {row['pcb']} (citra uji #{row['index']})\n{row['cls']}", fontsize=7.5, fontweight="bold")
+        axes[0].set_title(f"PCB {row['pcb']} (citra uji #{row['index']})\n{row['cls']}", fontsize=6.8, fontweight="bold")
         left, top, right, bottom = crop_window(marker)
         for ax in axes[1:]:
             ax.imshow(image)
@@ -357,11 +357,11 @@ def evidence_figure(rows: list[dict], group: str, dataset, filename: str) -> Non
         draw_box(axes[2], row["nesy_box"], REJECT_BLUE, linestyle="--", linewidth=1.8)
         nesy_score = f"skor {fmt(row['nesy_score'])} < {fmt_threshold(NESY_THR)}"
         if group == "fp":
-            axes[1].set_title(f"Faster R-CNN: gagal (FP)\nskor {fmt(row['frcnn']['score'])}", fontsize=7.5)
-            axes[2].set_title(f"Neuro-Symbolic: berhasil (ditolak)\n{nesy_score}", fontsize=7.5)
+            axes[1].set_title(f"Faster R-CNN: gagal (FP)\nskor {fmt(row['frcnn']['score'])}", fontsize=6.8)
+            axes[2].set_title(f"Neuro-Symbolic: berhasil (ditolak)\n{nesy_score}", fontsize=6.8)
         else:
-            axes[1].set_title(f"Faster R-CNN: berhasil (TP)\nskor {fmt(row['frcnn']['score'])}", fontsize=7.5)
-            axes[2].set_title(f"Neuro-Symbolic: gagal (terlewat)\n{nesy_score}\nnode terlemah N{row['node']} (kedalaman {row['depth']})", fontsize=7.5)
+            axes[1].set_title(f"Faster R-CNN: berhasil (TP)\nskor {fmt(row['frcnn']['score'])}", fontsize=6.8)
+            axes[2].set_title(f"Neuro-Symbolic: gagal (terlewat)\n{nesy_score}\nnode terlemah N{row['node']} (kedalaman {row['depth']})", fontsize=6.8)
     for ax in all_axes:
         blank_axis(ax)
     handles = [plt.Rectangle((0, 0), 1, 1, fill=False, edgecolor=REJECT_BLUE, linestyle="--", label="kandidat Neuro-Symbolic")]
@@ -425,7 +425,7 @@ def root_confidence(records: list[dict], tree) -> dict[str, object]:
 
 
 def root_figure(confidence: dict[str, object], counts: np.ndarray) -> None:
-    """Gambar 4.13: (a) root σ of detected defects, rejected Faster R-CNN false positives and missed defects,
+    """Gambar 4.12: (a) root σ of detected defects, rejected Faster R-CNN false positives and missed defects,
     (b) share of RoIs N0 sends left / right per class."""
     tp, misses, rejected = confidence["tp"], confidence["misses"], np.array([m["sigma"] for m in confidence["rejected"]])
     names = ["background", "open", "short", "mousebite", "spur", "spurious copper", "pinhole"]
@@ -490,7 +490,7 @@ def root_figure(confidence: dict[str, object], counts: np.ndarray) -> None:
 
 
 def confusion_figure(cms: dict[str, np.ndarray]) -> None:
-    """Gambar 4.14: confusion matrix without (a) and with (b) routing margin, one shared color scale."""
+    """Gambar 4.13: confusion matrix without (a) and with (b) routing margin, one shared color scale."""
     names = ["background", "open", "short", "mousebite", "spur", "spurious copper", "pinhole"]
     vmax = max(cms["nomargin"].max(), cms["nesy"].max())
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 6.2), dpi=200)
@@ -513,6 +513,99 @@ def confusion_figure(cms: dict[str, np.ndarray]) -> None:
     plt.close(fig)
 
 
+# (test index, row in the cached NeSy output, score): A is a pinhole TP, B a background pinhole candidate under the cutoff.
+MARGIN_EXAMPLES = ((360, 0, 0.856), (47, 6, 0.267))
+BAND_EDGES = (0.5, 0.6, 0.7, 0.8, 0.9, 1.0001)
+BAND_COLORS = plt.cm.Blues(np.linspace(0.12, 0.75, len(BAND_EDGES) - 1))  # the five blue bands of Gambar 3.5
+
+
+def draw_margin_panel(ax, tree, feature: np.ndarray, step, is_root: bool) -> None:
+    """One node as in Gambar 3.5: split line, blue σ bands, the RoI x and its distance |f(x)| to the split.
+
+    Axes are the node's score split in two, a = evidence for left (Σw⁺x) and c = evidence for right (−Σw⁻x),
+    so f(x) = a − c + b exactly (same construction as neurosym.visualization._draw_node_split_panel).
+    """
+    w, bias = tree.node_weights[step.node_index], float(tree.node_bias[step.node_index])
+    parts = w * feature
+    a, c = float(parts[w > 0].sum()), float(-parts[w < 0].sum())
+    assert abs(a - c + bias - step.score) < 1e-3 * (1 + abs(step.score)), (step.node_index, a - c + bias, step.score)
+    lo, hi = min(0.0, a, c), 1.15 * max(a, c, abs(bias), 1e-6)
+    grid = np.linspace(lo, hi, 200)
+    sigma = 1 / (1 + np.exp(-np.abs(grid[None, :] - grid[:, None] + bias)))  # rows = c, cols = a
+    ax.contourf(grid, grid, sigma, levels=BAND_EDGES, colors=BAND_COLORS, zorder=0)
+    ax.plot(grid, grid + bias, color="black", lw=1.3, zorder=2)
+    foot = ((a + c - bias) / 2, (a + c + bias) / 2)  # closest point on the split line
+    ax.plot([a, foot[0]], [c, foot[1]], color=FP_RED, lw=1.6, ls=":", zorder=3)
+    ax.plot(a, c, "o", color="#fdd835", mec="black", ms=7, zorder=4)
+    ax.text(a, c, " x", fontsize=8, style="italic", fontweight="bold", va="bottom", zorder=5)
+    mid = (a + foot[0]) / 2
+    ax.text(mid, (c + foot[1]) / 2, " |f(x)| ", fontsize=6.5, color=FP_RED, ha="right" if mid > (lo + hi) / 2 else "left", va="top", zorder=5)
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_aspect("equal")
+    ax.tick_params(labelsize=6)
+    ax.set_title(f"N{step.node_index}{' (akar)' if is_root else ''}: ke {'kiri' if step.went_left else 'kanan'}", fontsize=7.5, fontweight="bold", pad=3)
+    ax.set_xlabel(f"bukti kiri\nσ(|f(x)|) ≈ {fmt(1 / (1 + np.exp(-abs(step.score))))}", fontsize=7, labelpad=2)
+    ax.set_ylabel("bukti kanan", fontsize=7, labelpad=2)
+
+
+@torch.inference_mode()
+def routing_margin_figure(records: list[dict], hybrid, dataset: PCBDataset) -> None:
+    """Gambar 4.14: routing margin of every node on the path of a pinhole TP (A) and a background pinhole under the cutoff (B), styled as Gambar 3.5."""
+    tree = hybrid.symbolic_tree
+    columns = []
+    for index, row, expected in MARGIN_EXAMPLES:
+        record, nesy = records[index], records[index]["nesy"]
+        label, score, box = int(nesy["labels"][row]), float(nesy["scores"][row]), nesy["boxes"][row]
+        iou = float(box_iou(box[None], record["gt_boxes"]).max()) if record["gt_boxes"].numel() else 0.0
+        assert label == 6 and abs(score - expected) < 6e-4, (index, row, label, score)
+        assert abs(float(np.exp(nesy["log_certainties"][row].sum())) - score) < 2e-3, "score is Πσ (Persamaan 3.3)"
+        assert (iou >= IOU_THR) if expected > NESY_THR else (iou < BACKGROUND_IOU and score < NESY_THR), (index, iou)
+        image, _ = dataset[index]
+        out = hybrid([image])[0]
+        k = [j for j in range(len(out["scores"])) if int(out["labels"][j]) == label and abs(float(out["scores"][j]) - score) < 1e-5]
+        assert len(k) == 1, (index, row, k)
+        feature = out["pooled_features"][k[0]].detach().cpu().numpy().reshape(-1)
+        steps = [s for s in tree.decision_path(feature) if np.any(tree.node_weights[s.node_index] != 0.0)]
+        print(f"routing margin figure {'AB'[len(columns)]}: PCB test #{index}, score {score:.3f}, path {[f'N{s.node_index}' for s in steps]}, "
+              f"σ {[round(float(1 / (1 + np.exp(-abs(s.score)))), 3) for s in steps]}")
+        columns.append((score, box, image_to_array(image), feature, steps))
+
+    rows = max(len(steps) for *_, steps in columns) // 2
+    fig = plt.figure(figsize=(7.2, 8.6), dpi=200)
+    # Crops, node panels and verdict boxes are separate blocks so each vertical gap is set on its own.
+    block = dict(ncols=5, width_ratios=(1, 1, 0.08, 1, 1), left=0.06, right=0.98, wspace=0.42)
+    crop_grid = fig.add_gridspec(1, top=0.905, bottom=0.745, **block)
+    grid = fig.add_gridspec(rows, top=0.70, bottom=0.185, hspace=0.55, **block)
+    box_grid = fig.add_gridspec(1, top=0.115, bottom=0.07, **block)
+    for side, (score, box, array, feature, steps) in zip((0, 3), columns):
+        accepted = score >= NESY_THR
+        ax = fig.add_subplot(crop_grid[0, side:side + 2])
+        left, top, right, bottom = crop_window(box, factor=6.0)
+        ax.imshow(array)
+        ax.set_xlim(left, right)
+        ax.set_ylim(bottom, top)
+        draw_box(ax, box, TP_GREEN if accepted else REJECT_BLUE, linestyle="-" if accepted else "--", linewidth=1.8)
+        ax.set_title(f"{'A' if accepted else 'B'}: pinhole, skor {fmt(score)}", fontsize=10, fontweight="bold")
+        blank_axis(ax)
+        for n, step in enumerate(steps):
+            panel = fig.add_subplot(grid[n // 2, side + n % 2])
+            draw_margin_panel(panel, tree, feature, step, step.node_index == 0)
+        ax = fig.add_subplot(box_grid[0, side:side + 2])
+        blank_axis(ax)
+        verdict = f"s(x) = ∏ σ(|fᵢ(x)|) ≈ {fmt(score)}" + ("" if accepted else f"\n< {fmt_threshold(NESY_THR)}: ditolak")
+        ax.text(0.5, 0.5, verdict, ha="center", va="center", fontsize=8.5, fontweight="bold", transform=ax.transAxes,
+                bbox=dict(boxstyle="square,pad=0.5", facecolor="#fff75e", edgecolor=FP_RED, linewidth=2))
+    legend = fig.add_axes((0.20, 0.037, 0.60, 0.014))
+    legend.imshow(np.arange(len(BAND_COLORS))[None, :], cmap=matplotlib.colors.ListedColormap(BAND_COLORS), aspect="auto")
+    blank_axis(legend)
+    fig.text(0.20, 0.016, "dekat split: σ ≈ 0,5 (ragu)", fontsize=8, ha="left", va="center")
+    fig.text(0.80, 0.016, "jauh dari split: σ → 1 (yakin)", fontsize=8, ha="right", va="center")
+    fig.suptitle("Routing margin setiap node pada jalur keputusan", fontsize=10, fontweight="bold", x=0.5, y=0.985)
+    fig.savefig(OUT / "fig_routing_margin.png", facecolor="white")
+    plt.close(fig)
+
+
 def main() -> None:
     hybrid, train_config, device = load_models()
     dataset = load_test_set(train_config)
@@ -526,6 +619,7 @@ def main() -> None:
     evidence_figure(rows_fn, "fn", dataset, "fig_fn_terlewat.png")
     root_figure(root_confidence(records, hybrid.symbolic_tree), root_split_counts(hybrid, dataset, device))
     confusion_figure(cms)
+    routing_margin_figure(records, hybrid, dataset)
 
 
 if __name__ == "__main__":
