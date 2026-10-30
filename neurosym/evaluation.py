@@ -364,12 +364,15 @@ def breakdown_nesy_misses(
     Checked in that order. A per-box existence check, not the evaluator's one-to-one
     greedy match, so totals can differ from its FN by a few. For "score" misses the
     weakest node is the path node with the lowest log σ(|margin|) of the best-scored
-    such detection; its depth is counted (0 = root). Detections need `pooled_features`.
+    such detection; its depth is counted (0 = root). Detections need `pooled_features`, or
+    precomputed `log_certainties` ([detections, nodes], as `path_log_certainties` returns).
+    "score_misses" lists each such miss with its label and per-node log certainties.
     """
     nesy_threshold = score_threshold if nesy_score_threshold is None else nesy_score_threshold
     causes: dict[int, dict[str, int]] = defaultdict(lambda: {"score": 0, "class": 0, "none": 0})
     frcnn_hits: dict[int, int] = defaultdict(int)
     weakest_depth: dict[int, int] = defaultdict(int)
+    score_misses: list[dict[str, Any]] = []
 
     for frcnn, nesy, target in zip(frcnn_detections, nesy_detections, targets):
         for gt_box, gt_label in zip(target["boxes"], target["labels"].tolist()):
@@ -384,11 +387,14 @@ def breakdown_nesy_misses(
             if bool(weak.any()):
                 causes[gt_label]["score"] += 1
                 best = int(torch.where(weak, nesy["scores"], torch.full_like(nesy["scores"], -1.0)).argmax())
-                _, log_certainties = tree.path_log_certainties(
-                    nesy["pooled_features"][best].numpy().reshape(1, -1)
-                )
-                weakest = int(np.argmin(log_certainties[0]))
+                if "log_certainties" in nesy:
+                    log_certainties = nesy["log_certainties"][best].numpy()
+                else:
+                    _, path = tree.path_log_certainties(nesy["pooled_features"][best].numpy().reshape(1, -1))
+                    log_certainties = path[0]
+                weakest = int(np.argmin(log_certainties))
                 weakest_depth[tree.depth_of(weakest)] += 1
+                score_misses.append({"label": gt_label, "log_certainties": log_certainties})
             elif bool((overlap & (nesy["scores"] >= nesy_threshold)).any()):
                 causes[gt_label]["class"] += 1
             else:
@@ -398,6 +404,7 @@ def breakdown_nesy_misses(
         "causes": {label: dict(counts) for label, counts in causes.items()},
         "frcnn_hits": dict(frcnn_hits),
         "weakest_depth": dict(weakest_depth),
+        "score_misses": score_misses,
     }
 
 

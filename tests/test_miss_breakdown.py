@@ -39,6 +39,15 @@ def test_misses_split_into_score_class_and_none():
     # "score" outranks "class": a same-class box under the threshold exists.
     assert result["causes"] == {1: {"score": 4, "class": 0, "none": 0}}
     assert sum(result["weakest_depth"].values()) == 4
+    assert len(result["score_misses"]) == 4
+
+    # Precomputed log certainties give the same misses and weakest depths as pooled_features.
+    nesy_cached = [dict(nesy[0], log_certainties=torch.from_numpy(
+        tree.path_log_certainties(pooled.flatten(start_dim=1).numpy())[1]
+    ))]
+    cached = breakdown_nesy_misses(frcnn, nesy_cached, targets, tree, 0.5, 0.5)
+    assert cached["weakest_depth"] == result["weakest_depth"]
+    assert len(cached["score_misses"]) == 4
 
     nesy_no_weak = [_detections([box, far], [0.8, 0.9], [2, 1], pooled=pooled[:2])]
     assert breakdown_nesy_misses(frcnn, nesy_no_weak, targets, tree, 0.5, 0.5)["causes"] == {

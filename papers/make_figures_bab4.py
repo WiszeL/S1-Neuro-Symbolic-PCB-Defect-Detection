@@ -1,7 +1,8 @@
-"""Figures for Bab 4: Gambar 4.10 (deteksi 4 PCB), 4.11 (bukti FP/FN), 4.12 (confusion matrix).
+"""Figures for Bab 4: Gambar 4.10 (deteksi 4 PCB), 4.11/4.12 (bukti FP/FN), 4.13 (keyakinan root), 4.14 (confusion matrix).
 
 Run from anywhere: python papers/make_figures_bab4.py
-Inference is cached in figures_bab4_v2/_cache_detections.pt; delete it to re-run the models.
+Inference is cached in figures_bab4_v2/_cache_detections.pt (detections, NeSy per-node certainties) and
+_cache_root_split.pt (N0's left/right counts); delete them to re-run the models.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from neuro.config import NeuroConfig, NeuroTrainConfig
 from neuro.prepare_dataset import PCBDataset
 from neuro.preprocess_dataset import test_preprocess
 from neuro.train import _global_confusion_matrix
+from neurosym.evaluation import breakdown_nesy_misses
 from neurosym.inference import load_neurosymbolic_detector
 from util.config import load_yaml
 from util.device import select_device
@@ -35,6 +37,7 @@ from util.visualization import image_to_array
 
 OUT = ROOT / "papers" / "figures_bab4_v2"
 CACHE = OUT / "_cache_detections.pt"
+ROOT_CACHE = OUT / "_cache_root_split.pt"
 FRCNN_THR, NESY_THR, IOU_THR = 0.5, 0.35, 0.5
 CLASSES = ("open", "short", "mouse_bite", "spur", "spurious_copper", "pinhole")
 MODELS = ("frcnn", "nesy", "nomargin")
@@ -65,6 +68,14 @@ def _keep(output: dict[str, Tensor]) -> dict[str, Tensor]:
     return {k: output[k].detach().cpu() for k in ("boxes", "scores", "labels")}
 
 
+def _log_certainties(hybrid, pooled: Tensor) -> Tensor:
+    """log σ(|margin|) of every node on each detection's path, [detections, nodes] (0 off the path)."""
+    if pooled.shape[0] == 0:
+        return torch.zeros(0, hybrid.symbolic_tree.num_internal_nodes)
+    _, log_certainties = hybrid.symbolic_tree.path_log_certainties(pooled.flatten(start_dim=1).numpy())
+    return torch.from_numpy(log_certainties)
+
+
 @torch.inference_mode()
 def run_all(hybrid, dataset: PCBDataset, device: torch.device) -> list[dict]:
     records = []
@@ -73,7 +84,9 @@ def run_all(hybrid, dataset: PCBDataset, device: torch.device) -> list[dict]:
         record = {"gt_boxes": target["boxes"].cpu(), "gt_labels": target["labels"].cpu()}
         record["frcnn"] = _keep(hybrid.detector([image.to(device)])[0])
         hybrid.use_routing_margin = True
-        record["nesy"] = _keep(hybrid([image])[0])
+        nesy = hybrid([image])[0]
+        record["nesy"] = _keep(nesy)
+        record["nesy"]["log_certainties"] = _log_certainties(hybrid, nesy["pooled_features"])
         hybrid.use_routing_margin = False  # every detection scores 1.0 (Subbab 4.6.3 ablation)
         record["nomargin"] = _keep(hybrid([image])[0])
         records.append(record)
@@ -93,13 +106,14 @@ def match(pred: dict[str, Tensor], gt_boxes: Tensor, gt_labels: Tensor, threshol
     """Per-label greedy matching, same rule as neuro.train._greedy_match_within_label but per box.
 
     Returns (detections by descending score, unmatched GT indices). A detection is
-    {"box", "label", "score", "status": "TP"|"FP", "gt": matched GT index or None}.
+    {"box", "label", "score", "status": "TP"|"FP", "gt": matched GT index or None, "row": index in `pred`}.
     """
     mask = pred["scores"] >= threshold
     boxes, scores, labels = pred["boxes"][mask], pred["scores"][mask], pred["labels"][mask]
+    rows = torch.where(mask)[0]
     order = torch.argsort(scores, descending=True, stable=True)
     detections = [
-        {"box": boxes[j], "label": int(labels[j]), "score": float(scores[j]), "status": "FP", "gt": None}
+        {"box": boxes[j], "label": int(labels[j]), "score": float(scores[j]), "status": "FP", "gt": None, "row": int(rows[j])}
         for j in order.tolist()
     ]
     for label in set(d["label"] for d in detections):
@@ -211,7 +225,8 @@ def blank_axis(ax) -> None:
 
 
 def detection_figure(records, dataset) -> None:
-    """Gambar 4.10: GT | Faster R-CNN | NeSy for four PCBs. TP boxes carry only their number."""
+    """Gambar 4.10: GT | Faster R-CNN | NeSy for four PCBs. Every model box carries its score
+    (a missed defect shows its best same-class candidate's score, or – if the model has none)."""
     fig, axes = plt.subplots(len(DETECTION_PCBS), 3, figsize=(9.0, 12.6), dpi=200)
     fig.subplots_adjust(left=0.01, right=0.99, top=0.955, bottom=0.04, wspace=0.03, hspace=0.20)
     for row, index in enumerate(DETECTION_PCBS):
@@ -234,13 +249,16 @@ def detection_figure(records, dataset) -> None:
             for number, det in sorted(enumerate(detections, start=1), key=lambda item: item[1]["status"] == "TP"):
                 if det["status"] == "TP":
                     draw_box(ax, det["box"], TP_GREEN)
-                    place_label(ax, det["box"], f"#{number}", TP_GREEN, placed)
+                    place_label(ax, det["box"], f"#{number} {fmt(det['score'])}", TP_GREEN, placed)
                 else:
                     draw_box(ax, det["box"], FP_RED, linewidth=1.5)
                     place_label(ax, det["box"], f"#{number} {CLASSES[det['label'] - 1]} {fmt(det['score'])}", FP_RED, placed)
             for g in missed:
                 draw_box(ax, gt_boxes[g], FN_YELLOW, linestyle="--", linewidth=1.5)
-                place_label(ax, gt_boxes[g], f"terlewat: {CLASSES[int(gt_labels[g]) - 1]}", FN_YELLOW, placed)
+                pred = record[model]
+                j = best_overlap(pred["boxes"], pred["scores"], pred["labels"], gt_boxes[g], int(gt_labels[g]))
+                candidate = "–" if j is None else fmt(float(pred["scores"][j]))
+                place_label(ax, gt_boxes[g], f"terlewat: {CLASSES[int(gt_labels[g]) - 1]} {candidate}", FN_YELLOW, placed)
             tp = sum(d["status"] == "TP" for d in detections)
             ax.set_title(f"PCB {row + 1} – {name} (ambang {fmt_threshold(THRESHOLD[model])})\n{tp} TP · {len(detections) - tp} FP · {len(missed)} FN", fontsize=8, fontweight="bold")
     for ax in axes.ravel():
@@ -356,8 +374,96 @@ def evidence_figure(rows: list[dict], group: str, dataset, filename: str) -> Non
     plt.close(fig)
 
 
+@torch.inference_mode()
+def root_split_counts(hybrid, dataset, device) -> np.ndarray:
+    """[7, 2]: test-set RPN proposals by teacher label (0 = background) that N0 sends left / right."""
+    if ROOT_CACHE.exists():
+        return torch.load(ROOT_CACHE, weights_only=True).numpy()
+    tree = hybrid.symbolic_tree
+    w0, b0 = tree.node_weights[0], tree.node_bias[0]
+    counts = np.zeros((len(CLASSES) + 1, 2), dtype=np.int64)
+    for i in tqdm(range(len(dataset)), desc="root split"):
+        image, target = dataset[i]
+        sample = hybrid.detector.extract_teacher_roi_samples(
+            [image.to(device)], [{k: v.to(device) for k, v in target.items()}]
+        )[0]
+        goes_left = (sample["pooled_features"].flatten(start_dim=1).cpu().numpy() @ w0 + b0) >= 0.0  # as sodt.decision_path
+        np.add.at(counts, (sample["teacher_labels"].cpu().numpy(), (~goes_left).astype(int)), 1)
+    torch.save(torch.from_numpy(counts), ROOT_CACHE)
+    return counts
+
+
+def root_confidence(records: list[dict], tree) -> dict[str, object]:
+    """Root σ (Persamaan 3.3) of NeSy's true positives and of the detections lost to a score under the cutoff."""
+    tp = np.array([float(np.exp(r["nesy"]["log_certainties"][d["row"], 0]))
+                   for r in records
+                   for d in match(r["nesy"], r["gt_boxes"], r["gt_labels"], NESY_THR)[0] if d["status"] == "TP"])
+    targets = [{"boxes": r["gt_boxes"], "labels": r["gt_labels"]} for r in records]
+    misses = breakdown_nesy_misses([r["frcnn"] for r in records], [r["nesy"] for r in records], targets,
+                                   tree, FRCNN_THR, IOU_THR, nesy_score_threshold=NESY_THR)["score_misses"]
+    rows = [dict(label=m["label"], sigma=float(np.exp(m["log_certainties"][0])), root=int(np.argmin(m["log_certainties"])) == 0)
+            for m in misses]
+    assert len(rows) == 14 and sum(m["root"] for m in rows) == 9, "Subbab 4.6.2: 14 score misses, root weakest in 9"
+    return {"tp": tp, "misses": rows}
+
+
+def root_figure(confidence: dict[str, object], counts: np.ndarray) -> None:
+    """Gambar 4.13: (a) root σ of detected vs missed defects, (b) share of RoIs N0 sends left / right per class."""
+    tp, misses = confidence["tp"], confidence["misses"]
+    names = ["background", "open", "short", "mousebite", "spur", "spurious copper", "pinhole"]
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(11.5, 5.2), dpi=200, gridspec_kw=dict(width_ratios=(1, 1.25), wspace=0.32))
+    fig.subplots_adjust(left=0.08, right=0.97, top=0.97, bottom=0.27)
+
+    rng = np.random.default_rng(0)
+    ax_a.scatter(rng.uniform(-0.3, 0.3, tp.size), tp, s=6, color="#9aa5b1", alpha=0.25, linewidths=0, rasterized=True)
+    for m in misses:
+        color = CLASS_COLORS[m["label"] - 1]
+        ax_a.scatter(1 + rng.uniform(-0.15, 0.15), m["sigma"], s=46, facecolors=color if m["root"] else "none", edgecolors=color, linewidths=1.6, zorder=3)
+    for x, values in ((0, tp), (1, np.array([m["sigma"] for m in misses]))):
+        ax_a.hlines(np.median(values), x - 0.38, x + 0.38, color="black", linewidth=1.6, zorder=4)
+    ax_a.axhline(0.5, color="#555555", linestyle="--", linewidth=1)
+    ax_a.text(-0.42, 0.505, "tidak yakin", fontsize=8, color="#555555", ha="left", va="bottom")
+    ax_a.set_xlim(-0.45, 1.45)
+    ax_a.set_ylim(0.48, 1.02)
+    ax_a.set_xticks([0, 1], [f"Terdeteksi (TP)\nn = {tp.size}", f"Terlewat (skor < {fmt_threshold(NESY_THR)})\nn = {len(misses)}"], fontsize=8.5)
+    ax_a.set_ylabel("Keyakinan root", fontsize=9)
+    handles = [plt.Line2D([], [], marker="o", linestyle="", markerfacecolor=CLASS_COLORS[c], markeredgecolor=CLASS_COLORS[c], markersize=6, label=names[c + 1])
+               for c in range(len(CLASSES)) if any(m["label"] == c + 1 for m in misses)]
+    handles += [plt.Line2D([], [], marker="o", linestyle="", markerfacecolor="#555555", markeredgecolor="#555555", markersize=6, label="node terlemah: root"),
+                plt.Line2D([], [], marker="o", linestyle="", markerfacecolor="none", markeredgecolor="#555555", markersize=6, label="node terlemah: lebih dalam"),
+                plt.Line2D([], [], color="black", linewidth=1.6, label="median")]
+    ax_a.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=3, fontsize=7, frameon=False)
+
+    share = counts / counts.sum(axis=1, keepdims=True) * 100
+    y = np.arange(len(names))[::-1]
+    ax_b.barh(y, share[:, 0], color="#4c78a8", label="kiri (f₀ ≥ 0)")
+    ax_b.barh(y, share[:, 1], left=share[:, 0], color="#f58518", label="kanan (f₀ < 0)")
+    for yi, (left, right) in zip(y, share):
+        for x0, width in ((0, left), (left, right)):
+            if width >= 6:
+                ax_b.text(x0 + width / 2, yi, f"{width:.0f}%", ha="center", va="center", fontsize=8, color="white", fontweight="bold")
+    ax_b.set_yticks(y, names, fontsize=8.5)
+    ax_b.set_xlim(0, 100)
+    ax_b.set_xlabel("Proporsi RoI menurut label teacher (%)", fontsize=9)
+    ax_b.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2, fontsize=8, frameon=False)
+    for ax, letter in ((ax_a, "(a)"), (ax_b, "(b)")):
+        box = ax.get_position()
+        fig.text((box.x0 + box.x1) / 2, 0.03, letter, ha="center", va="center", fontsize=12, family="serif")
+    fig.savefig(OUT / "fig_root_keyakinan.png", facecolor="white")
+    plt.close(fig)
+
+    sigma = np.array([m["sigma"] for m in misses])
+    at_root = np.array([m["sigma"] for m in misses if m["root"]])
+    deeper = np.array([m["sigma"] for m in misses if not m["root"]])
+    print(f"root σ median: TP {np.median(tp):.3f} (n={tp.size}, IQR {np.percentile(tp, 25):.3f}-{np.percentile(tp, 75):.3f}); "
+          f"14 misses {np.median(sigma):.3f} (min {sigma.min():.3f}, max {sigma.max():.3f}); "
+          f"9 root {np.median(at_root):.3f} (max {at_root.max():.3f}); 5 deeper {np.median(deeper):.3f} (min {deeper.min():.3f}); "
+          f"TP with σ <= max root case: {(tp <= at_root.max()).sum()} of {tp.size}")
+    print("N0 left share % by teacher label:", {n: round(float(s), 1) for n, s in zip(names, share[:, 0])}, "counts", counts.tolist())
+
+
 def confusion_figure(cms: dict[str, np.ndarray]) -> None:
-    """Gambar 4.13: confusion matrix without (a) and with (b) routing margin, one shared color scale."""
+    """Gambar 4.14: confusion matrix without (a) and with (b) routing margin, one shared color scale."""
     names = ["background", "open", "short", "mousebite", "spur", "spurious copper", "pinhole"]
     vmax = max(cms["nomargin"].max(), cms["nesy"].max())
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 6.2), dpi=200)
@@ -391,6 +497,7 @@ def main() -> None:
     print("weakest nodes (b):", [(r["index"], f"N{r['node']}", r["depth"]) for r in rows_fn])
     evidence_figure(rows_fp, "fp", dataset, "fig_fp_ditolak.png")
     evidence_figure(rows_fn, "fn", dataset, "fig_fn_terlewat.png")
+    root_figure(root_confidence(records, hybrid.symbolic_tree), root_split_counts(hybrid, dataset, device))
     confusion_figure(cms)
 
 
