@@ -334,9 +334,7 @@ Tabel 4.9 *Precision*, *Recall*, dan AP@0,5:0,95 per Kelas Cacat pada Data Uji
 
 Tabel 4.10 Pengaruh *Routing Margin* pada Deteksi *Neuro-Symbolic*
 
-Tabel 4.11 Jenis *False Positive* tanpa dan dengan *Routing Margin*
-
-Tabel 4.12 *Faithfulness* Metode *Explanation* terhadap *Random Control*
+Tabel 4.11 *Faithfulness* Metode *Explanation* terhadap *Random Control*
 
 # DAFTAR ALGORITMA
 
@@ -1517,16 +1515,9 @@ Tanpa *routing margin*, setiap deteksi berskor 1,0 sehingga urutan skor yang dib
 | NeSy tanpa *routing margin* | 0,35 | 0,644 | 0,810 | 0,750 | **0,988** | 0,852 |
 | NeSy dengan *routing margin* | 0,35 | **0,787** | **0,982** | **0,912** | 0,978 | **0,944** |
 
-Berdasarkan Tabel 4.10, *routing margin* menaikkan mAP@0,5:0,95 sebesar 0,142 dan mAP@0,5 sebesar 0,172, serta *precision* sebesar 16,2 poin, dengan *recall* hanya turun 1,0 poin. Tanpa skor, *false positive* meningkat dari 298 menjadi 1.036 (Tabel 4.11), sebagian besar karena duplikat tidak dapat dibedakan oleh *Soft*-NMS (7 menjadi 140) dan *background* tidak dapat disaring (215 menjadi 517).
+Berdasarkan Tabel 4.10, *routing margin* menaikkan mAP@0,5:0,95 sebesar 0,142 dan mAP@0,5 sebesar 0,172, serta *precision* sebesar 16,2 poin, dengan *recall* hanya turun 1,0 poin. Tanpa skor, *false positive* meningkat dari 298 menjadi 1.036, sebagian besar karena duplikat tidak dapat dibedakan oleh *Soft*-NMS (7 menjadi 140) dan *background* tidak dapat disaring (215 menjadi 517).
 
-**Tabel 4.11 Jenis *False Positive* tanpa dan dengan *Routing Margin***
-
-| **Model** | **Background** | **Salah kelas** | **Salah lokalisasi** | **Duplikat** | **Total** |
-|:------------|--------|--------|--------|--------|--------|
-| NeSy tanpa *routing margin* | 517 | 248 | 131 | 140 | 1.036 |
-| NeSy dengan *routing margin* | **215** | **49** | **27** | **7** | **298** |
-
-Pola yang sama terlihat pada *confusion matrix* pada Gambar 4.13, dengan panel (a) tanpa *routing margin* dan panel (b) dengan *routing margin*. Tanpa *routing margin*, baris *background* membengkak, yaitu *background* yang dideteksi sebagai *short* (264), *pinhole* (218), *open* (152), dan *spurious copper* (143), dibandingkan 71, 89, 24, dan 51 dengan *routing margin*. Selain itu muncul pertukaran antarkelas seperti *mousebite* menjadi *pinhole* (25) dan *spurious copper* menjadi *pinhole* (16).
+Rincian *false positive* tersebut dibuktikan melalui *confusion matrix* pada Gambar 4.13, dengan panel (a) tanpa *routing margin* dan panel (b) dengan *routing margin*. Tanpa *routing margin*, baris *background* membengkak, yaitu *background* yang dideteksi sebagai *short* (264), *pinhole* (218), *open* (152), dan *spurious copper* (143), dibandingkan 71, 89, 24, dan 51 dengan *routing margin*. Selain itu muncul pertukaran antarkelas seperti *mousebite* menjadi *pinhole* (25) dan *spurious copper* menjadi *pinhole* (16).
 
 ![Gambar 4.13](figures_bab4_v2/cm_nesy_margin_compare.png)
 
@@ -1548,9 +1539,9 @@ Dengan demikian skor *routing margin* membuat SODT dapat menggantikan *classific
 
 ### 4.7.1 *Faithfulness*
 
-Tabel 4.12 membandingkan metode yang menjelaskan SODT dengan Grad-CAM pada *Faster* R-CNN, masing-masing terhadap *random control*-nya sendiri. *Necessity* dan *Sufficiency* dalam persentase deteksi yang labelnya berubah atau bertahan, sedangkan *Deletion* dan *Insertion* AUC dihitung dari skor deteksi.
+Tabel 4.11 membandingkan metode yang menjelaskan SODT dengan Grad-CAM pada *Faster* R-CNN, masing-masing terhadap *random control*-nya sendiri. *Necessity* dan *Sufficiency* dalam persentase deteksi yang labelnya berubah atau bertahan, sedangkan *Deletion* dan *Insertion* AUC dihitung dari skor deteksi.
 
-**Tabel 4.12 *Faithfulness* Metode *Explanation* terhadap *Random Control***
+**Tabel 4.11 *Faithfulness* Metode *Explanation* terhadap *Random Control***
 
 | **Metode** | ***Necessity*** | ***Sufficiency*** | ***Deletion* AUC** | ***Insertion* AUC** | **Jumlah deteksi** |
 |:------------|-------|--------|--------|--------|--------|
@@ -1572,7 +1563,7 @@ Penjelasan dibaca pada PCB 1 dari Lampiran 1, yang memuat lima cacat dari lima k
 
 **Gambar 4.15 Penjelasan pada PCB 1: (a) peta M (NeSy) dan (b) peta Grad-CAM pada proposal yang sama**
 
-Peta M konsisten menunjuk struktur cacat pada kelima kelas, yaitu celah konduktor (#5), takik tepi (#1), tonjolan (#2), lubang (#3), dan gumpalan tembaga (#4). Grad-CAM lebih lemah dan tersebar, bahkan hampir tidak menyala pada #4 dan #5, sehingga secara visual mendukung hasil *faithfulness* pada Tabel 4.12. Peta M adalah label lokasi *region* yang ditimbang dan bukan penyebab per piksel, sehingga keduanya dibaca sebagai petunjuk letak.
+Peta M konsisten menunjuk struktur cacat pada kelima kelas, yaitu celah konduktor (#5), takik tepi (#1), tonjolan (#2), lubang (#3), dan gumpalan tembaga (#4). Grad-CAM lebih lemah dan tersebar, bahkan hampir tidak menyala pada #4 dan #5, sehingga secara visual mendukung hasil *faithfulness* pada Tabel 4.11. Peta M adalah label lokasi *region* yang ditimbang dan bukan penyebab per piksel, sehingga keduanya dibaca sebagai petunjuk letak.
 
 Selain menunjuk letak, penjelasan SODT dapat ditelusuri langkah demi langkah, sesuatu yang tidak dihasilkan Grad-CAM. Peta M merupakan jumlah peta setiap *node* pada Persamaan 3.8, sehingga panel (c) pada Gambar 4.16 dan 4.17 menguraikan M menjadi langkah-langkah keputusan sepanjang *decision path*, sedangkan Grad-CAM hanya menghasilkan satu peta per deteksi. Faktor σ yang tertulis pada setiap *node* adalah *routing margin* pada Persamaan 3.3, sehingga perkalian seluruhnya sama dengan skor deteksi (0,95 × 0,93 × 0,99 × 0,97 × 1,00 × 0,99 ≈ 0,84 pada Gambar 4.16, selisih terhadap 0,833 berasal dari pembulatan). Satu penjelasan dengan demikian memperlihatkan sekaligus bagian yang ditimbang dan keyakinan pada setiap langkah. Dua deteksi dipilih sebagai dua kasus, bukan dua kelas. Gambar 4.16 adalah kasus ketika peta M dan Grad-CAM sepakat pada puncaknya, yaitu deteksi #1 (*mouse_bite*, skor 0,833) dengan jalur N0 → N2 → N6 → N14 → N29 → N59. Gambar 4.17 adalah kasus ketika keduanya berbeda, yaitu deteksi #2 (*spur*, skor 0,801) dengan jalur N0 → N2 → N5 → N11 → N24 → N49. Kotak cyan adalah proposal dan kotak hijau putus-putus adalah kotak deteksi.
 
