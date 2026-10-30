@@ -39,6 +39,7 @@ OUT = ROOT / "papers" / "figures_bab4_v2"
 CACHE = OUT / "_cache_detections.pt"
 ROOT_CACHE = OUT / "_cache_root_split.pt"
 FRCNN_THR, NESY_THR, IOU_THR = 0.5, 0.35, 0.5
+BACKGROUND_IOU = 0.1  # an FP under this IoU with every ground truth is "background" (neurosym.evaluation.breakdown_false_positives)
 CLASSES = ("open", "short", "mouse_bite", "spur", "spurious_copper", "pinhole")
 MODELS = ("frcnn", "nesy", "nomargin")
 THRESHOLD = {"frcnn": FRCNN_THR, "nesy": NESY_THR, "nomargin": NESY_THR}
@@ -394,7 +395,8 @@ def root_split_counts(hybrid, dataset, device) -> np.ndarray:
 
 
 def root_confidence(records: list[dict], tree) -> dict[str, object]:
-    """Root σ (Persamaan 3.3) of NeSy's true positives and of the detections lost to a score under the cutoff."""
+    """Root σ (Persamaan 3.3) of NeSy's true positives, of Faster R-CNN's background false positives NeSy rejects
+    (`rejected_none` of them have no NeSy candidate at all), and of the detections lost to a score under the cutoff."""
     tp = np.array([float(np.exp(r["nesy"]["log_certainties"][d["row"], 0]))
                    for r in records
                    for d in match(r["nesy"], r["gt_boxes"], r["gt_labels"], NESY_THR)[0] if d["status"] == "TP"])
@@ -404,28 +406,48 @@ def root_confidence(records: list[dict], tree) -> dict[str, object]:
     rows = [dict(label=m["label"], sigma=float(np.exp(m["log_certainties"][0])), root=int(np.argmin(m["log_certainties"])) == 0)
             for m in misses]
     assert len(rows) == 14 and sum(m["root"] for m in rows) == 9, "Subbab 4.6.2: 14 score misses, root weakest in 9"
-    return {"tp": tp, "misses": rows}
+    # Faster R-CNN's background false positives (Tabel 4.10 rule) that NeSy rejects: no same-class NeSy output at the cutoff covers them.
+    rejected, rejected_none = [], 0
+    for r in records:
+        n = r["nesy"]
+        fired = n["scores"] >= NESY_THR
+        for d in match(r["frcnn"], r["gt_boxes"], r["gt_labels"], FRCNN_THR)[0]:
+            if d["status"] != "FP" or (r["gt_boxes"].shape[0] and float(box_iou(d["box"][None], r["gt_boxes"]).max()) >= BACKGROUND_IOU):
+                continue
+            if best_overlap(n["boxes"][fired], n["scores"][fired], n["labels"][fired], d["box"], d["label"]) is not None:
+                continue
+            j = best_overlap(n["boxes"], n["scores"], n["labels"], d["box"], d["label"])
+            if j is None:
+                rejected_none += 1
+            else:
+                rejected.append(dict(sigma=float(np.exp(n["log_certainties"][j, 0])), root=int(np.argmin(n["log_certainties"][j])) == 0))
+    return {"tp": tp, "misses": rows, "rejected": rejected, "rejected_none": rejected_none}
 
 
 def root_figure(confidence: dict[str, object], counts: np.ndarray) -> None:
-    """Gambar 4.13: (a) root σ of detected vs missed defects, (b) share of RoIs N0 sends left / right per class."""
-    tp, misses = confidence["tp"], confidence["misses"]
+    """Gambar 4.13: (a) root σ of detected defects, rejected Faster R-CNN false positives and missed defects,
+    (b) share of RoIs N0 sends left / right per class."""
+    tp, misses, rejected = confidence["tp"], confidence["misses"], np.array([m["sigma"] for m in confidence["rejected"]])
     names = ["background", "open", "short", "mousebite", "spur", "spurious copper", "pinhole"]
-    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(11.5, 5.2), dpi=200, gridspec_kw=dict(width_ratios=(1, 1.25), wspace=0.32))
-    fig.subplots_adjust(left=0.08, right=0.97, top=0.97, bottom=0.27)
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(12.5, 5.2), dpi=200, gridspec_kw=dict(width_ratios=(1.25, 1.2), wspace=0.32))
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.97, bottom=0.27)
 
     rng = np.random.default_rng(0)
     ax_a.scatter(rng.uniform(-0.3, 0.3, tp.size), tp, s=6, color="#9aa5b1", alpha=0.25, linewidths=0, rasterized=True)
+    ax_a.scatter(1 + rng.uniform(-0.3, 0.3, rejected.size), rejected, s=8, color="#444444", alpha=0.45, linewidths=0, zorder=2)
     for m in misses:
         color = CLASS_COLORS[m["label"] - 1]
-        ax_a.scatter(1 + rng.uniform(-0.15, 0.15), m["sigma"], s=46, facecolors=color if m["root"] else "none", edgecolors=color, linewidths=1.6, zorder=3)
-    for x, values in ((0, tp), (1, np.array([m["sigma"] for m in misses]))):
+        ax_a.scatter(2 + rng.uniform(-0.15, 0.15), m["sigma"], s=46, facecolors=color if m["root"] else "none", edgecolors=color, linewidths=1.6, zorder=3)
+    for x, values in ((0, tp), (1, rejected), (2, np.array([m["sigma"] for m in misses]))):
         ax_a.hlines(np.median(values), x - 0.38, x + 0.38, color="black", linewidth=1.6, zorder=4)
     ax_a.axhline(0.5, color="#555555", linestyle="--", linewidth=1)
     ax_a.text(-0.42, 0.505, "tidak yakin", fontsize=8, color="#555555", ha="left", va="bottom")
-    ax_a.set_xlim(-0.45, 1.45)
+    ax_a.set_xlim(-0.45, 2.45)
     ax_a.set_ylim(0.48, 1.02)
-    ax_a.set_xticks([0, 1], [f"Terdeteksi (TP)\nn = {tp.size}", f"Terlewat (skor < {fmt_threshold(NESY_THR)})\nn = {len(misses)}"], fontsize=8.5)
+    none = confidence["rejected_none"]
+    ax_a.set_xticks([0, 1, 2], [f"Terdeteksi (TP)\nn = {tp.size}",
+                                f"FP Faster R-CNN\nditolak NeSy\nn = {rejected.size}" + (f" (+{none} tanpa kandidat)" if none else ""),
+                                f"Terlewat\n(skor < {fmt_threshold(NESY_THR)})\nn = {len(misses)}"], fontsize=8.5)
     ax_a.set_ylabel("Keyakinan root", fontsize=9)
     handles = [plt.Line2D([], [], marker="o", linestyle="", markerfacecolor=CLASS_COLORS[c], markeredgecolor=CLASS_COLORS[c], markersize=6, label=names[c + 1])
                for c in range(len(CLASSES)) if any(m["label"] == c + 1 for m in misses)]
@@ -459,6 +481,11 @@ def root_figure(confidence: dict[str, object], counts: np.ndarray) -> None:
           f"14 misses {np.median(sigma):.3f} (min {sigma.min():.3f}, max {sigma.max():.3f}); "
           f"9 root {np.median(at_root):.3f} (max {at_root.max():.3f}); 5 deeper {np.median(deeper):.3f} (min {deeper.min():.3f}); "
           f"TP with σ <= max root case: {(tp <= at_root.max()).sum()} of {tp.size}")
+    in_root = sum(m["root"] for m in confidence["rejected"])
+    print(f"rejected Faster R-CNN background FPs: {rejected.size} with a NeSy candidate + {none} without; "
+          f"root σ median {np.median(rejected):.3f} (IQR {np.percentile(rejected, 25):.3f}-{np.percentile(rejected, 75):.3f}), "
+          f"{(rejected < 0.65).sum()} below 0.65, root weakest in {in_root}; "
+          f"TP below 0.65: {(tp < 0.65).sum()} of {tp.size}")
     print("N0 left share % by teacher label:", {n: round(float(s), 1) for n, s in zip(names, share[:, 0])}, "counts", counts.tolist())
 
 
